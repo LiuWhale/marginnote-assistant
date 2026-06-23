@@ -20,6 +20,10 @@ UPDATE_STATUS_RELATIVE = Path("control/update_status.json")
 UPDATES_DIR_NAME = "updates"
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
 GITHUB_LATEST_PAGE = "https://github.com/{repo}/releases/latest"
+MARGINNOTE_EXTENSION_TARGET = Path.home() / (
+    "Library/Containers/QReader.MarginStudy.easy/Data/Library/"
+    "MarginNote Extensions/codex.mn.assistant"
+)
 
 
 def now_text() -> str:
@@ -61,6 +65,57 @@ def write_update_status(root: Path, data: dict[str, Any]) -> dict[str, Any]:
     return status
 
 
+def summarize_install_log_failure(text: str) -> str:
+    lower = text.lower()
+    if "operation not permitted" in lower:
+        return (
+            "安装失败：权限不足，Companion 无法写入 MarginNote 扩展目录。"
+            "请给 Terminal/Python/Companion 完全磁盘访问权限，或用 release 包里的安装命令手动安装。"
+        )
+    if "permission denied" in lower:
+        return (
+            "安装失败：权限被拒绝。请检查完全磁盘访问权限后重试，"
+            "或用 release 包里的安装命令手动安装。"
+        )
+    if "cannot find" in lower or "missing installer" in lower:
+        return "安装失败：更新包缺少安装文件，请重新下载更新。"
+    if "did not become ready" in lower:
+        return "安装失败：文件已复制但 Companion 没有重新启动成功，请查看安装日志。"
+    if "rsync" in lower and "error" in lower:
+        return "安装失败：复制插件文件时出错，请查看安装日志。"
+    return ""
+
+
+def refresh_install_status(root: Path, status: dict[str, Any]) -> dict[str, Any]:
+    if str(status.get("state") or "") != "installing":
+        return status
+    log_path = Path(str(status.get("installLog") or "")).expanduser()
+    if not log_path.exists():
+        return status
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
+    except Exception:
+        return status
+    failure_message = summarize_install_log_failure(text)
+    if failure_message:
+        return {
+            **status,
+            "ok": False,
+            "state": "error",
+            "available": True,
+            "message": failure_message,
+        }
+    if "Install finished." in text:
+        return {
+            **status,
+            "ok": True,
+            "state": "installed",
+            "available": False,
+            "message": "安装脚本已完成。请重新打开 Codex 面板，必要时重启 MarginNote 4。",
+        }
+    return status
+
+
 def read_update_status(root: Path) -> dict[str, Any]:
     target = root / UPDATE_STATUS_RELATIVE
     try:
@@ -69,6 +124,7 @@ def read_update_status(root: Path) -> dict[str, Any]:
         data = {}
     if not isinstance(data, dict):
         data = {}
+    data = refresh_install_status(root, data)
     return {
         "ok": bool(data.get("ok", False)),
         "state": str(data.get("state") or "unknown"),
@@ -367,6 +423,22 @@ def download_asset(root: Path, settings: dict[str, Any], update: dict[str, Any])
     return target
 
 
+def check_extension_write_access() -> tuple[bool, str]:
+    try:
+        MARGINNOTE_EXTENSION_TARGET.mkdir(parents=True, exist_ok=True)
+        marker = MARGINNOTE_EXTENSION_TARGET / ".codex-companion-write-test"
+        marker.write_text("ok", encoding="utf-8")
+        marker.unlink(missing_ok=True)
+    except Exception as exc:
+        return (
+            False,
+            "权限不足：Companion 无法写入 MarginNote 扩展目录。"
+            "请给 Terminal/Python/Companion 完全磁盘访问权限，或用 release 包里的安装命令手动安装。"
+            f"原始错误：{exc}",
+        )
+    return True, ""
+
+
 def install_update(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
     update = check_for_update(root, settings, current_version)
     if not update.get("ok"):
@@ -390,6 +462,19 @@ def install_update(root: Path, settings: dict[str, Any], current_version: str) -
                 "archivePath": str(archive_path),
                 "packageRootPath": validation.get("packageRootPath", ""),
                 "message": "更新包已下载并通过校验（dry-run，未安装）。",
+            },
+        )
+    writable, permission_message = check_extension_write_access()
+    if not writable:
+        return write_update_status(
+            root,
+            {
+                **update,
+                "ok": False,
+                "state": "error",
+                "archivePath": str(archive_path),
+                "packageRootPath": validation.get("packageRootPath", ""),
+                "message": permission_message,
             },
         )
     log_path = root / UPDATES_DIR_NAME / "install-latest.log"

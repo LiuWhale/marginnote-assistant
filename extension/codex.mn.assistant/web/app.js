@@ -2782,7 +2782,14 @@
       addMessage('assistant', '当前没有可安装的新版本。请先检查更新。');
       return;
     }
-    if (window.confirm && !window.confirm('确认下载并安装 GitHub Release 最新版？安装后需要重新打开 Codex 面板。')) return;
+    state.update = Object.assign({}, update, {
+      ok: true,
+      state: 'downloading',
+      available: true,
+      message: '正在下载并安装更新，请稍等。'
+    });
+    renderUpdateStatus({update: state.update, settings: state.settings || {}});
+    addMessage('assistant', '正在下载并安装更新，请稍等。');
     postCompanion('update_install', {
       githubRepo: getValue('githubRepoInput')
     }, function(result) {

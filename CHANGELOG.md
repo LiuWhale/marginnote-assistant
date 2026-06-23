@@ -2,6 +2,14 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.4 - 2026-06-23
+
+### Fixed
+
+- Fixed the update install button feeling unresponsive by showing immediate download/install feedback before the long request returns.
+- Fixed failed background installs staying stuck in `installing`; permission errors in the install log now surface as a visible update error.
+- Added a write-permission preflight before running the installer so missing Full Disk Access is reported directly.
+
 ## 0.4.3 - 2026-06-23
 
 ### Changed

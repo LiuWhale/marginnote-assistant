@@ -157,6 +157,15 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertNotIn('id="updateInstallButton"', main_html)
         self.assertNotIn('id="githubRepoInput"', main_html)
 
+    def test_update_install_click_gives_immediate_visible_feedback(self) -> None:
+        install_body = self.js.split("function installUpdate()", 1)[1].split("\n  function trimText", 1)[0]
+
+        self.assertNotIn("window.confirm", install_body)
+        self.assertIn("state.update = Object.assign", install_body)
+        self.assertIn("state: 'downloading'", install_body)
+        self.assertIn("正在下载并安装更新", install_body)
+        self.assertLess(install_body.index("renderUpdateStatus"), install_body.index("postCompanion('update_install'"))
+
     def test_ai_chat_exposes_context_scope_like_builtin_ai(self) -> None:
         for marker in [
             'id="contextScopeAutoButton"',
