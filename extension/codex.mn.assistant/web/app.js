@@ -2738,9 +2738,20 @@
   }
 
   function checkForUpdates(silent) {
+    var button = byId('updateCheckButton');
+    if (button) {
+      button.disabled = true;
+      button.textContent = '检查中...';
+    }
+    setText('updateStatusLine', '更新：正在检查');
+    setText('updateStatusDetail', '正在检查 GitHub Release...');
     postCompanion('update_check', {
       githubRepo: getValue('githubRepoInput')
     }, function(result) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = '检查更新';
+      }
       renderControls(result || {});
       if (!result || !result.ok) {
         if (!silent) addFailureMessage('检查更新失败', result);
@@ -2755,8 +2766,15 @@
     var repo = getValue('githubRepoInput') || update.repo || 'LiuWhale/marginnote-assistant';
     var fallback = 'https://github.com/' + repo.replace(/^\/+|\/+$/g, '') + '/releases';
     var url = update.releaseUrl || update.downloadUrl || fallback;
-    bridge('open_url', {url: url});
-    addMessage('assistant', '已打开下载页面：' + url);
+    addMessage('assistant', '正在打开下载页面：' + url);
+    postCompanion('open_url', {url: url}, function(result) {
+      if (result && result.ok) {
+        addMessage('assistant', result.message || '已打开下载页面。');
+        return;
+      }
+      bridge('open_url', {url: url});
+      addFailureMessage('Companion 打开下载页失败，已尝试交给 MN4 打开', result);
+    }, {showReply: false});
   }
 
   function trimText(text, limit) {

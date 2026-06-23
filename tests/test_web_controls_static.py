@@ -162,11 +162,21 @@ class WebControlsStaticTests(unittest.TestCase):
 
         self.assertNotIn("window.confirm", install_body)
         self.assertNotIn("postCompanion('update_install'", install_body)
+        self.assertIn("postCompanion('open_url'", install_body)
         self.assertIn("bridge('open_url'", install_body)
         self.assertIn("releaseUrl", install_body)
         self.assertIn("downloadUrl", install_body)
-        self.assertIn("已打开下载页面", install_body)
+        self.assertIn("正在打开下载页面", install_body)
         self.assertIn("打开下载页", self.html + self.js)
+
+    def test_update_check_shows_in_progress_feedback(self) -> None:
+        check_body = self.js.split("function checkForUpdates", 1)[1].split("\n  function installUpdate", 1)[0]
+
+        self.assertIn("updateCheckButton", check_body)
+        self.assertIn("检查中...", check_body)
+        self.assertIn("正在检查 GitHub Release", check_body)
+        self.assertIn("button.disabled = true", check_body)
+        self.assertIn("button.disabled = false", check_body)
 
     def test_ai_chat_exposes_context_scope_like_builtin_ai(self) -> None:
         for marker in [

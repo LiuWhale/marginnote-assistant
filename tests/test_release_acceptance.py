@@ -221,7 +221,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         native_highlight_evidence = {
             "ok": True,
             "path": "/tmp/native-highlight-evidence.json",
-            "event": {"event": "nativeHighlightSelectionPosted", "pluginVersion": "0.4.10"},
+            "event": {"event": "nativeHighlightSelectionPosted", "pluginVersion": "0.4.11"},
             "doctorHighlightCheck": {"name": "Native highlight blobs", "status": "OK", "detail": "1 rows have ZHIGHLIGHTS"},
         }
 
@@ -1336,7 +1336,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         module = self.load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package.write_bytes(b"pkg")
             expected_sha = module.sha256_file(package)
             evidence = {
@@ -1368,7 +1368,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         module = self.load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package.write_bytes(b"pkg")
             expected_sha = module.sha256_file(package)
             valid = {

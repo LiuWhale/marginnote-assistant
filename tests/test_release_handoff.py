@@ -25,8 +25,8 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
-            package_pkg = root / "CodexCompanion-0.4.10-latest.pkg"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
+            package_pkg = root / "CodexCompanion-0.4.11-latest.pkg"
             package_zip.write_bytes(b"zip payload")
             package_pkg.write_bytes(b"pkg payload")
             report = {
@@ -88,7 +88,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             report = {"releasable": False, "blockers": [], "warnings": [], "gates": []}
 
@@ -134,7 +134,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             report = {"releasable": False, "blockers": [], "warnings": [], "gates": []}
 
@@ -162,7 +162,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             evidence_dir = root / "evidence-src"
             evidence_dir.mkdir()
@@ -221,7 +221,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             evidence_dir = root / "evidence-src"
             evidence_dir.mkdir()
@@ -273,7 +273,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             evidence_dir = root / "evidence-src"
             evidence_dir.mkdir()
@@ -320,7 +320,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             extension = root / "codex.mn.assistant"
             (extension / "web").mkdir(parents=True)
@@ -370,7 +370,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"current zip payload")
             evidence_dir = root / "evidence-src"
             evidence_dir.mkdir()
@@ -418,7 +418,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             evidence_dir = root / "evidence-src"
             evidence_dir.mkdir()
@@ -461,7 +461,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             evidence_dir = root / "evidence-src"
             evidence_dir.mkdir()
@@ -521,7 +521,7 @@ class ReleaseHandoffTests(unittest.TestCase):
             root = Path(tmp)
             diagnostics_dir = root / "release" / "diagnostics" / "evidence"
             diagnostics_dir.mkdir(parents=True)
-            package_zip = root / "release" / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "release" / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"zip payload")
             old_root = module.ROOT
             module.ROOT = root
@@ -536,7 +536,7 @@ class ReleaseHandoffTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package_zip = root / "CodexCompanion-0.4.10-latest-dist.zip"
+            package_zip = root / "CodexCompanion-0.4.11-latest-dist.zip"
             package_zip.write_bytes(b"current zip payload")
             package_sha = module.sha256_file(package_zip)
             evidence_dir = root / "evidence-src"

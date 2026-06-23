@@ -69,7 +69,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.10"
+CURRENT_PLUGIN_VERSION = "0.4.11"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -173,6 +173,7 @@ READ_ONLY_ACTIONS = {
     "update_check",
     "update_install",
     "update_status",
+    "open_url",
     "draft_save",
     "draft_get",
     "draft_delete",
@@ -2027,7 +2028,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.10-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.11-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -2732,6 +2733,27 @@ def clear_history(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "message": f"清空历史失败：{exc}", "removed": removed}
     return {"ok": True, "message": "历史对话已清空。", "removed": removed, "history": []}
+
+
+def open_external_url(payload: dict[str, Any]) -> dict[str, Any]:
+    url = str(payload.get("url") or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return {"ok": False, "message": "只允许打开 http/https 链接。", "url": url}
+    try:
+        result = subprocess.run(
+            ["/usr/bin/open", url],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        return {"ok": False, "message": f"打开下载页失败：{exc}", "url": url}
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return {"ok": False, "message": f"打开下载页失败：{detail or result.returncode}", "url": url}
+    return {"ok": True, "message": "已打开下载页面。", "url": url}
 
 
 def generation_action_label(action: str) -> str:
@@ -5421,6 +5443,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
     if action == "update_status":
         update = update_manager.read_update_status(ROOT)
         return {"ok": True, "message": update.get("message") or "已读取更新状态。", "update": update}
+    if action == "open_url":
+        return open_external_url(payload)
     if action == "update_check":
         if payload.get("githubRepo"):
             save_runtime_settings({"githubRepo": payload.get("githubRepo")})

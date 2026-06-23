@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.11 - 2026-06-23
+
+### Fixed
+
+- Fixed the updater download button by opening release URLs through the local Companion service first, with the MarginNote bridge kept as a fallback.
+- Added visible in-progress feedback while checking GitHub Releases so the update check no longer appears unresponsive.
+
 ## 0.4.10 - 2026-06-23
 
 ### Fixed
