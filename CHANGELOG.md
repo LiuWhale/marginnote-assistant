@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.12 - 2026-06-23
+
+### Changed
+
+- Moved the context refresh button and context scope controls from the main chat surface into the settings page.
+- Kept the main chat surface focused on conversation, update notices, and generation status while preserving context controls under Settings.
+
 ## 0.4.11 - 2026-06-23
 
 ### Fixed

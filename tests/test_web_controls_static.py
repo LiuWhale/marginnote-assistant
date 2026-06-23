@@ -22,10 +22,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="aiChatShell"',
             'id="statusPill"',
             'id="settingsButton"',
-            'id="contextButton"',
             'id="stopButton"',
-            'id="contextSourceLine"',
-            'id="selectionPreview"',
             'id="liveHistory"',
             'id="promptInput"',
             'id="sendButton"',
@@ -33,6 +30,13 @@ class WebControlsStaticTests(unittest.TestCase):
             self.assertIn(marker, self.html)
 
         for removed in [
+            'id="contextButton"',
+            'id="contextScopeAutoButton"',
+            'id="contextScopeSelectionButton"',
+            'id="contextScopeDocumentButton"',
+            'id="contextSourceLine"',
+            'id="selectionPreview"',
+            "当前内容 / 节点",
             "tabButtonButtons",
             "tabButtonSettings",
             "tabButtonFiles",
@@ -64,6 +68,12 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="settingsNotebookLine"',
             'id="settingsDocumentLine"',
             'id="settingsContextScopeLine"',
+            'id="contextButton"',
+            'id="contextScopeAutoButton"',
+            'id="contextScopeSelectionButton"',
+            'id="contextScopeDocumentButton"',
+            'id="contextSourceLine"',
+            'id="selectionPreview"',
             'id="readinessPanel"',
             'id="aiBackendSelect"',
             'id="codexCliPathInput"',
@@ -88,6 +98,18 @@ class WebControlsStaticTests(unittest.TestCase):
             "renderUpdateStatus",
         ]:
             self.assertIn(marker, self.html + self.js)
+
+        config_html = self.html.split('<section id="configPage"', 1)[1]
+        for marker in [
+            'id="contextButton"',
+            'id="contextScopeAutoButton"',
+            'id="contextScopeSelectionButton"',
+            'id="contextScopeDocumentButton"',
+            'id="contextSourceLine"',
+            'id="selectionPreview"',
+            "当前内容 / 节点",
+        ]:
+            self.assertIn(marker, config_html)
 
         topbar = self.html.split('<section class="topbar">', 1)[1].split("</section>", 1)[0]
         self.assertNotIn('id="readinessPanel"', topbar)
@@ -178,7 +200,10 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("button.disabled = true", check_body)
         self.assertIn("button.disabled = false", check_body)
 
-    def test_ai_chat_exposes_context_scope_like_builtin_ai(self) -> None:
+    def test_config_page_exposes_context_scope_like_builtin_ai(self) -> None:
+        main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+        config_html = self.html.split('<section id="configPage"', 1)[1]
+
         for marker in [
             'id="contextScopeAutoButton"',
             'id="contextScopeSelectionButton"',
@@ -187,7 +212,21 @@ class WebControlsStaticTests(unittest.TestCase):
             'data-context-scope="selection"',
             'data-context-scope="document"',
             'id="contextSourceLine"',
+            'id="selectionPreview"',
             'data-context-state="empty"',
+        ]:
+            self.assertIn(marker, config_html)
+
+        for marker in [
+            'id="contextButton"',
+            'id="contextScopeAutoButton"',
+            'id="contextSourceLine"',
+            'id="selectionPreview"',
+            "当前内容 / 节点",
+        ]:
+            self.assertNotIn(marker, main_html)
+
+        for marker in [
             "AI 可见：未选择上下文",
             "setContextScope",
             "payload.contextScope = currentContextScope()",

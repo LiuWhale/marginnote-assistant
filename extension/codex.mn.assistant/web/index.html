@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260623-reply-mindmap-v2">
+  <link rel="stylesheet" href="app.css?v=20260623-config-context-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -21,26 +21,12 @@
 
     <section class="status-row ai-chat-status-row">
       <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
-      <button id="contextButton" class="small-button" type="button">刷新上下文</button>
       <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
     </section>
 
     <section id="updateNotice" class="update-notice hidden">
       <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
       <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
-    </section>
-
-    <section class="ai-chat-context-box">
-      <div class="context-title-row">
-        <div class="context-title">当前内容 / 节点</div>
-        <div class="context-scope-control" role="group" aria-label="上下文范围">
-          <button id="contextScopeAutoButton" class="scope-button active" data-context-scope="auto" type="button">自动</button>
-          <button id="contextScopeSelectionButton" class="scope-button" data-context-scope="selection" type="button">选区</button>
-          <button id="contextScopeDocumentButton" class="scope-button" data-context-scope="document" type="button">全文</button>
-        </div>
-      </div>
-      <div id="contextSourceLine" class="context-source-line" data-context-state="empty">AI 可见：未选择上下文</div>
-      <div id="selectionPreview" class="context-preview">在 MN4 中选中内容，或直接输入问题。</div>
     </section>
 
     <section id="liveHistory" class="history ai-chat-history" aria-live="polite">
@@ -104,12 +90,27 @@
           <div><span>Document</span><strong id="settingsDocumentLine">未识别</strong></div>
           <div><span>上下文策略</span><strong id="settingsContextScopeLine">自动</strong></div>
         </div>
+        <div class="settings-context-panel">
+          <div class="context-title-row">
+            <div class="context-title">当前内容 / 节点</div>
+            <div class="context-scope-control" role="group" aria-label="上下文范围">
+              <button id="contextScopeAutoButton" class="scope-button active" data-context-scope="auto" type="button">自动</button>
+              <button id="contextScopeSelectionButton" class="scope-button" data-context-scope="selection" type="button">选区</button>
+              <button id="contextScopeDocumentButton" class="scope-button" data-context-scope="document" type="button">全文</button>
+            </div>
+          </div>
+          <div id="contextSourceLine" class="context-source-line" data-context-state="empty">AI 可见：未选择上下文</div>
+          <div id="selectionPreview" class="context-preview">在 MN4 中选中内容，或直接输入问题。</div>
+        </div>
         <div class="config-grid two">
           <label><span>默认上下文范围</span><select id="defaultContextScopeSelect">
             <option value="auto">自动：选区优先，否则全文</option>
             <option value="selection">只看选区 / 节点</option>
             <option value="document">当前文档全文</option>
           </select></label>
+        </div>
+        <div class="config-actions">
+          <button id="contextButton" class="small-button" type="button">刷新上下文</button>
         </div>
       </section>
 
@@ -152,6 +153,6 @@
       </section>
     </div>
   </section>
-  <script src="app.js?v=20260623-reply-mindmap-v2"></script>
+  <script src="app.js?v=20260623-config-context-v1"></script>
 </body>
 </html>

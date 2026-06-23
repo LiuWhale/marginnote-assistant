@@ -149,16 +149,25 @@ class ResizablePanelContractTest(unittest.TestCase):
             'id="aiChatShell"',
             'id="sendButton"',
             'id="promptInput"',
-            'id="selectionPreview"',
             'id="liveHistory"',
         ]:
             self.assertIn(required, self.index)
 
-        expected_order = ['id="selectionPreview"', 'id="liveHistory"', 'id="promptInput"', 'id="sendButton"']
+        expected_order = ['id="liveHistory"', 'id="promptInput"', 'id="sendButton"']
         positions = [self.index.index(marker) for marker in expected_order]
         self.assertEqual(positions, sorted(positions))
 
         main_html = self.index.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+        config_html = self.index.split('<section id="configPage"', 1)[1]
+        for config_owned in [
+            'id="contextButton"',
+            'id="selectionPreview"',
+            'id="contextSourceLine"',
+            "当前内容 / 节点",
+        ]:
+            self.assertIn(config_owned, config_html)
+            self.assertNotIn(config_owned, main_html)
+
         for removed in [
             'tabButtonButtons',
             'tabButtonSettings',

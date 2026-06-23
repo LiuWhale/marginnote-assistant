@@ -853,18 +853,16 @@ input[type="file"] {
   background: #fbfcfd;
 }
 
-.ai-chat-context-box {
-  margin: 0 14px 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fbfcfd;
-}
-
 .context-title {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.settings-context-panel {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
 }
 
 .context-title-row {
