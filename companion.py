@@ -69,7 +69,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.9"
+CURRENT_PLUGIN_VERSION = "0.4.10"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1109,8 +1109,24 @@ def prepare_codex_lite_home() -> Path:
     return CODEX_LITE_HOME
 
 
-def codex_cli_env() -> dict[str, str]:
+def merge_no_proxy(existing: str) -> str:
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in str(existing or "").split(","):
+        value = item.strip()
+        if value and value not in seen:
+            values.append(value)
+            seen.add(value)
+    for value in ["127.0.0.1", "localhost", "::1"]:
+        if value not in seen:
+            values.append(value)
+            seen.add(value)
+    return ",".join(values)
+
+
+def codex_cli_env(settings: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
+    settings = settings or runtime_settings()
     default_path = ":".join(
         [
             str(HOME / ".npm-global/bin"),
@@ -1125,6 +1141,13 @@ def codex_cli_env() -> dict[str, str]:
     env["PATH"] = env.get("PATH", default_path) + ":" + default_path
     env["HOME"] = str(prepare_codex_lite_home())
     env["CODEX_HOME"] = str(prepare_codex_lite_home())
+    proxy_url = sanitize_proxy_url(settings.get("proxyUrl", ""))
+    if proxy_url:
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
+            env[key] = proxy_url
+        no_proxy = merge_no_proxy(env.get("NO_PROXY") or env.get("no_proxy") or "")
+        env["NO_PROXY"] = no_proxy
+        env["no_proxy"] = no_proxy
     return env
 
 
@@ -2004,7 +2027,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.9-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.10-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -4654,7 +4677,7 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
             stderr=subprocess.PIPE,
             text=True,
             cwd=str(ROOT),
-            env=codex_cli_env(),
+            env=codex_cli_env(settings),
             start_new_session=True,
         )
         register_current_generation_process(process, "codex-cli")

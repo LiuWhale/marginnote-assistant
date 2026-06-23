@@ -1210,7 +1210,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.9",
+                    "pluginVersion": "0.4.10",
                     "extra": {
                         "hasNativeHighlightCandidate": True,
                         "hasAnnotatedExportCandidate": False,
@@ -1237,7 +1237,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.9",
+                    "pluginVersion": "0.4.10",
                     "extra": {
                         "hasNativeHighlightCandidate": False,
                         "hasAnnotatedExportCandidate": True,
@@ -1269,7 +1269,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.9",
+                    "pluginVersion": "0.4.10",
                     "extra": {
                         "activeSelectionLength": 26,
                         "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
@@ -1302,7 +1302,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.9",
+                    "pluginVersion": "0.4.10",
                     "extra": {
                         "activeSelectionLength": 0,
                         "candidateMethods": ["documentController.highlightFromSelection"],
@@ -1334,7 +1334,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.9",
+                    "pluginVersion": "0.4.10",
                     "extra": {
                         "activeSelectionLength": 18,
                         "candidateMethods": [],
@@ -1859,7 +1859,13 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.save_runtime_settings(
-                {"speed": "fast", "aiBackend": "codex_cli", "codexCliPath": "/tmp/codex", "model": "gpt-5.5"}
+                {
+                    "speed": "fast",
+                    "aiBackend": "codex_cli",
+                    "codexCliPath": "/tmp/codex",
+                    "model": "gpt-5.5",
+                    "proxyUrl": "http://127.0.0.1:7890",
+                }
             )
             fake_home = Path(tmp) / "home"
             fake_home.joinpath(".codex").mkdir(parents=True)
@@ -1913,6 +1919,12 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("gpt-5.5", captured["args"])
             self.assertEqual(captured["env"]["CODEX_HOME"], str(companion.CODEX_LITE_HOME))
             self.assertEqual(captured["env"]["HOME"], str(companion.CODEX_LITE_HOME))
+            self.assertEqual(captured["env"]["HTTP_PROXY"], "http://127.0.0.1:7890")
+            self.assertEqual(captured["env"]["HTTPS_PROXY"], "http://127.0.0.1:7890")
+            self.assertEqual(captured["env"]["ALL_PROXY"], "http://127.0.0.1:7890")
+            self.assertEqual(captured["env"]["http_proxy"], "http://127.0.0.1:7890")
+            self.assertIn("127.0.0.1", captured["env"]["NO_PROXY"])
+            self.assertIn("localhost", captured["env"]["NO_PROXY"])
             self.assertTrue((companion.CODEX_LITE_HOME / "auth.json").exists())
 
     def test_codex_cli_discovery_prefers_user_npm_cli_over_old_homebrew_cli(self) -> None:
@@ -2044,10 +2056,10 @@ class CompanionControlsTests(unittest.TestCase):
                     "available": True,
                     "repo": settings["githubRepo"],
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.9",
-                    "assetName": "CodexCompanion-0.4.9-latest-dist.zip",
-                    "downloadUrl": "https://example/CodexCompanion-0.4.9-latest-dist.zip",
-                    "message": "发现新版本 0.4.9。",
+                    "latestVersion": "0.4.10",
+                    "assetName": "CodexCompanion-0.4.10-latest-dist.zip",
+                    "downloadUrl": "https://example/CodexCompanion-0.4.10-latest-dist.zip",
+                    "message": "发现新版本 0.4.10。",
                 }
 
             def fake_install(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
@@ -2057,7 +2069,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "state": "installing",
                     "repo": settings["githubRepo"],
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.9",
+                    "latestVersion": "0.4.10",
                     "message": "已开始安装更新。",
                 }
 
@@ -2077,7 +2089,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(checked["update"]["available"])
             self.assertEqual(installed["update"]["state"], "installing")
             self.assertEqual(calls, ["LiuWhale/marginnote-assistant", "install:LiuWhale/marginnote-assistant"])
-            self.assertEqual(status["update"]["latestVersion"], "0.4.9")
+            self.assertEqual(status["update"]["latestVersion"], "0.4.10")
 
     def test_settings_goal_upload_stop_and_permission_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

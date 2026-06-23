@@ -20,10 +20,10 @@ from urllib import request
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.9-latest-dist.zip"
+DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.10-latest-dist.zip"
 LIVE_EXTENSION = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 MN_DATABASE = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents/MN4NotebookDatabase/0/MarginNotes.sqlite"
-CURRENT_PLUGIN_VERSION = "0.4.9"
+CURRENT_PLUGIN_VERSION = "0.4.10"
 EVIDENCE_SCHEMA = "codex-companion-cross-machine-install-v1"
 NATIVE_HIGHLIGHT_EVIDENCE_SCHEMA = "codex-companion-native-highlight-v1"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
@@ -345,11 +345,11 @@ def next_actions_for_gate(name: str, detail: str = "") -> list[str]:
     if name == "unit_tests":
         return ["Run python3 -m unittest discover -s tests and fix the failing test output."]
     if name == "syntax_checks":
-        return ["Run python3 release_acceptance.py release/CodexCompanion-0.4.9-latest-dist.zip --skip-tests to see the exact syntax command failure."]
+        return ["Run python3 release_acceptance.py release/CodexCompanion-0.4.10-latest-dist.zip --skip-tests to see the exact syntax command failure."]
     if name == "release_zip_smoke":
-        return ["Run python3 package_release.py 0.4.9, then rerun release_smoke_test.py on the latest dist zip."]
+        return ["Run python3 package_release.py 0.4.10, then rerun release_smoke_test.py on the latest dist zip."]
     if name == "install_dry_run":
-        return ["Run python3 release_smoke_test.py release/CodexCompanion-0.4.9-latest-dist.zip --install-dry-run and fix the install/uninstall script failure."]
+        return ["Run python3 release_smoke_test.py release/CodexCompanion-0.4.10-latest-dist.zip --install-dry-run and fix the install/uninstall script failure."]
     if name == "runtime_web_controls":
         if "reload_web_panel" in detail_lower:
             return [
@@ -391,7 +391,7 @@ def next_actions_for_gate(name: str, detail: str = "") -> list[str]:
                 "Then rerun release_acceptance.py or click 发布验收 in the Codex Companion panel.",
             ]
         return [
-            "Run python3 package_release.py, then python3 build_pkg.py release/CodexCompanion-0.4.9-latest-dist.zip --json.",
+            "Run python3 package_release.py, then python3 build_pkg.py release/CodexCompanion-0.4.10-latest-dist.zip --json.",
             "Copy release/SHA256SUMS.txt to the OneDrive Codex Companion folder and rerun release_acceptance.py.",
         ]
     if name == "release_maintainer_prerequisites":
@@ -402,12 +402,12 @@ def next_actions_for_gate(name: str, detail: str = "") -> list[str]:
     if name == "signed_pkg":
         return [
             "Install a Developer ID Installer certificate in Keychain, then run Build Signed Package.command.",
-            "CLI alternative: python3 build_pkg.py release/CodexCompanion-0.4.9-latest-dist.zip --auto-sign --json.",
+            "CLI alternative: python3 build_pkg.py release/CodexCompanion-0.4.10-latest-dist.zip --auto-sign --json.",
         ]
     if name == "notarized_pkg":
         return [
             "Store Apple notarization credentials with xcrun notarytool store-credentials, then run Notarize Package.command.",
-            "CLI alternative: python3 notarize_pkg.py release/CodexCompanion-0.4.9-latest.pkg --keychain-profile <profile> --json.",
+            "CLI alternative: python3 notarize_pkg.py release/CodexCompanion-0.4.10-latest.pkg --keychain-profile <profile> --json.",
         ]
     if name == "cross_machine_install":
         return [

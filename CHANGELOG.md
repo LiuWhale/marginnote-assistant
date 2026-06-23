@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.10 - 2026-06-23
+
+### Fixed
+
+- Fixed the proxy setting for Codex CLI runs by injecting `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` into the CLI subprocess environment.
+- Kept local Companion traffic out of the proxy with `NO_PROXY=127.0.0.1,localhost,::1`.
+
 ## 0.4.9 - 2026-06-23
 
 ### Fixed
