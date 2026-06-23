@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Codex Companion logo">
+  <defs>
+    <linearGradient id="bg" x1="160" y1="120" x2="840" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef8f6"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="250" y1="180" x2="780" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5ed6d1"/>
+      <stop offset="1" stop-color="#009c93"/>
+    </linearGradient>
+    <linearGradient id="tealSoft" x1="330" y1="320" x2="720" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#dff6f4"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="graphite" x1="150" y1="410" x2="870" y2="620" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#162333"/>
+      <stop offset="1" stop-color="#384557"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#0f2830" flood-opacity="0.16"/>
+    </filter>
+    <filter id="paperShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#0f2830" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect x="54" y="54" width="916" height="916" rx="214" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="57" y="57" width="910" height="910" rx="211" fill="none" stroke="#d9ece9" stroke-width="6"/>
+
+  <g opacity="0.97">
+    <path d="M512 155 L572 380 L452 380 Z" fill="url(#teal)"/>
+    <path d="M512 869 L452 644 L572 644 Z" fill="url(#teal)"/>
+    <path d="M150 512 L382 452 L382 572 Z" fill="url(#graphite)"/>
+    <path d="M874 512 L642 452 L642 572 Z" fill="url(#graphite)"/>
+    <path d="M278 278 L438 418" fill="none" stroke="#28bbb3" stroke-width="46" stroke-linecap="round"/>
+    <path d="M746 278 L586 418" fill="none" stroke="#28bbb3" stroke-width="46" stroke-linecap="round"/>
+    <path d="M278 746 L438 606" fill="none" stroke="#28bbb3" stroke-width="46" stroke-linecap="round"/>
+    <path d="M746 746 L586 606" fill="none" stroke="#28bbb3" stroke-width="46" stroke-linecap="round"/>
+    <circle cx="512" cy="142" r="58" fill="url(#teal)"/>
+    <circle cx="512" cy="882" r="58" fill="url(#teal)"/>
+    <circle cx="142" cy="512" r="58" fill="#172433"/>
+    <circle cx="882" cy="512" r="58" fill="#263446"/>
+    <circle cx="260" cy="260" r="54" fill="#57d0cb"/>
+    <circle cx="764" cy="260" r="54" fill="#43c6c0"/>
+    <circle cx="260" cy="764" r="54" fill="#35beb8"/>
+    <circle cx="764" cy="764" r="54" fill="#26aaa3"/>
+  </g>
+
+  <g filter="url(#paperShadow)">
+    <path d="M367 312 H564 L704 452 V691 C704 755 662 797 598 797 H426 C362 797 320 755 320 691 V359 C320 331 339 312 367 312 Z" fill="url(#tealSoft)" stroke="#9bd9d4" stroke-width="8"/>
+    <path d="M564 312 V421 C564 449 583 468 611 468 H704 Z" fill="url(#teal)" stroke="#119e96" stroke-width="8" stroke-linejoin="round"/>
+    <rect x="410" y="500" width="204" height="24" rx="12" fill="#64c9c4"/>
+    <rect x="410" y="566" width="252" height="24" rx="12" fill="#52bdb8"/>
+    <rect x="410" y="632" width="228" height="24" rx="12" fill="#42b0aa"/>
+  </g>
+</svg>
