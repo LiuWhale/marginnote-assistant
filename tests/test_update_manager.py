@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,128 @@ def load_update_manager() -> Any:
 
 
 class UpdateManagerTests(unittest.TestCase):
+    def test_public_release_html_parses_latest_zip_without_rest_api(self) -> None:
+        module = load_update_manager()
+        html = b"""
+        <html>
+          <body>
+            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.2/CodexCompanion-0.4.2-latest.pkg">pkg</a>
+            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.2/CodexCompanion-0.4.2-latest-dist.zip">zip</a>
+          </body>
+        </html>
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requested_urls: list[str] = []
+
+            class FakeResponse(BytesIO):
+                headers = {"Content-Type": "text/html; charset=utf-8"}
+
+                def __enter__(self) -> "FakeResponse":
+                    return self
+
+                def __exit__(self, *args: object) -> None:
+                    return None
+
+                def geturl(self) -> str:
+                    return "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.2"
+
+            def fake_urlopen(req: Any, settings: dict[str, Any], timeout: float) -> FakeResponse:
+                requested_urls.append(req.full_url)
+                return FakeResponse(html)
+
+            old_urlopen = module.urlopen_with_proxy
+            module.urlopen_with_proxy = fake_urlopen
+            try:
+                result = module.check_for_update(
+                    root,
+                    {"githubRepo": "LiuWhale/marginnote-assistant", "proxyUrl": ""},
+                    current_version="0.4.1",
+                )
+            finally:
+                module.urlopen_with_proxy = old_urlopen
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["available"])
+        self.assertEqual(result["latestVersion"], "0.4.2")
+        self.assertEqual(result["assetName"], "CodexCompanion-0.4.2-latest-dist.zip")
+        self.assertEqual(
+            result["downloadUrl"],
+            "https://github.com/LiuWhale/marginnote-assistant/releases/download/v0.4.2/CodexCompanion-0.4.2-latest-dist.zip",
+        )
+        self.assertEqual(requested_urls, ["https://github.com/LiuWhale/marginnote-assistant/releases/latest"])
+
+    def test_public_release_check_fetches_lazy_loaded_expanded_assets(self) -> None:
+        module = load_update_manager()
+        latest_html = b"""
+        <html>
+          <body>
+            <include-fragment src="https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.2"></include-fragment>
+          </body>
+        </html>
+        """
+        assets_html = b"""
+        <html>
+          <body>
+            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.2/CodexCompanion-0.4.2-latest-dist.zip">zip</a>
+          </body>
+        </html>
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requested_urls: list[str] = []
+
+            class FakeResponse(BytesIO):
+                def __init__(self, payload: bytes, final_url: str) -> None:
+                    super().__init__(payload)
+                    self._final_url = final_url
+                    self.headers = {"Content-Type": "text/html; charset=utf-8"}
+
+                def __enter__(self) -> "FakeResponse":
+                    return self
+
+                def __exit__(self, *args: object) -> None:
+                    return None
+
+                def geturl(self) -> str:
+                    return self._final_url
+
+            def fake_urlopen(req: Any, settings: dict[str, Any], timeout: float) -> FakeResponse:
+                requested_urls.append(req.full_url)
+                if req.full_url.endswith("/releases/latest"):
+                    return FakeResponse(
+                        latest_html,
+                        "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.2",
+                    )
+                if req.full_url.endswith("/releases/expanded_assets/v0.4.2"):
+                    return FakeResponse(
+                        assets_html,
+                        "https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.2",
+                    )
+                raise AssertionError(f"unexpected URL: {req.full_url}")
+
+            old_urlopen = module.urlopen_with_proxy
+            module.urlopen_with_proxy = fake_urlopen
+            try:
+                result = module.check_for_update(
+                    root,
+                    {"githubRepo": "LiuWhale/marginnote-assistant", "proxyUrl": ""},
+                    current_version="0.4.1",
+                )
+            finally:
+                module.urlopen_with_proxy = old_urlopen
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["latestVersion"], "0.4.2")
+        self.assertEqual(result["assetName"], "CodexCompanion-0.4.2-latest-dist.zip")
+        self.assertEqual(
+            requested_urls,
+            [
+                "https://github.com/LiuWhale/marginnote-assistant/releases/latest",
+                "https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.2",
+            ],
+        )
+
     def test_release_metadata_selects_latest_dist_zip_and_compares_version(self) -> None:
         module = load_update_manager()
 
@@ -95,4 +218,3 @@ class UpdateManagerTests(unittest.TestCase):
             self.assertEqual(written["state"], "available")
             self.assertEqual(loaded["repo"], "LiuWhale/marginnote-assistant")
             self.assertEqual(module.read_update_status(root)["latestVersion"], "0.4.2")
-

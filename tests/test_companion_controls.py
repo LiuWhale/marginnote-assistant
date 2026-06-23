@@ -1204,7 +1204,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.1",
+                    "pluginVersion": "0.4.2",
                     "extra": {
                         "hasNativeHighlightCandidate": True,
                         "hasAnnotatedExportCandidate": False,
@@ -1231,7 +1231,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.1",
+                    "pluginVersion": "0.4.2",
                     "extra": {
                         "hasNativeHighlightCandidate": False,
                         "hasAnnotatedExportCandidate": True,
@@ -1263,7 +1263,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.1",
+                    "pluginVersion": "0.4.2",
                     "extra": {
                         "activeSelectionLength": 26,
                         "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
@@ -1296,7 +1296,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.1",
+                    "pluginVersion": "0.4.2",
                     "extra": {
                         "activeSelectionLength": 0,
                         "candidateMethods": ["documentController.highlightFromSelection"],
@@ -1328,7 +1328,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.1",
+                    "pluginVersion": "0.4.2",
                     "extra": {
                         "activeSelectionLength": 18,
                         "candidateMethods": [],

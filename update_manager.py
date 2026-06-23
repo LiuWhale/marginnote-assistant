@@ -8,9 +8,10 @@ import shutil
 import subprocess
 import time
 import zipfile
+from html import unescape
 from pathlib import Path
 from typing import Any
-from urllib import error, request
+from urllib import error, parse, request
 
 from runtime_config import DEFAULT_RUNTIME_SETTINGS, sanitize_github_repo, sanitize_proxy_url
 
@@ -18,6 +19,7 @@ from runtime_config import DEFAULT_RUNTIME_SETTINGS, sanitize_github_repo, sanit
 UPDATE_STATUS_RELATIVE = Path("control/update_status.json")
 UPDATES_DIR_NAME = "updates"
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
+GITHUB_LATEST_PAGE = "https://github.com/{repo}/releases/latest"
 
 
 def now_text() -> str:
@@ -158,6 +160,55 @@ def parse_latest_release(release: dict[str, Any], current_version: str, repo: st
     }
 
 
+def absolute_github_url(repo: str, href: str) -> str:
+    href = unescape(str(href or "").strip())
+    if href.startswith(("https://", "http://")):
+        return href
+    if href.startswith("//"):
+        return "https:" + href
+    if href.startswith("/"):
+        return "https://github.com" + href
+    return parse.urljoin(f"https://github.com/{repo}/releases/", href)
+
+
+def parse_public_release_html(html_text: str, final_url: str, repo: str) -> dict[str, Any]:
+    tag = ""
+    tag_match = re.search(r"/releases/tag/([^/?#]+)", final_url)
+    if tag_match:
+        tag = parse.unquote(tag_match.group(1))
+    assets: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for match in re.finditer(r"""href\s*=\s*(['"])(.*?)\1""", html_text, flags=re.IGNORECASE | re.DOTALL):
+        href = unescape(match.group(2))
+        if "/releases/download/" not in href:
+            continue
+        asset_url = absolute_github_url(repo, href)
+        parsed = parse.urlparse(asset_url)
+        if not parsed.path.lower().endswith(".zip"):
+            continue
+        if asset_url in seen_urls:
+            continue
+        seen_urls.add(asset_url)
+        if not tag:
+            download_tag = re.search(r"/releases/download/([^/]+)/", parsed.path)
+            if download_tag:
+                tag = parse.unquote(download_tag.group(1))
+        assets.append(
+            {
+                "name": Path(parse.unquote(parsed.path)).name,
+                "browser_download_url": asset_url,
+                "size": 0,
+            }
+        )
+    release_url = f"https://github.com/{repo}/releases/tag/{parse.quote(tag, safe='')}" if tag else final_url
+    return {
+        "tag_name": tag,
+        "html_url": release_url,
+        "assets": assets,
+        "body": "",
+    }
+
+
 def urlopen_with_proxy(req: request.Request, settings: dict[str, Any], timeout: float):
     proxy_url = sanitize_proxy_url(settings.get("proxyUrl", ""))
     if not proxy_url:
@@ -166,8 +217,49 @@ def urlopen_with_proxy(req: request.Request, settings: dict[str, Any], timeout: 
     return opener.open(req, timeout=timeout)
 
 
-def check_for_update(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
-    repo = sanitize_github_repo(settings.get("githubRepo"))
+def fetch_latest_release_from_public_page(settings: dict[str, Any], repo: str) -> dict[str, Any]:
+    page_url = GITHUB_LATEST_PAGE.format(repo=repo)
+    req = request.Request(
+        page_url,
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "CodexCompanionUpdater/1.0",
+        },
+        method="GET",
+    )
+    with urlopen_with_proxy(req, settings, timeout=20) as resp:
+        raw = resp.read()
+        final_url = getattr(resp, "geturl", lambda: page_url)()
+    html_text = raw.decode("utf-8", errors="replace")
+    release = parse_public_release_html(html_text, str(final_url or page_url), repo)
+    tag = str(release.get("tag_name") or "")
+    if tag and not release.get("assets"):
+        assets_url = f"https://github.com/{repo}/releases/expanded_assets/{parse.quote(tag, safe='')}"
+        assets_req = request.Request(
+            assets_url,
+            headers={
+                "Accept": "text/html,*/*",
+                "User-Agent": "CodexCompanionUpdater/1.0",
+            },
+            method="GET",
+        )
+        with urlopen_with_proxy(assets_req, settings, timeout=20) as assets_resp:
+            assets_raw = assets_resp.read()
+        expanded_release = parse_public_release_html(
+            assets_raw.decode("utf-8", errors="replace"),
+            str(release.get("html_url") or final_url or page_url),
+            repo,
+        )
+        if expanded_release.get("assets"):
+            release["assets"] = expanded_release["assets"]
+    if not release.get("tag_name"):
+        raise ValueError("GitHub release 页面缺少版本号。")
+    if not release.get("assets"):
+        raise ValueError("GitHub release 页面没有找到可安装 zip。")
+    return release
+
+
+def fetch_latest_release_from_api(settings: dict[str, Any], repo: str) -> dict[str, Any]:
     api_url = GITHUB_API.format(repo=repo)
     req = request.Request(
         api_url,
@@ -177,40 +269,42 @@ def check_for_update(root: Path, settings: dict[str, Any], current_version: str)
         },
         method="GET",
     )
-    try:
-        with urlopen_with_proxy(req, settings, timeout=20) as resp:
-            release = json.loads(resp.read().decode("utf-8"))
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        result = {
-            "ok": False,
-            "state": "error",
-            "available": False,
-            "repo": repo,
-            "currentVersion": current_version,
-            "message": f"检查更新失败：GitHub HTTP {exc.code}。{detail}",
-        }
-        return write_update_status(root, result)
-    except Exception as exc:
-        result = {
-            "ok": False,
-            "state": "error",
-            "available": False,
-            "repo": repo,
-            "currentVersion": current_version,
-            "message": f"检查更新失败：{exc}",
-        }
-        return write_update_status(root, result)
+    with urlopen_with_proxy(req, settings, timeout=20) as resp:
+        release = json.loads(resp.read().decode("utf-8"))
     if not isinstance(release, dict):
-        result = {
-            "ok": False,
-            "state": "error",
-            "available": False,
-            "repo": repo,
-            "currentVersion": current_version,
-            "message": "检查更新失败：GitHub 返回不是 release 对象。",
-        }
-        return write_update_status(root, result)
+        raise ValueError("GitHub 返回不是 release 对象。")
+    return release
+
+
+def check_for_update(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
+    repo = sanitize_github_repo(settings.get("githubRepo"))
+    try:
+        release = fetch_latest_release_from_public_page(settings, repo)
+    except Exception as exc:
+        page_error = str(exc)
+        try:
+            release = fetch_latest_release_from_api(settings, repo)
+        except error.HTTPError as api_exc:
+            detail = api_exc.read().decode("utf-8", errors="replace")[:500]
+            result = {
+                "ok": False,
+                "state": "error",
+                "available": False,
+                "repo": repo,
+                "currentVersion": current_version,
+                "message": f"检查更新失败：公开 release 页面不可用（{page_error}）；GitHub API HTTP {api_exc.code}。{detail}",
+            }
+            return write_update_status(root, result)
+        except Exception as api_exc:
+            result = {
+                "ok": False,
+                "state": "error",
+                "available": False,
+                "repo": repo,
+                "currentVersion": current_version,
+                "message": f"检查更新失败：公开 release 页面不可用（{page_error}）；GitHub API 也不可用（{api_exc}）。",
+            }
+            return write_update_status(root, result)
     return write_update_status(root, parse_latest_release(release, current_version, repo))
 
 
