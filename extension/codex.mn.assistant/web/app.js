@@ -2,6 +2,7 @@
   var state = {
     busy: false,
     runActive: false,
+    currentQueueId: '',
     context: {},
     contextScope: 'auto',
     contextScopeInitialized: false,
@@ -319,86 +320,30 @@
     });
   }
 
-  function latestChatTranscript() {
-    var history = byId('liveHistory');
-    if (!history) return state.latestAssistantReply || '';
-    var messages = history.querySelectorAll('.message');
-    var parts = [];
-    for (var i = 0; i < messages.length; i++) {
-      var roleEl = messages[i].querySelector('.message-role');
-      var bodyEl = messages[i].querySelector('.message-body');
-      var body = bodyEl ? String(bodyEl.textContent || '').replace(/^\s+|\s+$/g, '') : '';
-      if (!body) continue;
-      var role = roleEl ? String(roleEl.textContent || '').replace(/^\s+|\s+$/g, '') : 'Codex';
-      parts.push(role + '：\n' + body);
-    }
-    return parts.join('\n\n---\n\n') || state.latestAssistantReply || '';
-  }
-
-  function buildReplyMindmapPrompt(kind, replyText) {
+  function buildReplyMindmapPrompt(replyText) {
     var answer = String(replyText || state.latestAssistantReply || '').replace(/^\s+|\s+$/g, '');
-    var transcript = latestChatTranscript();
     var outlineRule = '输出必须是 Markdown 层级大纲：## 一级主题、### 二级主题、#### 三级细节点。覆盖全文章节或回答中的完整逻辑链；长文尽量形成 18-30 个二级主题、40-80 个三级细节点；每个节点标题不超过 28 个汉字，说明不超过 80 个汉字；不要把整段回答塞进一张卡；末尾用“覆盖统计：...”说明覆盖章节、二级主题和三级细节点数量。';
-    if (kind === 'conversation') {
-      return '[conversation_to_mindmap] 根据上面的对话创建一个结构化的脑图分支（使用markdown大纲格式，并保留问答关系和双向同步线索）。' +
-        '\n' + outlineRule + '\n\n上面的对话：\n' + transcript;
-    }
-    if (kind === 'card_tree') {
-      return '[create_card_tree] 根据上面的回答创建一个结构化的卡片树（使用markdown大纲格式）。' +
-        '\n' + outlineRule + '\n\n上面的回答：\n' + answer;
-    }
-    return '[answer_to_mindmap] 根据上面的回答创建一个结构化的脑图分支（使用markdown大纲格式）。' +
+    return '[create_card_tree] 根据上面的回答创建一个结构化的脑图树（使用markdown大纲格式）。' +
       '\n' + outlineRule + '\n\n上面的回答：\n' + answer;
   }
 
-  function runReplyMindmapAction(kind, replyText) {
-    var labels = {
-      answer: '回答添加到脑图',
-      conversation: '对话添加到脑图（双向同步）',
-      card_tree: '在脑图中创建卡片树'
-    };
-    var prompt = buildReplyMindmapPrompt(kind, replyText);
-    executeAction('generate_mindmap', prompt, labels[kind] || '添加到脑图');
+  function runReplyMindmapAction(replyText) {
+    var prompt = buildReplyMindmapPrompt(replyText);
+    executeAction('generate_mindmap', prompt, '生成脑图树');
   }
 
   function buildReplyMindmapControls(replyText) {
     var wrapper = document.createElement('div');
     wrapper.className = 'reply-mindmap-actions';
-    var trigger = document.createElement('button');
-    trigger.className = 'small-button reply-mindmap-trigger';
-    trigger.type = 'button';
-    trigger.textContent = '添加到脑图';
-    trigger.setAttribute('aria-expanded', 'false');
-    var menu = document.createElement('div');
-    menu.className = 'reply-mindmap-menu hidden';
-    var items = [
-      {kind: 'answer', title: '回答添加到脑图'},
-      {kind: 'conversation', title: '对话添加到脑图（双向同步）'},
-      {kind: 'card_tree', title: '在脑图中创建卡片树'}
-    ];
-    trigger.addEventListener('click', function(ev) {
+    var button = document.createElement('button');
+    button.className = 'small-button reply-mindmap-tree-button';
+    button.type = 'button';
+    button.textContent = '生成脑图树';
+    button.addEventListener('click', function(ev) {
       releaseButtonFocus(ev.currentTarget);
-      var hidden = menu.className.indexOf('hidden') >= 0;
-      menu.className = hidden ? 'reply-mindmap-menu' : 'reply-mindmap-menu hidden';
-      trigger.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+      runReplyMindmapAction(replyText);
     });
-    for (var i = 0; i < items.length; i++) {
-      (function(item) {
-        var button = document.createElement('button');
-        button.className = 'reply-mindmap-menu-item';
-        button.type = 'button';
-        button.textContent = item.title;
-        button.addEventListener('click', function(ev) {
-          releaseButtonFocus(ev.currentTarget);
-          menu.className = 'reply-mindmap-menu hidden';
-          trigger.setAttribute('aria-expanded', 'false');
-          runReplyMindmapAction(item.kind, replyText);
-        });
-        menu.appendChild(button);
-      })(items[i]);
-    }
-    wrapper.appendChild(trigger);
-    wrapper.appendChild(menu);
+    wrapper.appendChild(button);
     return wrapper;
   }
 
@@ -625,6 +570,7 @@
     xhr.onerror = function() {
       var result = companionConnectionFailureResult();
       setProgressStage('连接失败', result.message);
+      finishProgressStage('连接失败', result.message);
       window.CodexPanel.setStatus({text: result.message});
       if (done) done(result);
     };
@@ -651,6 +597,7 @@
     xhr.onerror = function() {
       var result = companionConnectionFailureResult();
       setProgressStage('连接失败', result.message);
+      finishProgressStage('连接失败', result.message);
       window.CodexPanel.setStatus({text: result.message});
       if (done) done(result);
     };
@@ -678,6 +625,7 @@
   }
 
   function ackQueueAndContinue(queueId) {
+    if (queueId && state.currentQueueId === queueId) state.currentQueueId = '';
     if (queueId) {
       ackQueuedCommands([queueId], function() {
         refreshQueue();
@@ -792,6 +740,7 @@
   }
 
   function requestTextAction(action, prompt, userText, queueId) {
+    state.currentQueueId = queueId || '';
     addMessage('user', userText || '[' + action + ']');
     setWebRunLock(true);
     window.CodexPanel.setBusy({busy: true});
@@ -802,11 +751,13 @@
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
       if (!result || !result.ok) {
+        finishProgressStage('失败', result && result.message ? result.message : '动作失败。');
         addFailureMessage('队列任务执行失败', result);
         ackQueueAndContinue(queueId);
         return;
       }
       if (result.queued_due_to_web_busy) {
+        finishProgressStage('已加入队列', result.message || '上一个任务仍在运行，本次请求已加入队列。');
         if (queueId) {
           ackQueueAndContinue(queueId);
           return;
@@ -815,6 +766,7 @@
         return;
       }
       reportActionResponse(action, result || {});
+      finishProgressStage('已完成', result.message || result.reply || '动作已完成。');
       ackQueueAndContinue(queueId);
     });
   }
@@ -2214,21 +2166,30 @@
     return Math.max(0, Math.floor((Date.now() - state.progressStartedAt) / 1000));
   }
 
-  function formatProgressText(elapsed) {
+  function progressActiveHint() {
+    return '可继续输入；运行中可点停止。';
+  }
+
+  function progressFinishedHint() {
+    return '可继续输入。';
+  }
+
+  function formatProgressText(elapsed, active) {
     var stage = state.progressStage || '准备执行';
     var detail = state.progressDetail || '正在收集当前上下文并准备请求。';
+    var running = active !== false;
     return [
       '阶段：' + stage,
       '动作：' + actionLabel(state.progressAction),
       '状态：' + detail,
       '已用：' + elapsed + 's',
-      '可继续输入；运行中可点停止。'
+      running ? progressActiveHint() : progressFinishedHint()
     ].join('\n');
   }
 
   function updateProgressText() {
     if (!state.progressBody || !state.progressStartedAt) return;
-    state.progressBody.textContent = formatProgressText(progressElapsedSeconds());
+    state.progressBody.textContent = formatProgressText(progressElapsedSeconds(), true);
   }
 
   function refreshProgressRunState() {
@@ -2247,11 +2208,14 @@
       }
       var run = result && result.run ? result.run : null;
       if (!run || !(run.active || run.action || run.stage || run.detail)) return;
+      var runAction = String(run.action || '');
+      if (runAction && state.progressAction && runAction !== state.progressAction) return;
       state.progressStage = run.stage || state.progressStage;
       state.progressDetail = run.detail || state.progressDetail;
       state.progressAction = run.action || state.progressAction;
       renderRunState(run);
-      updateProgressText();
+      if (run.active) updateProgressText();
+      else finishProgressStage(state.progressStage, state.progressDetail);
     };
     xhr.onerror = function() {
       state.progressStatusInFlight = false;
@@ -2311,7 +2275,7 @@
     if (!state.progressBody || !state.progressStartedAt) return;
     state.progressStage = stage || state.progressStage;
     state.progressDetail = detail || state.progressDetail;
-    finishProgress(formatProgressText(progressElapsedSeconds()));
+    finishProgress(formatProgressText(progressElapsedSeconds(), false));
   }
 
   function enqueueAction(action, prompt) {
@@ -2370,6 +2334,7 @@
   }
 
   function requestGoalAction(goalText, userText, queueId) {
+    state.currentQueueId = queueId || '';
     var goal = goalTextToPayload(goalText);
     if (!goal.title && !goal.detail) {
       addMessage('assistant', '队列目标为空，已跳过。');
@@ -2386,16 +2351,19 @@
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
       if (!result || !result.ok) {
+        finishProgressStage('失败', result && result.message ? result.message : '目标执行失败。');
         addFailureMessage('目标执行失败', result);
         ackQueueAndContinue(queueId);
         return;
       }
       if (result.queued_due_to_web_busy) {
+        finishProgressStage('已加入队列', result.message || '目标已重新加入队列。');
         addMessage('assistant', result.message || '目标已重新加入队列。');
         ackQueueAndContinue(queueId);
         return;
       }
       reportActionResponse('goal_run', result || {});
+      finishProgressStage('已完成', result.message || result.reply || '目标已完成。');
       if (enqueueGoalQueue(result.goalQueue, goalUserText(goal))) {
         window.setTimeout(drainNextQueuedAction, 500);
       } else {
@@ -2406,6 +2374,7 @@
   }
 
   function requestDraftAction(action, prompt, userText, queueId) {
+    state.currentQueueId = queueId || '';
     addMessage('user', userText || '[' + action + ']');
     renderDraft(null);
     setWebRunLock(true);
@@ -2416,6 +2385,7 @@
       if (!result || !result.ok) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
+        finishProgressStage('失败', result && result.message ? result.message : '草稿生成失败。');
         addFailureMessage('草稿生成失败', result);
         ackQueueAndContinue(queueId);
         return;
@@ -2423,6 +2393,7 @@
       if (result.queued_due_to_web_busy) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
+        finishProgressStage('已加入队列', result.message || '已加入队列，上一个任务结束后会自动执行。');
         addMessage('assistant', result.message || '已加入队列，上一个任务结束后会自动执行。');
         if (queueId) {
           ackQueueAndContinue(queueId);
@@ -2434,6 +2405,7 @@
       if (!result.cards && !result.mindmap) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
+        finishProgressStage('未生成脑图', result.message || '没有可写入的卡片或脑图。');
         addMessage('assistant', '没有可写入的卡片或脑图。');
         ackQueueAndContinue(queueId);
         return;
@@ -2449,8 +2421,10 @@
         if (saved && saved.ok && saved.draft) {
           renderDraft(saved.draft);
           writeDraftForAiEditOperation(saved.draft);
+          finishProgressStage('已发送写入', '草稿已保存并发送给 MarginNote 写入。');
           ackQueueAndContinue(queueId);
         } else {
+          finishProgressStage('失败', saved && saved.message ? saved.message : '草稿保存失败。');
           addFailureMessage('草稿保存失败', saved);
           ackQueueAndContinue(queueId);
         }
@@ -2847,15 +2821,18 @@
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
       if (!result || !result.ok) {
+        finishProgressStage('失败', result && result.message ? result.message : '目标执行失败。');
         addFailureMessage('目标执行失败', result);
         return;
       }
       if (result.queued_due_to_web_busy) {
+        finishProgressStage('已加入队列', result.message || '目标已加入队列。');
         addMessage('assistant', result.message || '目标已加入队列。');
         refreshQueue();
         return;
       }
       reportActionResponse('goal_run', result || {});
+      finishProgressStage('已完成', result.message || result.reply || '目标已完成。');
       if (enqueueGoalQueue(result.goalQueue, goalUserText(goal))) {
         window.setTimeout(drainNextQueuedAction, 500);
       } else {
@@ -2931,10 +2908,15 @@
   }
 
   function stopCurrent() {
+    var queueId = state.currentQueueId || '';
     setWebRunLock(false);
+    state.runActive = false;
+    finishProgressStage('已停止', '已请求终止当前生成；不会继续写入当前队列项。');
     window.CodexPanel.setBusy({busy: false});
-    postCompanion('stop_current', {}, function(result) {
-      renderControls({queue: result.queue || state.queue});
+    postCompanion('stop_current', {queue_id: queueId}, function(result) {
+      state.currentQueueId = '';
+      renderControls(result || {queue: state.queue});
+      refreshQueue();
     });
   }
 

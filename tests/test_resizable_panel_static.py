@@ -90,7 +90,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("draftWriteFailed", self.main)
         self.assertIn("draftWritten", self.main)
 
-    def test_ai_edit_reject_removes_only_nodes_from_the_recent_write_transaction(self) -> None:
+    def test_ai_edit_reject_rolls_back_created_cards_without_structure_only_unlink(self) -> None:
         for marker in [
             "beginAiEditTransaction",
             "recordAiEditCreatedNote",
@@ -114,7 +114,34 @@ class ResizablePanelContractTest(unittest.TestCase):
         reject_body = self.main.split("CodexAssistantAddon.prototype.rejectAiEditTransaction", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1
         )[0]
-        self.assertIn("deleteNoteForAiEdit(note, ctx)", reject_body)
+        self.assertIn("rollbackAiEditTransactionWithUndo(transaction, ctx)", reject_body)
+        self.assertIn("aiEditUndoRollbackAttempted", reject_body)
+        self.assertIn("deleteNoteForAiEdit(note, ctx, noteId)", reject_body)
+        self.assertIn("method: result ? result.method", reject_body)
+        self.assertIn("remainingAiEditNoteIds", self.main)
+        self.assertIn("UndoManager.sharedInstance().undo()", self.main)
+        self.assertIn("verifyAiEditNoteDeleted", self.main)
+        self.assertIn("resolveAiEditNoteById", self.main)
+        self.assertIn("databaseNoteById", self.main)
+        self.assertIn("getNoteById", self.main)
+        self.assertIn("deleteBookNoteTree", self.main)
+        self.assertIn("deleteBookNote", self.main)
+        self.assertIn("databaseDeleteMethods", self.main)
+        self.assertIn("markAiEditDatabaseChanged", self.main)
+        self.assertIn("setNotebookSyncDirty", self.main)
+        self.assertIn("savedb", self.main)
+        self.assertIn("callableMethodVariants", self.main)
+        self.assertIn("selectorVariants(method)", self.main)
+        self.assertIn("still-exists-after-delete", self.main)
+        delete_body = self.main.split("function deleteNoteForAiEdit", 1)[1].split(
+            "\n  function pruneAiEditDeleteFailures", 1
+        )[0]
+        self.assertIn("databaseDeleteMethods", delete_body)
+        self.assertNotIn("parentMethods", delete_body)
+        self.assertNotIn("notebookMethods", delete_body)
+        self.assertNotIn("noteMethods", delete_body)
+        self.assertNotIn("removeFromParent", delete_body)
+        self.assertNotIn("removeChild", delete_body)
         self.assertIn("Application.sharedInstance().refreshAfterDBChanged", reject_body)
 
     def test_visible_ui_is_margin_note_style_ai_chat_only(self) -> None:

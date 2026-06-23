@@ -29,7 +29,7 @@ def event(name: str, topicid: str = "T1", bookmd5: str = "B1", **extra: Any) -> 
         "event": name,
         "topicid": topicid,
         "bookmd5": bookmd5,
-        "pluginVersion": "0.4.8",
+        "pluginVersion": "0.4.9",
         "extra": extra,
     }
 
@@ -67,7 +67,7 @@ class SingleDocumentAcceptanceTests(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                 ],

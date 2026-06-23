@@ -477,10 +477,11 @@ class CompanionControlsTests(unittest.TestCase):
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
                             "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                         ],
                     },
                 },
@@ -543,10 +544,11 @@ class CompanionControlsTests(unittest.TestCase):
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
                             "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                         ],
                     },
                 },
@@ -607,10 +609,11 @@ class CompanionControlsTests(unittest.TestCase):
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
                             "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                         ],
                     },
                 },
@@ -636,7 +639,7 @@ class CompanionControlsTests(unittest.TestCase):
             (extension / "web").mkdir(parents=True)
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\n",
                 encoding="utf-8",
             )
             for relative in ("CodexWebPanelController.js", "web/app.js", "web/index.html", "web/app.css"):
@@ -679,10 +682,11 @@ class CompanionControlsTests(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
             )
 
@@ -729,10 +733,11 @@ class CompanionControlsTests(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
             )
             self.assertEqual(
@@ -744,10 +749,11 @@ class CompanionControlsTests(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
             )
             self.assertIn("native-handler-features", runtime["runtimeHandlerStaleActions"])
@@ -1204,7 +1210,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.8",
+                    "pluginVersion": "0.4.9",
                     "extra": {
                         "hasNativeHighlightCandidate": True,
                         "hasAnnotatedExportCandidate": False,
@@ -1231,7 +1237,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.8",
+                    "pluginVersion": "0.4.9",
                     "extra": {
                         "hasNativeHighlightCandidate": False,
                         "hasAnnotatedExportCandidate": True,
@@ -1263,7 +1269,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.8",
+                    "pluginVersion": "0.4.9",
                     "extra": {
                         "activeSelectionLength": 26,
                         "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
@@ -1296,7 +1302,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.8",
+                    "pluginVersion": "0.4.9",
                     "extra": {
                         "activeSelectionLength": 0,
                         "candidateMethods": ["documentController.highlightFromSelection"],
@@ -1328,7 +1334,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.8",
+                    "pluginVersion": "0.4.9",
                     "extra": {
                         "activeSelectionLength": 18,
                         "candidateMethods": [],
@@ -1862,29 +1868,40 @@ class CompanionControlsTests(unittest.TestCase):
             companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
             captured: dict[str, Any] = {}
 
-            class FakeCompleted:
+            class FakePopen:
+                pid = 4321
                 returncode = 0
-                stdout = ""
-                stderr = ""
 
-            def fake_run(args: list[str], **kwargs: Any) -> FakeCompleted:
+                def __init__(self, args: list[str], **kwargs: Any) -> None:
+                    captured["args"] = args
+                    captured["env"] = kwargs.get("env")
+                    output_path = Path(args[args.index("--output-last-message") + 1])
+                    output_path.write_text("fast cli output", encoding="utf-8")
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    captured["timeout"] = timeout
+                    captured["input"] = input
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            def fake_popen(args: list[str], **kwargs: Any) -> FakePopen:
                 captured["args"] = args
-                captured["timeout"] = kwargs.get("timeout")
                 captured["env"] = kwargs.get("env")
-                output_path = Path(args[args.index("--output-last-message") + 1])
-                output_path.write_text("fast cli output", encoding="utf-8")
-                return FakeCompleted()
+                return FakePopen(args, **kwargs)
 
-            old_run = companion.subprocess.run
-            companion.subprocess.run = fake_run
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = fake_popen
             try:
                 text, backend = companion.call_codex_cli({"prompt": "生成脑图"}, "generate_mindmap")
             finally:
-                companion.subprocess.run = old_run
+                companion.subprocess.Popen = old_popen
 
             self.assertEqual(text, "fast cli output")
             self.assertEqual(backend, "codex-cli")
             self.assertEqual(captured["timeout"], 75)
+            self.assertEqual(captured["input"], "")
             self.assertIn("model_reasoning_effort=medium", captured["args"])
             self.assertNotIn("--enable", captured["args"])
             self.assertNotIn("--disable", captured["args"])
@@ -2027,10 +2044,10 @@ class CompanionControlsTests(unittest.TestCase):
                     "available": True,
                     "repo": settings["githubRepo"],
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.8",
-                    "assetName": "CodexCompanion-0.4.8-latest-dist.zip",
-                    "downloadUrl": "https://example/CodexCompanion-0.4.8-latest-dist.zip",
-                    "message": "发现新版本 0.4.8。",
+                    "latestVersion": "0.4.9",
+                    "assetName": "CodexCompanion-0.4.9-latest-dist.zip",
+                    "downloadUrl": "https://example/CodexCompanion-0.4.9-latest-dist.zip",
+                    "message": "发现新版本 0.4.9。",
                 }
 
             def fake_install(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
@@ -2040,7 +2057,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "state": "installing",
                     "repo": settings["githubRepo"],
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.8",
+                    "latestVersion": "0.4.9",
                     "message": "已开始安装更新。",
                 }
 
@@ -2060,7 +2077,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(checked["update"]["available"])
             self.assertEqual(installed["update"]["state"], "installing")
             self.assertEqual(calls, ["LiuWhale/marginnote-assistant", "install:LiuWhale/marginnote-assistant"])
-            self.assertEqual(status["update"]["latestVersion"], "0.4.8")
+            self.assertEqual(status["update"]["latestVersion"], "0.4.9")
 
     def test_settings_goal_upload_stop_and_permission_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2160,6 +2177,73 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(settings_result["settings"]["aiBackend"], "codex_cli")
             self.assertEqual(settings_result["goal"]["title"], "读懂 KNOWS")
             self.assertEqual(len(settings_result["files"]), 1)
+
+    def test_stop_current_clears_web_busy_and_acks_current_queue_item(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            queued = companion.enqueue_command(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "test",
+                    "command": {
+                        "rawAction": "generate_mindmap",
+                        "prompt": "生成脑图",
+                        "source": "test",
+                    },
+                }
+            )
+            self.assertTrue(queued["ok"])
+            queue_id = queued["queued"]["id"]
+            companion.handle_action({"action": "web_busy_update", "busy": True})
+
+            stopped = companion.handle_action(
+                {
+                    "action": "stop_current",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "queue_id": queue_id,
+                }
+            )
+
+            self.assertTrue(stopped["ok"])
+            self.assertEqual(stopped["queue"]["pending"], 0)
+            self.assertFalse(companion.web_busy_status()["busy"])
+            self.assertFalse(companion.active_run_status()["active"])
+            self.assertEqual(companion.poll_commands("T1", "B1")["pending"], 0)
+
+    def test_stop_current_cancels_registered_generation_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            class FakeProcess:
+                pid = 43210
+
+                def __init__(self) -> None:
+                    self.terminated = False
+                    self.killed = False
+
+                def poll(self) -> None:
+                    return None
+
+                def terminate(self) -> None:
+                    self.terminated = True
+
+                def wait(self, timeout: float | None = None) -> None:
+                    raise companion.subprocess.TimeoutExpired(["codex"], timeout or 0)
+
+                def kill(self) -> None:
+                    self.killed = True
+
+            fake = FakeProcess()
+            companion.register_current_generation_process(fake, "codex-cli")
+
+            stopped = companion.handle_action({"action": "stop_current", "topicid": "T1", "bookmd5": "B1"})
+
+            self.assertTrue(stopped["ok"])
+            self.assertTrue(stopped["cancelledProcess"]["attempted"])
+            self.assertTrue(fake.terminated or fake.killed)
+            self.assertIsNone(companion.current_generation_process())
 
     def test_ai_backend_probe_reports_effective_backend_without_model_call(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

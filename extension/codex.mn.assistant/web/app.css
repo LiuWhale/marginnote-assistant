@@ -1183,52 +1183,16 @@ input[type="file"] {
 }
 
 .reply-mindmap-actions {
-  position: relative;
   display: inline-flex;
   align-items: flex-start;
   margin-top: 9px;
 }
 
-.reply-mindmap-trigger {
+.reply-mindmap-tree-button {
   border-color: #bfdcd2;
   background: #f5fbf8;
   color: var(--accent-strong);
   font-weight: 700;
-}
-
-.reply-mindmap-menu {
-  position: absolute;
-  left: 0;
-  top: 34px;
-  z-index: 10;
-  display: grid;
-  min-width: 218px;
-  padding: 7px;
-  border: 1px solid #cfd6dd;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-}
-
-.reply-mindmap-menu.hidden {
-  display: none;
-}
-
-.reply-mindmap-menu-item {
-  width: 100%;
-  min-height: 32px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.reply-mindmap-menu-item:hover {
-  background: #eef8f4;
-  color: var(--accent-strong);
 }
 
 .ai-edit-operation {

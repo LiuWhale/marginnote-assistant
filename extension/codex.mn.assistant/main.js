@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.8';
+  var PluginVersion = '0.4.9';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -17,7 +17,8 @@ JSB.newAddon = function(mainPath) {
     'selection-popup-notebook-rebind-v1',
     'native-highlight-selection-text-resolver-v1',
     'context-refresh-clears-stale-selection-v1',
-    'ai-edit-transaction-rollback-v1'
+    'ai-edit-transaction-rollback-v1',
+    'ai-edit-undo-rollback-v2'
   ];
 
   function isNil(value) {
@@ -653,55 +654,234 @@ JSB.newAddon = function(mainPath) {
     }, {scanned: 0}, 0);
   }
 
-  function tryCallAiEditMethod(obj, method, argsList) {
-    if (!obj || !method || !objectRespondsToMethod(obj, method)) return false;
-    argsList = argsList || [[]];
-    for (var i = 0; i < argsList.length; i++) {
-      try {
-        if (typeof obj[method] === 'function') {
-          obj[method].apply(obj, argsList[i]);
-          return true;
-        }
-      } catch (err) {}
-    }
-    return false;
+  function refreshAiEditNotebook(ctx) {
+    if (!ctx || !ctx.topicId) return ctx;
+    try {
+      var notebook = Database.sharedInstance().getNotebookById(String(ctx.topicId));
+      if (notebook) ctx.notebook = notebook;
+    } catch (err) {}
+    return ctx;
   }
 
-  function deleteNoteForAiEdit(note, ctx) {
-    if (!note) return {ok: false, method: '', reason: 'missing-note'};
-    var noteId = noteIdentifier(note);
-    var noteMethods = ['deleteNote', 'removeNote', 'delete', 'remove', 'removeFromParent', 'removeFromNotebook', 'moveToTrash', 'trash'];
-    for (var i = 0; i < noteMethods.length; i++) {
-      if (tryCallAiEditMethod(note, noteMethods[i], [[]])) {
-        return {ok: true, method: 'note.' + noteMethods[i], noteId: noteId};
+  function aiEditDatabases() {
+    var out = [];
+    function add(label, db) {
+      if (!db) return;
+      for (var i = 0; i < out.length; i++) {
+        if (out[i].object === db) return;
       }
+      out.push({label: label, object: db});
     }
-    var parent = valueOf(note, 'parentNote') || valueOf(note, 'parent') || valueOf(note, 'superNote');
-    var parentMethods = ['removeChild', 'deleteChild', 'removeNote', 'deleteNote', 'remove'];
-    for (var j = 0; j < parentMethods.length; j++) {
-      if (tryCallAiEditMethod(parent, parentMethods[j], [[note], [noteId]])) {
-        return {ok: true, method: 'parent.' + parentMethods[j], noteId: noteId};
-      }
-    }
-    var notebookMethods = ['removeNote', 'deleteNote', 'removeNotebookNote', 'deleteNotebookNote', 'removeChild'];
-    for (var k = 0; k < notebookMethods.length; k++) {
-      if (tryCallAiEditMethod(ctx && ctx.notebook, notebookMethods[k], [[note], [noteId]])) {
-        return {ok: true, method: 'notebook.' + notebookMethods[k], noteId: noteId};
-      }
-    }
-    var db = null;
     try {
-      db = Database.sharedInstance();
-    } catch (dbErr) {
-      db = null;
+      if (typeof Database !== 'undefined' && Database.sharedInstance) add('Database', Database.sharedInstance());
+    } catch (err) {}
+    try {
+      if (typeof MbModelTool !== 'undefined' && MbModelTool.sharedInstance) add('MbModelTool', MbModelTool.sharedInstance());
+    } catch (err2) {}
+    return out;
+  }
+
+  function aiEditDatabase() {
+    var dbs = aiEditDatabases();
+    return dbs.length ? dbs[0].object : null;
+  }
+
+  function callAiEditMethodValue(obj, method, args) {
+    if (!obj || !method || !objectRespondsToMethod(obj, method)) return null;
+    var callables = callableMethodVariants(obj, method);
+    args = args || [];
+    for (var i = 0; i < callables.length; i++) {
+      try {
+        return {ok: true, method: callables[i], value: obj[callables[i]].apply(obj, args)};
+      } catch (err) {}
     }
-    var dbMethods = ['removeNote', 'deleteNote', 'removeNotebookNote', 'deleteNotebookNote', 'deleteObject', 'removeObject'];
-    for (var m = 0; m < dbMethods.length; m++) {
-      if (tryCallAiEditMethod(db, dbMethods[m], [[note], [noteId]])) {
-        return {ok: true, method: 'database.' + dbMethods[m], noteId: noteId};
+    return null;
+  }
+
+  function databaseNoteById(noteId) {
+    noteId = safeString(noteId);
+    if (!noteId) return null;
+    var dbs = aiEditDatabases();
+    for (var i = 0; i < dbs.length; i++) {
+      var db = dbs[i].object;
+      var result = callAiEditMethodValue(db, 'getNoteById', [noteId]) ||
+        callAiEditMethodValue(db, 'getNoteFromId', [noteId]);
+      if (result && !isNil(result.value)) return result.value;
+    }
+    return null;
+  }
+
+  function markAiEditDatabaseChanged(topicId) {
+    topicId = safeString(topicId);
+    var dbs = aiEditDatabases();
+    for (var i = 0; i < dbs.length; i++) {
+      var db = dbs[i].object;
+      if (topicId) {
+        callAiEditMethodValue(db, 'setNotebookSyncDirty', [topicId]);
+        callAiEditMethodValue(db, 'setTopicDirty', [topicId]);
+      }
+      callAiEditMethodValue(db, 'savedb', []);
+    }
+  }
+
+  function resolveAiEditNoteById(ctx, noteId) {
+    noteId = safeString(noteId);
+    if (!noteId) return null;
+    var note = ctx ? findNoteById(ctx.notebook, noteId) : null;
+    if (note) return note;
+    if (ctx) {
+      refreshAiEditNotebook(ctx);
+      note = findNoteById(ctx.notebook, noteId);
+      if (note) return note;
+    }
+    return databaseNoteById(noteId);
+  }
+
+  function verifyAiEditNoteDeleted(noteId, ctx) {
+    noteId = safeString(noteId);
+    if (!noteId) return false;
+    if (databaseNoteById(noteId)) return false;
+    if (!ctx) return true;
+    refreshAiEditNotebook(ctx);
+    return !findNoteById(ctx.notebook, noteId);
+  }
+
+  function callableMethodVariants(obj, method) {
+    var out = [];
+    if (!obj || !method) return out;
+    var variants = selectorVariants(method);
+    for (var i = 0; i < variants.length; i++) {
+      try {
+        if (typeof obj[variants[i]] === 'function') out.push(variants[i]);
+      } catch (err) {}
+    }
+    return out;
+  }
+
+  function tryCallAiEditMethod(obj, method, argsList) {
+    if (!obj || !method || !objectRespondsToMethod(obj, method)) return null;
+    argsList = argsList || [[]];
+    for (var i = 0; i < argsList.length; i++) {
+      var result = callAiEditMethodValue(obj, method, argsList[i]);
+      if (result && result.ok) {
+        return {ok: true, method: result.method};
       }
     }
-    return {ok: false, method: '', reason: 'no-delete-method', noteId: noteId};
+    return null;
+  }
+
+  function attemptVerifiedAiEditDelete(label, obj, methods, argsList, noteId, ctx) {
+    if (!obj) return null;
+    var lastFailure = null;
+    for (var i = 0; i < methods.length; i++) {
+      var call = tryCallAiEditMethod(obj, methods[i], argsList);
+      if (!call || !call.ok) continue;
+      var methodName = label + '.' + call.method;
+      if (verifyAiEditNoteDeleted(noteId, ctx)) {
+        return {ok: true, method: methodName, noteId: noteId};
+      }
+      lastFailure = {ok: false, method: methodName, reason: 'still-exists-after-delete', noteId: noteId};
+    }
+    return lastFailure;
+  }
+
+  function deleteNoteForAiEdit(note, ctx, noteId) {
+    noteId = safeString(noteId || noteIdentifier(note));
+    if (!noteId) return {ok: false, method: '', reason: 'missing-note-id'};
+    if (!note) note = resolveAiEditNoteById(ctx, noteId);
+    if (!note && verifyAiEditNoteDeleted(noteId, ctx)) {
+      return {ok: true, method: 'already-deleted', noteId: noteId};
+    }
+    var databaseDeleteMethods = ['deleteBookNoteTree', 'deleteBookNote', 'removeNote', 'deleteNote', 'removeNotebookNote', 'deleteNotebookNote', 'deleteObject', 'removeObject'];
+    var argsList = [[noteId]];
+    if (note) {
+      argsList.push([note]);
+      argsList.push([note, noteId]);
+    }
+    var dbs = aiEditDatabases();
+    var lastFailure = null;
+    for (var i = 0; i < dbs.length; i++) {
+      var result = attemptVerifiedAiEditDelete('database.' + dbs[i].label, dbs[i].object, databaseDeleteMethods, argsList, noteId, ctx);
+      if (result && result.ok) return result;
+      if (result) lastFailure = result;
+    }
+    if (verifyAiEditNoteDeleted(noteId, ctx)) {
+      return {ok: true, method: 'deleted-by-related-node', noteId: noteId};
+    }
+    if (lastFailure) return lastFailure;
+    return {ok: false, method: 'database', reason: 'database-delete-unavailable', noteId: noteId};
+  }
+
+  function pruneAiEditDeleteFailures(failed, ctx) {
+    var remaining = [];
+    for (var i = 0; i < failed.length; i++) {
+      var item = failed[i];
+      if (!verifyAiEditNoteDeleted(item.noteId, ctx)) remaining.push(item);
+    }
+    return remaining;
+  }
+
+  function remainingAiEditNoteIds(noteIds, ctx) {
+    var ids = toArray(noteIds);
+    var remaining = [];
+    for (var i = 0; i < ids.length; i++) {
+      var noteId = safeString(ids[i]);
+      if (noteId && !verifyAiEditNoteDeleted(noteId, ctx)) remaining.push(noteId);
+    }
+    return remaining;
+  }
+
+  function rollbackAiEditTransactionWithUndo(transaction, ctx) {
+    var ids = transaction ? transaction.createdNoteIds : [];
+    var before = remainingAiEditNoteIds(ids, ctx);
+    var topicId = ctx ? ctx.topicId : safeString(transaction ? transaction.topicid : '');
+    if (!before.length) {
+      return {ok: true, method: 'undo-already-deleted', deleted: countOf(ids), remaining: [], reason: ''};
+    }
+    var manager = null;
+    try {
+      manager = UndoManager.sharedInstance();
+    } catch (err) {}
+    if (!manager || !objectRespondsToMethod(manager, 'undo')) {
+      return {ok: false, method: 'undo', deleted: 0, remaining: before, reason: 'undo-unavailable'};
+    }
+    var canUndo = true;
+    try {
+      if (typeof manager.canUndo === 'function') canUndo = !!manager.canUndo();
+      else if (!isNil(manager.canUndo)) canUndo = !!manager.canUndo;
+    } catch (canUndoErr) {}
+    if (!canUndo) {
+      return {ok: false, method: 'undo', deleted: 0, remaining: before, reason: 'undo-stack-empty'};
+    }
+    try {
+      UndoManager.sharedInstance().undo();
+    } catch (undoErr) {
+      return {ok: false, method: 'undo', deleted: 0, remaining: before, reason: 'undo-threw:' + safeString(undoErr)};
+    }
+    markAiEditDatabaseChanged(topicId);
+    try {
+      if (ctx && ctx.topicId) Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
+    } catch (refreshErr) {}
+    var after = remainingAiEditNoteIds(ids, ctx);
+    return {
+      ok: after.length === 0,
+      method: 'undo',
+      deleted: before.length - after.length,
+      remaining: after,
+      reason: after.length ? 'created-notes-still-exist-after-undo' : ''
+    };
+  }
+
+  function aiEditFallbackContext(topicId) {
+    topicId = safeString(topicId);
+    if (!topicId) return null;
+    try {
+      var notebook = Database.sharedInstance().getNotebookById(topicId);
+      if (!notebook) return null;
+      return {controller: null, notebook: notebook, document: null, topicId: topicId};
+    } catch (err) {
+      return null;
+    }
   }
 
   function probeCandidateMethods(label, obj, methods, found) {
@@ -2202,20 +2382,40 @@ JSB.newAddon = function(mainPath) {
       if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(missing);
       return missing;
     }
-    var ctx = this.resolveNotebookAndDocument();
+    var ctx = this.resolveNotebookAndDocument() || aiEditFallbackContext(transaction.topicid);
     var deleted = 0;
     var failed = [];
-    var addon = this;
-    UndoManager.sharedInstance().undoGrouping('Codex Reject AI Edit', ctx ? ctx.topicId : transaction.topicid, function() {
-      for (var i = transaction.createdNoteIds.length - 1; i >= 0; i--) {
-        var noteId = transaction.createdNoteIds[i];
-        var note = transaction.createdNotes[i] || (ctx ? findNoteById(ctx.notebook, noteId) : null);
-        var result = deleteNoteForAiEdit(note, ctx);
-        if (result && result.ok) deleted += 1;
-        else failed.push({noteId: noteId, reason: result ? result.reason : 'unknown'});
-      }
+    var undoRollback = rollbackAiEditTransactionWithUndo(transaction, ctx);
+    this.postEvent('aiEditUndoRollbackAttempted', {
+      transactionId: transactionId,
+      ok: undoRollback.ok,
+      method: undoRollback.method,
+      deleted: undoRollback.deleted,
+      remaining: countOf(undoRollback.remaining),
+      reason: undoRollback.reason || ''
     });
+    deleted = undoRollback.deleted || 0;
+    if (!undoRollback.ok) {
+      var remainingIds = countOf(undoRollback.remaining) ? undoRollback.remaining : transaction.createdNoteIds;
+      UndoManager.sharedInstance().undoGrouping('Codex Reject AI Edit', ctx ? ctx.topicId : transaction.topicid, function() {
+        for (var i = remainingIds.length - 1; i >= 0; i--) {
+          var noteId = remainingIds[i];
+          var note = resolveAiEditNoteById(ctx, noteId);
+          var result = deleteNoteForAiEdit(note, ctx, noteId);
+          if (result && result.ok) deleted += 1;
+          else failed.push({
+            noteId: noteId,
+            method: result ? result.method : '',
+            reason: result ? result.reason : 'unknown'
+          });
+        }
+      });
+    }
+    markAiEditDatabaseChanged(ctx ? ctx.topicId : transaction.topicid);
     if (ctx && ctx.topicId) Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
+    var originalFailed = failed.length;
+    if (failed.length && ctx) failed = pruneAiEditDeleteFailures(failed, ctx);
+    deleted += originalFailed - failed.length;
     var ok = failed.length === 0;
     if (ok && this.aiEditTransactions) delete this.aiEditTransactions[transactionId];
     var payload = {
@@ -2225,7 +2425,14 @@ JSB.newAddon = function(mainPath) {
       deleted: deleted,
       failed: failed.length,
       message: ok ? '已删除本次新增内容。' : '部分新增内容删除失败，请手动撤销。',
-      failures: failed
+      failures: failed,
+      undoRollback: {
+        ok: undoRollback.ok,
+        method: undoRollback.method,
+        deleted: undoRollback.deleted,
+        remaining: countOf(undoRollback.remaining),
+        reason: undoRollback.reason || ''
+      }
     };
     this.postEvent('aiEditTransactionRejected', payload);
     if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(payload);

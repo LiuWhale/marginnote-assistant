@@ -254,26 +254,36 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertNotIn("showFollowUpGuides(action, prompt)", request_body)
         self.assertIn("reportActionResponse(action, result || {})", request_body)
 
-    def test_latest_reply_exposes_mindmap_action_menu(self) -> None:
+    def test_latest_reply_exposes_single_direct_mindmap_tree_button(self) -> None:
+        controls_body = self.js.split("function buildReplyMindmapControls", 1)[1].split(
+            "\n  function runGuideItem", 1
+        )[0]
         for marker in [
             "addAssistantReplyWithActions",
-            "reply-mindmap-trigger",
-            "reply-mindmap-menu",
-            "回答添加到脑图",
-            "对话添加到脑图（双向同步）",
-            "在脑图中创建卡片树",
+            "reply-mindmap-tree-button",
+            "生成脑图树",
             "runReplyMindmapAction",
         ]:
             self.assertIn(marker, self.js + self.css)
+        for removed in [
+            "reply-mindmap-menu",
+            "reply-mindmap-menu-item",
+            "回答添加到脑图",
+            "对话添加到脑图（双向同步）",
+            "在脑图中创建卡片树",
+            "aria-expanded",
+        ]:
+            self.assertNotIn(removed, controls_body + self.css)
 
     def test_reply_card_tree_prompt_uses_explicit_create_card_tree_command(self) -> None:
         for marker in [
             "[create_card_tree]",
-            "根据上面的回答创建一个结构化的卡片树（使用markdown大纲格式）",
+            "根据上面的回答创建一个结构化的脑图树（使用markdown大纲格式）",
             "buildReplyMindmapPrompt",
-            "latestChatTranscript",
         ]:
             self.assertIn(marker, self.js)
+        self.assertNotIn("[answer_to_mindmap]", self.js)
+        self.assertNotIn("[conversation_to_mindmap]", self.js)
 
     def test_mindmap_prompts_request_complete_multi_level_outline(self) -> None:
         for marker in [
@@ -323,8 +333,26 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("等待确认", self.js)
 
     def test_progress_copy_matches_ai_chat_only_surface(self) -> None:
+        self.assertIn("progressActiveHint", self.js)
+        self.assertIn("progressFinishedHint", self.js)
+        self.assertIn("formatProgressText(elapsed, active)", self.js)
+        self.assertIn("finishProgressStage('失败'", self.js)
+        self.assertIn("finishProgressStage('未生成脑图'", self.js)
         self.assertIn("可继续输入；运行中可点停止。", self.js)
+        self.assertIn("可继续输入。", self.js)
         self.assertNotIn("可继续输入或点击按钮；忙碌时会在消息里给出后续引导。", self.js)
+
+    def test_stop_button_cancels_current_queue_item_and_busy_state(self) -> None:
+        self.assertIn("currentQueueId", self.js)
+        for function_name in ["requestTextAction", "requestGoalAction", "requestDraftAction"]:
+            body = self.js.split("function " + function_name, 1)[1].split("\n  function ", 1)[0]
+            self.assertIn("state.currentQueueId = queueId || ''", body)
+        stop_body = self.js.split("function stopCurrent", 1)[1].split("\n  function writeAcceptedDraft", 1)[0]
+        self.assertIn("var queueId = state.currentQueueId || ''", stop_body)
+        self.assertIn("finishProgressStage('已停止'", stop_body)
+        self.assertIn("queue_id: queueId", stop_body)
+        self.assertIn("state.currentQueueId = ''", stop_body)
+        self.assertIn("setWebRunLock(false)", stop_body)
 
     def test_required_controls_match_minimal_ai_chat_surface(self) -> None:
         required_body = self.js.split("var requiredControlIds = [", 1)[1].split("];", 1)[0]
@@ -368,7 +396,8 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".ai-chat-status-row", self.css)
         self.assertIn(".context-scope-control", self.css)
         self.assertIn(".scope-button.active", self.css)
-        self.assertIn(".reply-mindmap-menu", self.css)
+        self.assertIn(".reply-mindmap-tree-button", self.css)
+        self.assertNotIn(".reply-mindmap-menu", self.css)
         self.assertIn(".ai-edit-operation", self.css)
 
     def test_parity_matrix_document_tracks_builtin_ai_chat_requirements(self) -> None:

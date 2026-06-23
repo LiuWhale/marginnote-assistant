@@ -2,6 +2,14 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.9 - 2026-06-23
+
+### Fixed
+
+- Fixed Stop so it actually terminates the active Codex CLI generation process instead of only setting a stop flag.
+- Fixed queued generation cancellation by sending the active queue id from the web panel, clearing the web busy lock, and acknowledging the cancelled queue item.
+- Fixed stopped runs being shown as ordinary failures; stopped generations now freeze as `已停止` and do not continue writing cards or mind maps.
+
 ## 0.4.8 - 2026-06-23
 
 ### Fixed

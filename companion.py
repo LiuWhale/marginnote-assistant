@@ -8,11 +8,13 @@ import json
 import hashlib
 import os
 import re
+import signal
 import shlex
 import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
 import uuid
@@ -67,9 +69,12 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.8"
+CURRENT_PLUGIN_VERSION = "0.4.9"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
+CURRENT_GENERATION_PROCESS: Any | None = None
+CURRENT_GENERATION_PROCESS_LABEL = ""
 REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-arm-next-selection-default",
     "native-highlight-prefer-next-selection-v1",
@@ -81,6 +86,7 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-selection-text-resolver-v1",
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
+    "ai-edit-undo-rollback-v2",
 ]
 ONEDRIVE_COMPANION_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 PDF_EXPORT_DIR = ONEDRIVE_COMPANION_DIR / "exports"
@@ -851,6 +857,91 @@ def clear_stop() -> None:
         pass
 
 
+def register_current_generation_process(process: Any, label: str) -> None:
+    global CURRENT_GENERATION_PROCESS, CURRENT_GENERATION_PROCESS_LABEL
+    with CURRENT_GENERATION_PROCESS_LOCK:
+        CURRENT_GENERATION_PROCESS = process
+        CURRENT_GENERATION_PROCESS_LABEL = str(label or "generation")
+
+
+def current_generation_process() -> Any | None:
+    with CURRENT_GENERATION_PROCESS_LOCK:
+        return CURRENT_GENERATION_PROCESS
+
+
+def clear_current_generation_process(process: Any | None = None) -> None:
+    global CURRENT_GENERATION_PROCESS, CURRENT_GENERATION_PROCESS_LABEL
+    with CURRENT_GENERATION_PROCESS_LOCK:
+        if process is not None and CURRENT_GENERATION_PROCESS is not process:
+            return
+        CURRENT_GENERATION_PROCESS = None
+        CURRENT_GENERATION_PROCESS_LABEL = ""
+
+
+def _signal_generation_process(process: Any, sig: int) -> str:
+    pid = int(getattr(process, "pid", 0) or 0)
+    if pid > 0:
+        try:
+            os.killpg(os.getpgid(pid), sig)
+            return "process-group"
+        except Exception:
+            pass
+    if sig == signal.SIGTERM:
+        process.terminate()
+        return "terminate"
+    process.kill()
+    return "kill"
+
+
+def cancel_current_generation_process() -> dict[str, Any]:
+    with CURRENT_GENERATION_PROCESS_LOCK:
+        process = CURRENT_GENERATION_PROCESS
+        label = CURRENT_GENERATION_PROCESS_LABEL
+    if process is None:
+        return {"attempted": False, "message": "no active generation process"}
+    try:
+        returncode = process.poll()
+    except Exception:
+        returncode = None
+    if returncode is not None:
+        clear_current_generation_process(process)
+        return {
+            "attempted": False,
+            "alreadyExited": True,
+            "returncode": returncode,
+            "label": label,
+        }
+    method = ""
+    killed = False
+    try:
+        method = _signal_generation_process(process, signal.SIGTERM)
+        try:
+            process.wait(timeout=1.5)
+        except subprocess.TimeoutExpired:
+            method = _signal_generation_process(process, signal.SIGKILL)
+            killed = True
+            try:
+                process.wait(timeout=1.0)
+            except Exception:
+                pass
+    except Exception as exc:
+        clear_current_generation_process(process)
+        return {
+            "attempted": True,
+            "terminated": False,
+            "label": label,
+            "message": f"cancel failed: {exc}",
+        }
+    clear_current_generation_process(process)
+    return {
+        "attempted": True,
+        "terminated": True,
+        "killed": killed,
+        "method": method,
+        "label": label,
+    }
+
+
 def queue_status_payload(topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
     topic_id = topic_id or ""
     book_md5 = book_md5 or ""
@@ -929,7 +1020,7 @@ def stopped_response_if_needed(action: str) -> dict[str, Any] | None:
     return {
         "ok": False,
         "message": "已停止当前或下一步生成动作。",
-        "reply": "停止信号已生效。若请求已经发给外部模型，当前版本会在返回后忽略后续写入；完整异步中断将在后续版本接入。",
+        "reply": "停止信号已生效；当前生成会被取消，后续写入会被阻断。",
         "stopped": True,
         "stop": state,
     }
@@ -1913,7 +2004,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.8-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.9-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -2686,11 +2777,12 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
     if not isinstance(result, dict):
         result = {"ok": False, "message": "生成动作没有返回可用结果。"}
     ok = bool(result.get("ok"))
+    stopped = bool(result.get("stopped"))
     detail = str(result.get("message") or result.get("reply") or ("动作完成。" if ok else "动作失败。"))[:500]
     run = update_run_state(
         False,
         action=action,
-        stage="已完成" if ok else "失败",
+        stage="已停止" if stopped else ("已完成" if ok else "失败"),
         detail=detail,
         topicid=topic_id,
         bookmd5=book_md5,
@@ -4540,8 +4632,9 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
     reasoning = CODEX_CLI_REASONING[speed]
     CONTROL_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CONTROL_DIR / f"codex-cli-output-{uuid.uuid4().hex}.txt"
+    process = None
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             [
                 path,
                 "exec",
@@ -4556,18 +4649,25 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
                 str(output_path),
                 prompt,
             ],
-            check=False,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             cwd=str(ROOT),
             env=codex_cli_env(),
-            input="",
+            start_new_session=True,
         )
+        register_current_generation_process(process, "codex-cli")
+        stdout, stderr = process.communicate(input="", timeout=timeout)
+        returncode = process.returncode
     except subprocess.TimeoutExpired:
+        cancel_current_generation_process()
         return f"Codex CLI 调用超时（{timeout}s）。自动模式会回退到其他后端；强制 CLI 时请检查 CLI 登录状态。", "codex-cli-error"
     except Exception as exc:
         return f"Codex CLI 调用失败：{exc}", "codex-cli-error"
+    finally:
+        if process is not None:
+            clear_current_generation_process(process)
     final_text = ""
     try:
         final_text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
@@ -4576,11 +4676,11 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
             output_path.unlink()
         except FileNotFoundError:
             pass
-    stdout = (result.stdout or "").strip()
-    stderr = (result.stderr or "").strip()
-    if result.returncode == 0 and final_text:
+    stdout = (stdout or "").strip()
+    stderr = (stderr or "").strip()
+    if returncode == 0 and final_text:
         return final_text, "codex-cli"
-    if result.returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
+    if returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
         return stdout, "codex-cli"
     detail = stdout or stderr or "Codex CLI 返回为空。"
     if len(detail) > 1400:
@@ -5369,8 +5469,39 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             "queue": queue,
         }
     if action == "stop_current":
+        run_before = active_run_status()
+        topic_id = normalize_topic_id(payload) or str(run_before.get("topicid") or "")
+        book_md5 = normalize_book_md5(payload) or str(run_before.get("bookmd5") or "")
+        queue_id = str(payload.get("queue_id") or payload.get("_queue_id") or run_before.get("queue_id") or "")
         stop = request_stop(str(payload.get("reason") or "user requested stop"))
-        return {"ok": True, "message": "已发送停止信号。", "reply": "停止信号已发送；UI 会退出忙碌态，下一步生成动作会被阻断。", "stop": stop}
+        cancelled = cancel_current_generation_process()
+        web_busy = update_web_busy(False)
+        ack = None
+        if queue_id and topic_id:
+            ack_payload = {**payload, "topicid": topic_id, "bookmd5": book_md5, "ids": [queue_id]}
+            ack = ack_commands(ack_payload)
+        run = update_run_state(
+            False,
+            action=str(payload.get("currentAction") or run_before.get("action") or ""),
+            stage="已停止",
+            detail="已停止当前生成动作，未继续写入。",
+            topicid=topic_id,
+            bookmd5=book_md5,
+            queue_id=queue_id,
+            source=str(payload.get("source") or run_before.get("source") or ""),
+        )
+        queue = queue_status_payload(topic_id, book_md5)
+        return {
+            "ok": True,
+            "message": "已停止当前生成并清理运行锁。",
+            "reply": "已停止当前生成；不会继续写入当前队列项。",
+            "stop": stop,
+            "cancelledProcess": cancelled,
+            "web_busy": web_busy,
+            "acked": ack,
+            "run": run,
+            "queue": queue,
+        }
     if action == "history_list":
         return history_payload(payload)
     if action == "history_clear":

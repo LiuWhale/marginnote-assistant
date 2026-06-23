@@ -425,10 +425,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
                                 "selection-popup-diagnostics-v1",
                                 "native-highlight-selection-poll-v1",
                                 "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                             ],
                             "capabilityMatrix": {
                                 "nativeHighlightSelection": {
@@ -476,10 +477,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
                                 "selection-popup-diagnostics-v1",
                                 "native-highlight-selection-poll-v1",
                                 "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                             ],
                             "capabilityMatrix": {
                                 "nativeHighlightSelection": {
@@ -589,7 +591,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             extension.mkdir()
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\n",
                 encoding="utf-8",
             )
             doctor.EXT_DIR = extension
@@ -624,10 +626,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
             )
 
@@ -667,10 +670,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
             )
             self.assertEqual(
@@ -682,10 +686,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
             )
 
@@ -767,10 +772,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
                             "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                         ],
                         "capabilityMatrix": {
                             "nativeCards": {"available": True, "ready": True},

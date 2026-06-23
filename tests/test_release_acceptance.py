@@ -221,7 +221,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         native_highlight_evidence = {
             "ok": True,
             "path": "/tmp/native-highlight-evidence.json",
-            "event": {"event": "nativeHighlightSelectionPosted", "pluginVersion": "0.4.8"},
+            "event": {"event": "nativeHighlightSelectionPosted", "pluginVersion": "0.4.9"},
             "doctorHighlightCheck": {"name": "Native highlight blobs", "status": "OK", "detail": "1 rows have ZHIGHLIGHTS"},
         }
 
@@ -432,10 +432,11 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                         "selection-popup-diagnostics-v1",
                         "native-highlight-selection-poll-v1",
                         "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                     ],
                     "capabilityMatrix": {
                         "nativeCards": {"ready": True},
@@ -490,10 +491,11 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
                     "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
                 ],
                 "capabilityMatrix": {
                     "nativeCards": {"ready": True},
@@ -551,7 +553,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
             extension = Path(tmp) / "codex.mn.assistant"
             extension.mkdir(parents=True)
             (extension / "main.js").write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\n",
                 encoding="utf-8",
             )
             module.LIVE_EXTENSION = extension
@@ -624,10 +626,11 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                 "selection-popup-diagnostics-v1",
                 "native-highlight-selection-poll-v1",
                 "selection-popup-scene-observer-v1",
-    "selection-popup-notebook-rebind-v1",
+                            "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
+                            "ai-edit-undo-rollback-v2",
             ],
         )
         self.assertIn("missing-native-handler-feature:native-highlight-arm-next-selection-default", result["problems"])
@@ -1333,7 +1336,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         module = self.load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package = root / "CodexCompanion-0.4.8-latest-dist.zip"
+            package = root / "CodexCompanion-0.4.9-latest-dist.zip"
             package.write_bytes(b"pkg")
             expected_sha = module.sha256_file(package)
             evidence = {
@@ -1365,7 +1368,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         module = self.load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            package = root / "CodexCompanion-0.4.8-latest-dist.zip"
+            package = root / "CodexCompanion-0.4.9-latest-dist.zip"
             package.write_bytes(b"pkg")
             expected_sha = module.sha256_file(package)
             valid = {
