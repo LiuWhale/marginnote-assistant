@@ -2,6 +2,12 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.3 - 2026-06-23
+
+### Changed
+
+- Published a maintenance release to verify the in-plugin GitHub Release update flow from `0.4.2` to `0.4.3`.
+
 ## 0.4.2 - 2026-06-23
 
 ### Fixed
