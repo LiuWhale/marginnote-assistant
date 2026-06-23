@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" role="img" aria-label="Codex Companion toolbar icon">
+  <g fill="none" stroke="#111111" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 7.2v5.9"/>
+    <path d="M22 30.9v5.9"/>
+    <path d="M7.2 22h5.9"/>
+    <path d="M30.9 22h5.9"/>
+    <path d="M11.7 11.7l4.4 4.4"/>
+    <path d="M32.3 11.7l-4.4 4.4"/>
+    <path d="M11.7 32.3l4.4-4.4"/>
+    <path d="M32.3 32.3l-4.4-4.4"/>
+  </g>
+  <g fill="#111111">
+    <circle cx="22" cy="6.2" r="2.5"/>
+    <circle cx="22" cy="37.8" r="2.5"/>
+    <circle cx="6.2" cy="22" r="2.5"/>
+    <circle cx="37.8" cy="22" r="2.5"/>
+    <circle cx="10.8" cy="10.8" r="2.2"/>
+    <circle cx="33.2" cy="10.8" r="2.2"/>
+    <circle cx="10.8" cy="33.2" r="2.2"/>
+    <circle cx="33.2" cy="33.2" r="2.2"/>
+  </g>
+  <path d="M16.8 12.8h9.4l5 5v11.4c0 3-1.9 4.9-4.9 4.9h-8.1c-3 0-4.9-1.9-4.9-4.9V16.3c0-2.1 1.4-3.5 3.5-3.5z" fill="none" stroke="#111111" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M26.2 12.8v4.4c0 1.7 1 2.7 2.7 2.7h2.3" fill="none" stroke="#111111" stroke-width="3" stroke-linejoin="round"/>
+  <g stroke="#111111" stroke-width="2.6" stroke-linecap="round">
+    <path d="M18.5 23h7.8"/>
+    <path d="M18.5 27.5h9.2"/>
+  </g>
+</svg>

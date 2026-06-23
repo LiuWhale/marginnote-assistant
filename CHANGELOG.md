@@ -2,6 +2,12 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.8 - 2026-06-23
+
+### Fixed
+
+- Fixed the MarginNote toolbar icon so it uses a transparent template-mask asset instead of rendering as a filled black block.
+
 ## 0.4.7 - 2026-06-23
 
 ### Added

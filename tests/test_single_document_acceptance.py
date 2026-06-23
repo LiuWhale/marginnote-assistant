@@ -29,7 +29,7 @@ def event(name: str, topicid: str = "T1", bookmd5: str = "B1", **extra: Any) -> 
         "event": name,
         "topicid": topicid,
         "bookmd5": bookmd5,
-        "pluginVersion": "0.4.7",
+        "pluginVersion": "0.4.8",
         "extra": extra,
     }
 
