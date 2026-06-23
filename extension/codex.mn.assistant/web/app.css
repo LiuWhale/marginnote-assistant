@@ -987,6 +987,61 @@ input[type="file"] {
   margin-top: 8px;
 }
 
+.update-notice {
+  margin: 0 14px 10px;
+  padding: 10px;
+  border: 1px solid #bfdcd2;
+  border-radius: 8px;
+  background: #f2fbf7;
+  color: var(--accent-strong);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-notice.hidden {
+  display: none;
+}
+
+.update-notice-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-status-line {
+  min-height: 28px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.update-status-line.available {
+  border-color: #bfdcd2;
+  background: #f2fbf7;
+  color: var(--accent-strong);
+}
+
+.update-status-line.error {
+  border-color: #f0b8b3;
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.update-status-detail {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .goal-actions {
   display: flex;
   justify-content: flex-end;

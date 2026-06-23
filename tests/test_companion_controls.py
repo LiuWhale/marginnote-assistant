@@ -1204,7 +1204,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.0",
+                    "pluginVersion": "0.4.1",
                     "extra": {
                         "hasNativeHighlightCandidate": True,
                         "hasAnnotatedExportCandidate": False,
@@ -1231,7 +1231,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.0",
+                    "pluginVersion": "0.4.1",
                     "extra": {
                         "hasNativeHighlightCandidate": False,
                         "hasAnnotatedExportCandidate": True,
@@ -1263,7 +1263,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.0",
+                    "pluginVersion": "0.4.1",
                     "extra": {
                         "activeSelectionLength": 26,
                         "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
@@ -1296,7 +1296,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.0",
+                    "pluginVersion": "0.4.1",
                     "extra": {
                         "activeSelectionLength": 0,
                         "candidateMethods": ["documentController.highlightFromSelection"],
@@ -1328,7 +1328,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.0",
+                    "pluginVersion": "0.4.1",
                     "extra": {
                         "activeSelectionLength": 18,
                         "candidateMethods": [],
@@ -2007,6 +2007,60 @@ class CompanionControlsTests(unittest.TestCase):
                 }
             )
             self.assertEqual(invalid["settings"]["defaultContextScope"], "auto")
+
+    def test_update_actions_use_github_repo_setting_and_expose_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action(
+                {
+                    "action": "settings_update",
+                    "settings": {"githubRepo": "https://github.com/LiuWhale/marginnote-assistant"},
+                }
+            )
+            calls: list[str] = []
+
+            def fake_check(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
+                calls.append(settings["githubRepo"])
+                return {
+                    "ok": True,
+                    "state": "available",
+                    "available": True,
+                    "repo": settings["githubRepo"],
+                    "currentVersion": current_version,
+                    "latestVersion": "0.4.2",
+                    "assetName": "CodexCompanion-0.4.2-latest-dist.zip",
+                    "downloadUrl": "https://example/CodexCompanion-0.4.2-latest-dist.zip",
+                    "message": "发现新版本 0.4.2。",
+                }
+
+            def fake_install(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
+                calls.append("install:" + settings["githubRepo"])
+                return {
+                    "ok": True,
+                    "state": "installing",
+                    "repo": settings["githubRepo"],
+                    "currentVersion": current_version,
+                    "latestVersion": "0.4.2",
+                    "message": "已开始安装更新。",
+                }
+
+            old_check = companion.update_manager.check_for_update
+            old_install = companion.update_manager.install_update
+            companion.update_manager.check_for_update = fake_check
+            companion.update_manager.install_update = fake_install
+            try:
+                checked = companion.handle_action({"action": "update_check"})
+                installed = companion.handle_action({"action": "update_install"})
+                status = companion.status_payload()
+            finally:
+                companion.update_manager.check_for_update = old_check
+                companion.update_manager.install_update = old_install
+
+            self.assertTrue(checked["ok"])
+            self.assertTrue(checked["update"]["available"])
+            self.assertEqual(installed["update"]["state"], "installing")
+            self.assertEqual(calls, ["LiuWhale/marginnote-assistant", "install:LiuWhale/marginnote-assistant"])
+            self.assertEqual(status["update"]["latestVersion"], "0.4.2")
 
     def test_settings_goal_upload_stop_and_permission_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

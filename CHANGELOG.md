@@ -2,6 +2,19 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.1 - 2026-06-23
+
+### Added
+
+- Added a GitHub Release update center in settings, with a main-chat update notice when a newer release is available.
+- Added release zip validation and background installer launch for plugin updates, using `LiuWhale/marginnote-assistant` as the default repository.
+
+### Changed
+
+- Streamlined the settings page to keep only active user-facing controls: AI backend, model/speed/proxy, OpenAI key, context scope, connection state, permissions, PDF cache, health check, and native capability refresh.
+- Removed currently unused settings-page controls for queue/history management, uploaded file context, custom-button management, release/evidence diagnostics, and the local placeholder backend option.
+- Kept deeper diagnostics, release acceptance, package smoke tests, queue internals, and automation endpoints available for scripts and development workflows.
+
 ## 0.4.0 - 2026-06-23
 
 ### Added

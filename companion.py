@@ -23,6 +23,7 @@ from typing import Any
 from urllib import error, request
 from urllib.parse import parse_qs, unquote, urlparse
 
+import update_manager
 from runtime_config import (
     CODEX_CLI_REASONING,
     CODEX_CLI_TIMEOUTS,
@@ -36,6 +37,7 @@ from runtime_config import (
     sanitize_codex_cli_path,
     sanitize_custom_buttons,
     sanitize_default_context_scope,
+    sanitize_github_repo,
     sanitize_model,
     sanitize_openai_api_key,
     sanitize_permission,
@@ -65,7 +67,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.0"
+CURRENT_PLUGIN_VERSION = "0.4.1"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 REQUIRED_NATIVE_HANDLER_FEATURES = [
@@ -162,6 +164,9 @@ READ_ONLY_ACTIONS = {
     "diagnose_highlights",
     "diagnose_permissions",
     "open_full_disk_access_settings",
+    "update_check",
+    "update_install",
+    "update_status",
     "draft_save",
     "draft_get",
     "draft_delete",
@@ -264,6 +269,7 @@ def runtime_settings() -> dict[str, Any]:
     settings["aiBackend"] = sanitize_ai_backend(settings.get("aiBackend"))
     settings["codexCliPath"] = sanitize_codex_cli_path(settings.get("codexCliPath"))
     settings["defaultContextScope"] = sanitize_default_context_scope(settings.get("defaultContextScope"))
+    settings["githubRepo"] = sanitize_github_repo(settings.get("githubRepo"))
     settings["customButtons"] = sanitize_custom_buttons(saved.get("customButtons"))
     return settings
 
@@ -284,6 +290,8 @@ def save_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
         current["codexCliPath"] = sanitize_codex_cli_path(values.get("codexCliPath"))
     if "defaultContextScope" in values:
         current["defaultContextScope"] = sanitize_default_context_scope(values.get("defaultContextScope"))
+    if "githubRepo" in values:
+        current["githubRepo"] = sanitize_github_repo(values.get("githubRepo"))
     if "customButtons" in values:
         current["customButtons"] = sanitize_custom_buttons(values.get("customButtons"))
     api_key = sanitize_openai_api_key(values.get("openaiApiKey")) if "openaiApiKey" in values else ""
@@ -1905,7 +1913,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.0-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.1-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -3169,6 +3177,7 @@ def status_payload() -> dict[str, Any]:
         "ok": True,
         "message": "Codex MarginNote Companion is running.",
         "pid": os.getpid(),
+        "pluginVersion": CURRENT_PLUGIN_VERSION,
         **ai_status,
         "model": settings["model"],
         "speed": settings["speed"],
@@ -3181,6 +3190,7 @@ def status_payload() -> dict[str, Any]:
         "run": active_run_status(),
         "mnRuntime": mn4_runtime_status(),
         "nativeApiCapabilities": latest_native_api_capabilities(),
+        "update": update_manager.read_update_status(ROOT),
         "session_count": len(list(SESSIONS_DIR.glob("*.json"))) if SESSIONS_DIR.exists() else 0,
         "recent_events": read_recent_events(),
     }
@@ -5248,12 +5258,14 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "ok": True,
             "message": "已读取插件设置。",
+            "pluginVersion": CURRENT_PLUGIN_VERSION,
             "settings": settings,
             **ai_status_fields(settings),
             "goal": active_goal(),
             "files": uploaded_files(),
             "queue": queue_status_payload(topic_id, book_md5),
             "nativeApiCapabilities": latest_native_api_capabilities(topic_id, book_md5),
+            "update": update_manager.read_update_status(ROOT),
         }
     if action == "settings_update":
         settings_payload = payload.get("settings") if isinstance(payload.get("settings"), dict) else payload
@@ -5263,6 +5275,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "ok": True,
             "message": "插件设置已保存。",
+            "pluginVersion": CURRENT_PLUGIN_VERSION,
             "reply": (
                 "设置已保存。\n\n"
                 f"权限：{settings['permission']}\n"
@@ -5280,6 +5293,38 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             "files": uploaded_files(),
             "queue": queue_status_payload(topic_id, book_md5),
             "nativeApiCapabilities": latest_native_api_capabilities(topic_id, book_md5),
+            "update": update_manager.read_update_status(ROOT),
+        }
+    if action == "update_status":
+        update = update_manager.read_update_status(ROOT)
+        return {"ok": True, "message": update.get("message") or "已读取更新状态。", "update": update}
+    if action == "update_check":
+        if payload.get("githubRepo"):
+            save_runtime_settings({"githubRepo": payload.get("githubRepo")})
+        settings = runtime_settings()
+        update = update_manager.check_for_update(ROOT, settings, CURRENT_PLUGIN_VERSION)
+        update_manager.write_update_status(ROOT, update)
+        return {
+            "ok": bool(update.get("ok")),
+            "message": str(update.get("message") or "已检查更新。"),
+            "reply": str(update.get("message") or "已检查更新。"),
+            "pluginVersion": CURRENT_PLUGIN_VERSION,
+            "update": update,
+            "settings": settings,
+        }
+    if action == "update_install":
+        if payload.get("githubRepo"):
+            save_runtime_settings({"githubRepo": payload.get("githubRepo")})
+        settings = runtime_settings()
+        update = update_manager.install_update(ROOT, settings, CURRENT_PLUGIN_VERSION)
+        update_manager.write_update_status(ROOT, update)
+        return {
+            "ok": bool(update.get("ok")),
+            "message": str(update.get("message") or "已处理更新安装。"),
+            "reply": str(update.get("message") or "已处理更新安装。"),
+            "pluginVersion": CURRENT_PLUGIN_VERSION,
+            "update": update,
+            "settings": settings,
         }
     if action == "goal_get":
         return {"ok": True, "message": "已读取目标。", "goal": active_goal()}

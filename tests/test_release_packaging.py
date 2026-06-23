@@ -49,11 +49,13 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("notarize_pkg.py", module.COMPANION_EXCLUDES)
         self.assertIn(".git", module.COMPANION_EXCLUDES)
         self.assertIn("extension", module.COMPANION_EXCLUDES)
+        self.assertIn("updates", module.COMPANION_EXCLUDES)
 
     def test_release_keeps_acceptance_script_in_nested_companion_for_packaged_tests(self) -> None:
         module = self.load_module()
 
         self.assertNotIn("release_acceptance.py", module.COMPANION_EXCLUDES)
+        self.assertNotIn("update_manager.py", module.COMPANION_EXCLUDES)
 
     def test_release_places_first_run_scripts_at_package_root(self) -> None:
         module = self.load_module()
@@ -501,7 +503,7 @@ class ReleasePackagingTests(unittest.TestCase):
             package = Path(tmp) / "CodexCompanion-test.zip"
             entries = {
                 "CodexCompanion-test/README.md": "Codex Companion for MarginNote 4\n",
-                "CodexCompanion-test/CHANGELOG.md": "## 0.4.0 - 2026-06-23\n",
+                "CodexCompanion-test/CHANGELOG.md": "## 0.4.1 - 2026-06-23\n",
                 "CodexCompanion-test/LICENSE": "MIT License\n",
                 "CodexCompanion-test/assets/cover.png": b"\x89PNG\r\n\x1a\n",
                 "CodexCompanion-test/README-FIRST.txt": "Double-click: Install Codex Companion.command\n",

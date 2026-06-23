@@ -28,10 +28,17 @@ class RuntimeConfigTests(unittest.TestCase):
     def test_sanitizes_model_proxy_context_and_custom_buttons(self) -> None:
         config = load_runtime_config()
 
+        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["githubRepo"], "LiuWhale/marginnote-assistant")
         self.assertEqual(config.sanitize_model("bad model name", "fallback-model"), "fallback-model")
         self.assertEqual(config.sanitize_model("gpt-5.5", "fallback-model"), "gpt-5.5")
         self.assertEqual(config.sanitize_proxy_url("ftp://127.0.0.1:7890"), "")
         self.assertEqual(config.sanitize_proxy_url("http://127.0.0.1:7890"), "http://127.0.0.1:7890")
+        self.assertEqual(config.sanitize_github_repo("LiuWhale/marginnote-assistant"), "LiuWhale/marginnote-assistant")
+        self.assertEqual(
+            config.sanitize_github_repo("https://github.com/LiuWhale/marginnote-assistant"),
+            "LiuWhale/marginnote-assistant",
+        )
+        self.assertEqual(config.sanitize_github_repo("bad repo name"), "LiuWhale/marginnote-assistant")
         self.assertEqual(config.sanitize_default_context_scope("全文"), "document")
         self.assertEqual(config.sanitize_default_context_scope("unknown"), "auto")
         self.assertEqual(

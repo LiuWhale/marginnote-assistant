@@ -8,7 +8,10 @@ from pathlib import Path
 
 
 HOME = Path.home()
-DEFAULT_EXT_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_EXT_DIR = PROJECT_ROOT / "extension/codex.mn.assistant"
+LIVE_EXT_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+DEFAULT_EXT_DIR = SOURCE_EXT_DIR if SOURCE_EXT_DIR.exists() else LIVE_EXT_DIR
 
 
 def resolve_extension_dir() -> Path:

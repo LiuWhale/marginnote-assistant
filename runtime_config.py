@@ -15,6 +15,7 @@ DEFAULT_RUNTIME_SETTINGS = {
     "aiBackend": "auto",
     "codexCliPath": "",
     "defaultContextScope": "auto",
+    "githubRepo": "LiuWhale/marginnote-assistant",
     "customButtons": [],
 }
 AI_BACKENDS = {"auto", "codex_cli", "openai_api", "local"}
@@ -102,6 +103,26 @@ def sanitize_proxy_url(value: Any) -> str:
     if not parsed.netloc:
         return ""
     return text
+
+
+def sanitize_github_repo(value: Any) -> str:
+    fallback = DEFAULT_RUNTIME_SETTINGS["githubRepo"]
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    text = re.sub(r"^https?://github\.com/", "", text, flags=re.IGNORECASE)
+    text = text.removeprefix("git@github.com:")
+    text = text.removesuffix(".git")
+    text = text.strip("/")
+    parts = text.split("/")
+    if len(parts) != 2:
+        return fallback
+    owner, repo = parts
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$", owner):
+        return fallback
+    if not re.match(r"^[A-Za-z0-9._-]{1,100}$", repo):
+        return fallback
+    return f"{owner}/{repo}"
 
 
 def sanitize_ai_backend(value: Any) -> str:

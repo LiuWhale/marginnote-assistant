@@ -2,7 +2,7 @@
 
 ![Codex Companion cover](assets/cover.png)
 
-Codex Companion is a local-first MarginNote 4 extension that adds a Codex-style AI chat panel, document context controls, card and mind-map creation, and release-grade diagnostics to MarginNote.
+Codex Companion is a local-first MarginNote 4 extension that adds a Codex-style AI chat panel, document context controls, and reviewable card/mind-map creation to MarginNote.
 
 It is designed for reading, annotating, and restructuring long documents. Academic papers are a major use case, but the plugin is intentionally general: it can work with any document that MarginNote exposes through its notebook, PDF, and selection APIs.
 
@@ -16,10 +16,11 @@ It is designed for reading, annotating, and restructuring long documents. Academ
 - Add the latest answer to the mind map through a reviewable AI edit operation: accept keeps the new nodes, reject removes them.
 - Use a clean built-in-AI-style chat surface; advanced controls live in a separate settings page.
 - Configure AI backend: local Codex CLI, OpenAI API, or automatic fallback.
-- Manage custom prompt buttons with optional main-screen pinning.
+- Check GitHub Releases for plugin updates and install the latest release zip from settings.
 - Queue actions while another generation is running, and stop the active task.
 - Cache the current PDF through the MarginNote process to reduce macOS file-permission failures.
-- Run diagnostics for Companion health, MarginNote runtime state, native capabilities, highlighter behavior, release gates, and package smoke tests.
+- Check Companion health, MarginNote runtime state, and native bridge capabilities from settings.
+- Run release gates, package smoke tests, and deeper diagnostics from the command line.
 
 Goal-style runs are treated as 一次性长任务 and 不会保存成长期当前目标, so ordinary chat and card generation do not silently inherit an old defense or reading goal.
 
@@ -85,9 +86,14 @@ Supported backends:
 - `auto`: try Codex CLI first, then OpenAI API.
 - `codex_cli`: require a working local Codex CLI.
 - `openai_api`: require an OpenAI API key.
-- `local`: diagnostics-only mode; it does not fabricate template answers.
 
 The OpenAI key is stored locally in `.env` and is never echoed back into the WebView. The release package includes `.env.example`, not your `.env`.
+
+## Update
+
+Open settings, set the GitHub repository, then click `检查更新`. The default repository is `LiuWhale/marginnote-assistant`.
+
+If a newer GitHub Release is available, the main chat surface shows a compact update notice. Installing an update downloads the release zip, verifies that it contains `install.sh`, `companion/`, and `extension/codex.mn.assistant/`, then starts the bundled installer. Reopen the Codex panel after installation; restart MarginNote 4 if native files do not reload.
 
 ## Develop
 
@@ -100,7 +106,7 @@ python3 -m unittest discover -s tests
 Check Python syntax:
 
 ```bash
-python3 -m py_compile companion.py runtime_config.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py
+python3 -m py_compile companion.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py
 ```
 
 Check WebView JavaScript syntax:
@@ -128,20 +134,20 @@ curl http://127.0.0.1:48761/status
 Build a clean release zip:
 
 ```bash
-python3 package_release.py 0.4.0
+python3 package_release.py 0.4.1
 ```
 
 Smoke-test the zip:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.0-latest-dist.zip
-python3 release_smoke_test.py release/CodexCompanion-0.4.0-latest-dist.zip --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.1-latest-dist.zip
+python3 release_smoke_test.py release/CodexCompanion-0.4.1-latest-dist.zip --install-dry-run
 ```
 
 Run the release acceptance report:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.0-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.1-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked until you provide machine-specific evidence such as native highlight proof, signed/notarized package proof, or cross-machine install proof. Those gates are evidence checks, not source packaging failures.

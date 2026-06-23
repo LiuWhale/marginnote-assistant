@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = PROJECT_ROOT / "extension/codex.mn.assistant"
+LIVE_ROOT = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+ROOT = SOURCE_ROOT if SOURCE_ROOT.exists() else LIVE_ROOT
 
 
 class WebControlsStaticTests(unittest.TestCase):
@@ -72,11 +75,17 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="permissionSelect"',
             'id="saveSettingsButton"',
             'id="aiBackendProbeButton"',
-            'id="runtimeEvidenceButton"',
             'id="nativeCapabilitiesRefreshButton"',
+            'id="githubRepoInput"',
+            'id="updateCheckButton"',
+            'id="updateInstallButton"',
+            'id="updateNotice"',
             "openConfigPage",
             "closeConfigPage",
             "renderSettingsContextMeta",
+            "checkForUpdates",
+            "installUpdate",
+            "renderUpdateStatus",
         ]:
             self.assertIn(marker, self.html + self.js)
 
@@ -89,7 +98,7 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertNotIn("'Notebook: '", render_context_body)
         self.assertIn("renderSettingsContextMeta", render_context_body)
 
-    def test_config_page_contains_queue_files_history_and_custom_buttons(self) -> None:
+    def test_config_page_hides_unused_queue_files_custom_buttons_and_release_tools(self) -> None:
         for marker in [
             'id="queueBadge"',
             'id="runToggleButton"',
@@ -111,14 +120,42 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="newCustomButtonButton"',
             'id="saveCustomButtonButton"',
             'id="deleteCustomButtonButton"',
-            "customButtons",
+            'id="runtimeEvidenceButton"',
+            'id="settingsHighlightStatusButton"',
+            'id="nativeHighlightWizardButton"',
+            'id="singleDocumentAcceptanceButton"',
+            'id="releaseAcceptanceButton"',
+            '<option value="local">',
+            "队列与生成",
+            "上下文文件",
+            "自定义按钮",
+            "诊断与验收",
+            "发布验收",
+            "高亮采证",
+            "本文档验收",
+        ]:
+            self.assertNotIn(marker, self.html)
+        for marker in [
+            'id="defaultContextScopeSelect"',
+            'id="permissionDiagnoseButton"',
+            'id="cacheCurrentPdfButton"',
+            'id="nativeCapabilitiesRefreshButton"',
             "defaultContextScope",
         ]:
             self.assertIn(marker, self.html + self.js)
         self.assertEqual(self.html.count('id="permissionDiagnoseButton"'), 1)
         save_body = self.js.split("function saveSettings()", 1)[1].split("\n  function clearOpenAIKey", 1)[0]
         self.assertIn("defaultContextScope: getValue('defaultContextScopeSelect')", save_body)
-        self.assertIn("customButtons: state.customButtons", self.js)
+        self.assertIn("githubRepo: getValue('githubRepoInput')", save_body)
+
+    def test_main_surface_has_update_notice_but_no_update_install_controls(self) -> None:
+        main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+
+        self.assertIn('id="updateNotice"', main_html)
+        self.assertIn('id="updateNoticeText"', main_html)
+        self.assertIn('id="updateNoticeOpenSettingsButton"', main_html)
+        self.assertNotIn('id="updateInstallButton"', main_html)
+        self.assertNotIn('id="githubRepoInput"', main_html)
 
     def test_ai_chat_exposes_context_scope_like_builtin_ai(self) -> None:
         for marker in [

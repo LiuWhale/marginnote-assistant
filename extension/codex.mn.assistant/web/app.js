@@ -37,7 +37,10 @@
     queuePumpTimer: null,
     contextAutoRefreshTimer: null,
     nativeHighlightWizardTimer: null,
-    deferredNativeQueueIds: {}
+    deferredNativeQueueIds: {},
+    update: {},
+    updateAutoChecked: false,
+    pluginVersion: ''
   };
   var MAIN_PINNED_BUTTON_LIMIT = 4;
   var requiredControlIds = [
@@ -56,6 +59,8 @@
     'aiReadinessLine',
     'aiReadinessDetail',
     'selectionPreview',
+    'updateNotice',
+    'updateNoticeText',
     'statusPill',
     'contextLine',
     'readinessPanel'
@@ -2557,6 +2562,7 @@
   function renderControls(result) {
     result = result || {};
     state.settings = result.settings || state.settings || {};
+    if (result.pluginVersion) state.pluginVersion = String(result.pluginVersion || '');
     state.customButtons = cleanCustomButtons(state.settings.customButtons || state.customButtons || []);
     state.goal = result.goalOneShot ? {} : (result.goal || state.goal || {});
     state.files = result.files || state.files || [];
@@ -2569,6 +2575,7 @@
     setValue('proxyUrlInput', state.settings.proxyUrl || '');
     setValue('codexCliPathInput', state.settings.codexCliPath || state.codexCliPath || '');
     setValue('defaultContextScopeSelect', state.settings.defaultContextScope || 'auto');
+    setValue('githubRepoInput', state.settings.githubRepo || (state.update && state.update.repo) || 'LiuWhale/marginnote-assistant');
     if (!state.contextScopeInitialized) {
       state.contextScopeInitialized = true;
       setContextScope(state.settings.defaultContextScope || 'auto');
@@ -2585,6 +2592,7 @@
     if (result.fileAccess) renderFileAccess(result);
     renderMnRuntime(result);
     renderNativeCapabilities(result);
+    renderUpdateStatus(result);
     renderSettingsContextMeta(state.context || {});
     if (result.nativeHighlightWizard) renderNativeHighlightWizard(result);
     if (result.releaseAcceptance || result.releasable !== undefined || result.blockerCount !== undefined) {
@@ -2637,7 +2645,15 @@
   }
 
   function refreshSettings() {
-    postCompanion('settings_get', {}, renderControls);
+    postCompanion('settings_get', {}, function(result) {
+      renderControls(result || {});
+      if (!state.updateAutoChecked) {
+        state.updateAutoChecked = true;
+        window.setTimeout(function() {
+          checkForUpdates(true);
+        }, 800);
+      }
+    }, {showReply: false});
   }
 
   function saveSettings() {
@@ -2651,6 +2667,7 @@
         codexCliPath: getValue('codexCliPathInput'),
         proxyUrl: getValue('proxyUrlInput'),
         defaultContextScope: getValue('defaultContextScopeSelect'),
+        githubRepo: getValue('githubRepoInput'),
         customButtons: state.customButtons,
         openaiApiKey: openaiApiKey
       }
@@ -2690,6 +2707,92 @@
         addFailureMessage('连接检查失败', result);
       }
     });
+  }
+
+  function renderUpdateStatus(result) {
+    result = result || {};
+    if (result.pluginVersion) state.pluginVersion = String(result.pluginVersion || '');
+    if (result.update) state.update = result.update || {};
+    var update = state.update || {};
+    var settings = result.settings || state.settings || {};
+    var repo = settings.githubRepo || update.repo || 'LiuWhale/marginnote-assistant';
+    setValue('githubRepoInput', repo);
+    var current = update.currentVersion || state.pluginVersion || '0.4.1';
+    var latest = update.latestVersion || '未检查';
+    var status = String(update.state || 'unknown');
+    var message = update.message || '尚未检查更新。';
+    setText('updateVersionLine', '当前：' + current + ' / 最新：' + latest);
+    var line = byId('updateStatusLine');
+    if (line) {
+      if (update.available) {
+        line.textContent = '更新：发现新版本 ' + latest;
+        line.className = 'update-status-line available';
+      } else if (status === 'error' || update.ok === false) {
+        line.textContent = '更新：检查失败';
+        line.className = 'update-status-line error';
+      } else if (status === 'installing') {
+        line.textContent = '更新：正在安装';
+        line.className = 'update-status-line available';
+      } else if (status === 'ready') {
+        line.textContent = '更新：已下载待安装';
+        line.className = 'update-status-line available';
+      } else if (status === 'current') {
+        line.textContent = '更新：已是最新';
+        line.className = 'update-status-line';
+      } else {
+        line.textContent = '更新：尚未检查';
+        line.className = 'update-status-line';
+      }
+    }
+    setText('updateStatusDetail', message);
+    var installButton = byId('updateInstallButton');
+    if (installButton) {
+      installButton.disabled = !update.available || status === 'downloading' || status === 'installing';
+      installButton.textContent = status === 'installing' ? '安装中' : '下载并安装';
+    }
+    var notice = byId('updateNotice');
+    if (notice) {
+      notice.className = update.available ? 'update-notice' : 'update-notice hidden';
+    }
+    setText('updateNoticeText', update.available ? ('发现插件更新：v' + latest) : '');
+  }
+
+  function openUpdateSettings() {
+    openConfigPage();
+    var section = byId('updateSection');
+    if (section && section.scrollIntoView) section.scrollIntoView({block: 'start'});
+  }
+
+  function checkForUpdates(silent) {
+    postCompanion('update_check', {
+      githubRepo: getValue('githubRepoInput')
+    }, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) {
+        if (!silent) addFailureMessage('检查更新失败', result);
+        return;
+      }
+      if (!silent) addMessage('assistant', result.message || '已检查更新。');
+    }, {showReply: false});
+  }
+
+  function installUpdate() {
+    var update = state.update || {};
+    if (!update.available) {
+      addMessage('assistant', '当前没有可安装的新版本。请先检查更新。');
+      return;
+    }
+    if (window.confirm && !window.confirm('确认下载并安装 GitHub Release 最新版？安装后需要重新打开 Codex 面板。')) return;
+    postCompanion('update_install', {
+      githubRepo: getValue('githubRepoInput')
+    }, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) {
+        addFailureMessage('安装更新失败', result);
+        return;
+      }
+      addMessage('assistant', result.message || '已开始安装更新。');
+    }, {showReply: false});
   }
 
   function trimText(text, limit) {
@@ -3211,6 +3314,11 @@
     bindButton('cacheCurrentPdfButton', cacheCurrentPdf);
     bindButton('runtimeEvidenceButton', collectRuntimeEvidence);
     bindButton('nativeCapabilitiesRefreshButton', refreshNativeCapabilities);
+    bindButton('updateCheckButton', function() {
+      checkForUpdates(false);
+    });
+    bindButton('updateInstallButton', installUpdate);
+    bindButton('updateNoticeOpenSettingsButton', openUpdateSettings);
     bindButton('settingsHighlightStatusButton', diagnoseHighlights);
     bindButton('nativeHighlightWizardButton', startNativeHighlightWizard);
     bindButton('singleDocumentAcceptanceButton', checkSingleDocumentAcceptance);

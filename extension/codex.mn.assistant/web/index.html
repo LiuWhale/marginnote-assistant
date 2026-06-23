@@ -25,6 +25,11 @@
       <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
     </section>
 
+    <section id="updateNotice" class="update-notice hidden">
+      <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
+      <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
+    </section>
+
     <section class="ai-chat-context-box">
       <div class="context-title-row">
         <div class="context-title">当前内容 / 节点</div>
@@ -57,7 +62,7 @@
     <header class="config-header">
       <div>
         <h2>配置</h2>
-        <p>AI 后端、上下文、权限和运行诊断</p>
+        <p>AI 后端、上下文和基础权限</p>
       </div>
       <button id="configBackButton" class="small-button primary-lite" type="button">返回对话</button>
     </header>
@@ -74,7 +79,6 @@
             <option value="auto">自动</option>
             <option value="codex_cli">Codex CLI</option>
             <option value="openai_api">OpenAI API</option>
-            <option value="local">本地不可用占位</option>
           </select></label>
           <label><span>速度</span><select id="speedSelect">
             <option value="fast">fast</option>
@@ -109,74 +113,24 @@
         </div>
       </section>
 
-      <section class="config-section">
-        <div class="config-section-title">队列与生成</div>
+      <section id="updateSection" class="config-section">
+        <div class="config-section-title">插件更新</div>
+        <div id="updateStatusLine" class="update-status-line">更新：尚未检查</div>
+        <div id="updateStatusDetail" class="update-status-detail">从 GitHub Releases 下载并安装最新 release zip。</div>
+        <div class="config-grid two">
+          <label><span>GitHub 仓库</span><input id="githubRepoInput" type="text" placeholder="LiuWhale/marginnote-assistant"></label>
+          <div class="config-kv compact">
+            <div><span>版本</span><strong id="updateVersionLine">当前：0.4.1 / 最新：未检查</strong></div>
+          </div>
+        </div>
         <div class="config-actions">
-          <div id="queueBadge">0 pending / 0 files</div>
-          <button id="runToggleButton" class="small-button run-toggle-button" type="button">队列</button>
-          <button id="historyButton" class="small-button" type="button">查看历史</button>
-          <button id="clearHistoryButton" class="small-button danger-lite" type="button">清空历史</button>
+          <button id="updateCheckButton" class="small-button" type="button">检查更新</button>
+          <button id="updateInstallButton" class="small-button primary" type="button">下载并安装</button>
         </div>
       </section>
 
       <section class="config-section">
-        <div class="config-section-title">上下文文件</div>
-        <div class="file-grid">
-          <label><span>选择文件</span><input id="fileInput" type="file"></label>
-          <label><span>本机路径</span><input id="filePathInput" type="text" placeholder="/path/to/context.txt"></label>
-          <button id="uploadButton" class="small-button primary-lite" type="button">上传上下文</button>
-        </div>
-      </section>
-
-      <section class="config-section">
-        <div class="config-section-title">自定义按钮</div>
-        <div id="mainPinnedButtonsPanel" class="main-pinned-panel hidden">
-          <div class="panel-heading">主界面常用按钮预览</div>
-          <div id="mainPinnedButtonsList" class="main-pinned-buttons"></div>
-        </div>
-        <section class="settings-group main-pinned-manager-panel">
-          <div class="panel-heading-row">
-            <div class="panel-heading">主界面按钮</div>
-            <div class="button-policy-line">最多 4 个；从下方自定义按钮置顶。</div>
-          </div>
-          <div id="mainPinnedManagerList" class="prompt-button-list"></div>
-        </section>
-        <section class="settings-group">
-          <div class="panel-heading-row">
-            <div class="panel-heading">预设 prompt</div>
-            <div class="button-policy-line">先加入自定义，再决定是否置顶。</div>
-          </div>
-          <div id="presetButtonsList" class="prompt-button-list"></div>
-        </section>
-        <section class="settings-group">
-          <div class="panel-heading">自定义列表</div>
-          <div id="customButtonsList" class="prompt-button-list"></div>
-          <div class="custom-button-form">
-            <input id="customButtonIndexInput" type="hidden" value="-1">
-            <label><span>按钮名称</span><input id="customButtonTitleInput" type="text" placeholder="例如：精读当前章节"></label>
-            <label><span>动作类型</span><select id="customButtonActionSelect">
-              <option value="chat">问 Codex</option>
-              <option value="explain_selection">解释选区</option>
-              <option value="generate_card">生成卡片</option>
-              <option value="generate_mindmap">生成脑图</option>
-              <option value="generate_full_reading">精读材料</option>
-              <option value="expand_node">补当前脑图节点</option>
-              <option value="reorganize_mindmap">重组脑图</option>
-              <option value="request_native_highlight_selection">高亮当前选区</option>
-            </select></label>
-            <label><span>Prompt</span><textarea id="customButtonPromptInput" class="compact-textarea" placeholder="写清楚这个按钮要 Codex 做什么"></textarea></label>
-            <label class="check-row"><input id="customButtonShowOnMainInput" type="checkbox">显示在主界面常用按钮</label>
-            <div class="custom-button-actions">
-              <button id="newCustomButtonButton" class="small-button" type="button">新建</button>
-              <button id="saveCustomButtonButton" class="small-button primary" type="button">保存按钮</button>
-              <button id="deleteCustomButtonButton" class="small-button danger-lite" type="button">删除按钮</button>
-            </div>
-          </div>
-        </section>
-      </section>
-
-      <section class="config-section">
-        <div class="config-section-title">权限与运行态</div>
+        <div class="config-section-title">权限与连接</div>
         <div class="config-grid two">
           <label><span>写入权限</span><select id="permissionSelect">
             <option value="notes">允许写入笔记</option>
@@ -193,24 +147,7 @@
           <button id="permissionDiagnoseButton" class="small-button" type="button">权限诊断</button>
           <button id="openPermissionSettingsButton" class="small-button" type="button">打开权限设置</button>
           <button id="cacheCurrentPdfButton" class="small-button" type="button">缓存当前 PDF</button>
-          <button id="runtimeEvidenceButton" class="small-button" type="button">运行态采证</button>
           <button id="nativeCapabilitiesRefreshButton" class="small-button" type="button">刷新 MN 能力</button>
-        </div>
-      </section>
-
-      <section class="config-section">
-        <div class="config-section-title">诊断与验收</div>
-        <div id="nativeHighlightWizardLine" class="release-acceptance-line warn">高亮采证：未运行</div>
-        <div id="nativeHighlightWizardDetail" class="release-acceptance-detail">可检查原生高亮流程。</div>
-        <div id="singleDocumentAcceptanceLine" class="release-acceptance-line warn">本文档验收：未运行</div>
-        <div id="singleDocumentAcceptanceDetail" class="release-acceptance-detail">检查当前文档工作流。</div>
-        <div id="releaseAcceptanceLine" class="release-acceptance-line warn">发布验收：未运行</div>
-        <div id="releaseAcceptanceDetail" class="release-acceptance-detail">检查发布 gate。</div>
-        <div class="config-actions">
-          <button id="settingsHighlightStatusButton" class="small-button" type="button">高亮诊断</button>
-          <button id="nativeHighlightWizardButton" class="small-button" type="button">高亮采证</button>
-          <button id="singleDocumentAcceptanceButton" class="small-button" type="button">本文档验收</button>
-          <button id="releaseAcceptanceButton" class="small-button" type="button">发布验收</button>
         </div>
       </section>
     </div>
