@@ -14,8 +14,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_ZIP = ROOT / "release/CodexCompanion-0.4.4-latest-dist.zip"
-DEFAULT_OUTPUT = ROOT / "release/CodexCompanion-0.4.4-latest.pkg"
+DEFAULT_ZIP = ROOT / "release/CodexCompanion-0.4.5-latest-dist.zip"
+DEFAULT_OUTPUT = ROOT / "release/CodexCompanion-0.4.5-latest.pkg"
 ONEDRIVE_DIR = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 PACKAGE_IDENTIFIER = "com.codex.marginnote-companion"
 SHARED_INSTALL_PARENT = Path("Users/Shared/Codex Companion")
@@ -351,7 +351,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build a macOS pkg wrapper for Codex Companion.")
     parser.add_argument("zip", nargs="?", default=str(DEFAULT_ZIP), help="CodexCompanion release zip.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output .pkg path.")
-    parser.add_argument("--version", default="0.4.4", help="pkg version string.")
+    parser.add_argument("--version", default="0.4.5", help="pkg version string.")
     parser.add_argument("--sign-identity", default="", help="Developer ID Installer identity for productbuild --sign.")
     parser.add_argument("--auto-sign", action="store_true", help="Use the single Developer ID Installer identity found in the current keychain.")
     parser.add_argument("--dry-run", action="store_true", help="Stage payload and scripts without invoking pkgbuild/productbuild.")

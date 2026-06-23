@@ -2,6 +2,12 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.5 - 2026-06-23
+
+### Changed
+
+- Published a maintenance release to let `0.4.4` installations test the visible update install flow.
+
 ## 0.4.4 - 2026-06-23
 
 ### Fixed
