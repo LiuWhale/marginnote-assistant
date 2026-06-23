@@ -1204,7 +1204,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.6",
+                    "pluginVersion": "0.4.7",
                     "extra": {
                         "hasNativeHighlightCandidate": True,
                         "hasAnnotatedExportCandidate": False,
@@ -1231,7 +1231,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.6",
+                    "pluginVersion": "0.4.7",
                     "extra": {
                         "hasNativeHighlightCandidate": False,
                         "hasAnnotatedExportCandidate": True,
@@ -1263,7 +1263,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.6",
+                    "pluginVersion": "0.4.7",
                     "extra": {
                         "activeSelectionLength": 26,
                         "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
@@ -1296,7 +1296,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.6",
+                    "pluginVersion": "0.4.7",
                     "extra": {
                         "activeSelectionLength": 0,
                         "candidateMethods": ["documentController.highlightFromSelection"],
@@ -1328,7 +1328,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "event": "nativeApiCapabilities",
                     "topicid": "T1",
                     "bookmd5": "B1",
-                    "pluginVersion": "0.4.6",
+                    "pluginVersion": "0.4.7",
                     "extra": {
                         "activeSelectionLength": 18,
                         "candidateMethods": [],
@@ -2027,10 +2027,10 @@ class CompanionControlsTests(unittest.TestCase):
                     "available": True,
                     "repo": settings["githubRepo"],
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.6",
-                    "assetName": "CodexCompanion-0.4.6-latest-dist.zip",
-                    "downloadUrl": "https://example/CodexCompanion-0.4.6-latest-dist.zip",
-                    "message": "发现新版本 0.4.6。",
+                    "latestVersion": "0.4.7",
+                    "assetName": "CodexCompanion-0.4.7-latest-dist.zip",
+                    "downloadUrl": "https://example/CodexCompanion-0.4.7-latest-dist.zip",
+                    "message": "发现新版本 0.4.7。",
                 }
 
             def fake_install(root: Path, settings: dict[str, Any], current_version: str) -> dict[str, Any]:
@@ -2040,7 +2040,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "state": "installing",
                     "repo": settings["githubRepo"],
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.6",
+                    "latestVersion": "0.4.7",
                     "message": "已开始安装更新。",
                 }
 
@@ -2060,7 +2060,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(checked["update"]["available"])
             self.assertEqual(installed["update"]["state"], "installing")
             self.assertEqual(calls, ["LiuWhale/marginnote-assistant", "install:LiuWhale/marginnote-assistant"])
-            self.assertEqual(status["update"]["latestVersion"], "0.4.6")
+            self.assertEqual(status["update"]["latestVersion"], "0.4.7")
 
     def test_settings_goal_upload_stop_and_permission_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

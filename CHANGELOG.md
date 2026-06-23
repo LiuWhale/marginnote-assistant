@@ -2,6 +2,12 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.7 - 2026-06-23
+
+### Added
+
+- Added the new GPT-image2-directed Codex Companion logo assets and replaced the MarginNote toolbar icon.
+
 ## 0.4.6 - 2026-06-23
 
 ### Changed
