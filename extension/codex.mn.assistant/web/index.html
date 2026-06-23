@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Companion</title>
+  <link rel="stylesheet" href="app.css?v=20260623-reply-mindmap-v1">
+</head>
+<body>
+  <main id="aiChatShell" class="app-shell ai-chat-shell">
+    <section class="topbar">
+      <div>
+        <h1>Codex Companion</h1>
+        <p id="contextLine">等待 MarginNote 上下文</p>
+      </div>
+      <div class="topbar-actions">
+        <button class="small-button" id="settingsButton" type="button">设置</button>
+        <button class="icon-button" id="closeButton" type="button" title="关闭">x</button>
+      </div>
+    </section>
+
+    <section class="status-row ai-chat-status-row">
+      <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
+      <button id="contextButton" class="small-button" type="button">刷新上下文</button>
+      <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
+    </section>
+
+    <section class="ai-chat-context-box">
+      <div class="context-title-row">
+        <div class="context-title">当前内容 / 节点</div>
+        <div class="context-scope-control" role="group" aria-label="上下文范围">
+          <button id="contextScopeAutoButton" class="scope-button active" data-context-scope="auto" type="button">自动</button>
+          <button id="contextScopeSelectionButton" class="scope-button" data-context-scope="selection" type="button">选区</button>
+          <button id="contextScopeDocumentButton" class="scope-button" data-context-scope="document" type="button">全文</button>
+        </div>
+      </div>
+      <div id="contextSourceLine" class="context-source-line" data-context-state="empty">AI 可见：未选择上下文</div>
+      <div id="selectionPreview" class="context-preview">在 MN4 中选中内容，或直接输入问题。</div>
+    </section>
+
+    <section id="liveHistory" class="history ai-chat-history" aria-live="polite">
+      <article class="message assistant">
+        <div class="message-role">Codex</div>
+        <div class="message-body">可以直接提问；如果在 MarginNote 里选中了内容，我会优先结合当前选区和节点回答。</div>
+      </article>
+    </section>
+
+    <section class="composer ai-chat-composer">
+      <div class="composer-input-row">
+        <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
+        <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">发送</button>
+      </div>
+    </section>
+  </main>
+
+  <section id="configPage" class="config-page hidden" aria-label="Codex Companion 配置">
+    <header class="config-header">
+      <div>
+        <h2>配置</h2>
+        <p>AI 后端、上下文、权限和运行诊断</p>
+      </div>
+      <button id="configBackButton" class="small-button primary-lite" type="button">返回对话</button>
+    </header>
+
+    <div class="config-body">
+      <section class="config-section">
+        <div class="config-section-title">AI 后端</div>
+        <section id="readinessPanel" class="readiness-panel warn">
+          <div id="aiReadinessLine" class="readiness-line">正在检查 AI 连接</div>
+          <div id="aiReadinessDetail" class="readiness-detail">对话会使用本机 Codex CLI 或已配置的 OpenAI API。</div>
+        </section>
+        <div class="config-grid two">
+          <label><span>AI 后端</span><select id="aiBackendSelect">
+            <option value="auto">自动</option>
+            <option value="codex_cli">Codex CLI</option>
+            <option value="openai_api">OpenAI API</option>
+            <option value="local">本地不可用占位</option>
+          </select></label>
+          <label><span>速度</span><select id="speedSelect">
+            <option value="fast">fast</option>
+            <option value="balanced">balanced</option>
+            <option value="deep">deep</option>
+          </select></label>
+          <label><span>模型</span><input id="modelInput" type="text" placeholder="gpt-5.5"></label>
+          <label><span>Codex CLI 路径</span><input id="codexCliPathInput" type="text" placeholder="自动发现"></label>
+          <label><span>代理</span><input id="proxyUrlInput" type="text" placeholder="http://127.0.0.1:7890"></label>
+          <label><span>OpenAI Key</span><input id="openaiApiKeyInput" type="password" placeholder="保存后不会回显"></label>
+        </div>
+        <div class="config-actions">
+          <button id="saveSettingsButton" class="small-button primary" type="button">保存设置</button>
+          <button id="aiBackendProbeButton" class="small-button" type="button">AI 试连</button>
+          <button id="clearOpenAIKeyButton" class="small-button danger-lite" type="button">清除 Key</button>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">当前上下文</div>
+        <div class="config-kv">
+          <div><span>Notebook</span><strong id="settingsNotebookLine">未识别</strong></div>
+          <div><span>Document</span><strong id="settingsDocumentLine">未识别</strong></div>
+          <div><span>上下文策略</span><strong id="settingsContextScopeLine">自动</strong></div>
+        </div>
+        <div class="config-grid two">
+          <label><span>默认上下文范围</span><select id="defaultContextScopeSelect">
+            <option value="auto">自动：选区优先，否则全文</option>
+            <option value="selection">只看选区 / 节点</option>
+            <option value="document">当前文档全文</option>
+          </select></label>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">队列与生成</div>
+        <div class="config-actions">
+          <div id="queueBadge">0 pending / 0 files</div>
+          <button id="runToggleButton" class="small-button run-toggle-button" type="button">队列</button>
+          <button id="historyButton" class="small-button" type="button">查看历史</button>
+          <button id="clearHistoryButton" class="small-button danger-lite" type="button">清空历史</button>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">上下文文件</div>
+        <div class="file-grid">
+          <label><span>选择文件</span><input id="fileInput" type="file"></label>
+          <label><span>本机路径</span><input id="filePathInput" type="text" placeholder="/path/to/context.txt"></label>
+          <button id="uploadButton" class="small-button primary-lite" type="button">上传上下文</button>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">自定义按钮</div>
+        <div id="mainPinnedButtonsPanel" class="main-pinned-panel hidden">
+          <div class="panel-heading">主界面常用按钮预览</div>
+          <div id="mainPinnedButtonsList" class="main-pinned-buttons"></div>
+        </div>
+        <section class="settings-group main-pinned-manager-panel">
+          <div class="panel-heading-row">
+            <div class="panel-heading">主界面按钮</div>
+            <div class="button-policy-line">最多 4 个；从下方自定义按钮置顶。</div>
+          </div>
+          <div id="mainPinnedManagerList" class="prompt-button-list"></div>
+        </section>
+        <section class="settings-group">
+          <div class="panel-heading-row">
+            <div class="panel-heading">预设 prompt</div>
+            <div class="button-policy-line">先加入自定义，再决定是否置顶。</div>
+          </div>
+          <div id="presetButtonsList" class="prompt-button-list"></div>
+        </section>
+        <section class="settings-group">
+          <div class="panel-heading">自定义列表</div>
+          <div id="customButtonsList" class="prompt-button-list"></div>
+          <div class="custom-button-form">
+            <input id="customButtonIndexInput" type="hidden" value="-1">
+            <label><span>按钮名称</span><input id="customButtonTitleInput" type="text" placeholder="例如：精读当前章节"></label>
+            <label><span>动作类型</span><select id="customButtonActionSelect">
+              <option value="chat">问 Codex</option>
+              <option value="explain_selection">解释选区</option>
+              <option value="generate_card">生成卡片</option>
+              <option value="generate_mindmap">生成脑图</option>
+              <option value="generate_full_reading">精读材料</option>
+              <option value="expand_node">补当前脑图节点</option>
+              <option value="reorganize_mindmap">重组脑图</option>
+              <option value="request_native_highlight_selection">高亮当前选区</option>
+            </select></label>
+            <label><span>Prompt</span><textarea id="customButtonPromptInput" class="compact-textarea" placeholder="写清楚这个按钮要 Codex 做什么"></textarea></label>
+            <label class="check-row"><input id="customButtonShowOnMainInput" type="checkbox">显示在主界面常用按钮</label>
+            <div class="custom-button-actions">
+              <button id="newCustomButtonButton" class="small-button" type="button">新建</button>
+              <button id="saveCustomButtonButton" class="small-button primary" type="button">保存按钮</button>
+              <button id="deleteCustomButtonButton" class="small-button danger-lite" type="button">删除按钮</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">权限与运行态</div>
+        <div class="config-grid two">
+          <label><span>写入权限</span><select id="permissionSelect">
+            <option value="notes">允许写入笔记</option>
+            <option value="read_only">只读</option>
+            <option value="full">完整权限</option>
+          </select></label>
+        </div>
+        <div id="runStateLine" class="run-state-line">运行：空闲</div>
+        <div id="fileAccessLine" class="file-access-line warn">文件权限：未检查</div>
+        <div id="mnRuntimeLine" class="mn-runtime-line warn">MN4 运行态：未检查</div>
+        <div id="nativeCapabilitiesLine" class="native-capabilities-line warn">原生能力：未刷新</div>
+        <div class="config-actions">
+          <button id="healthCheckButton" class="small-button" type="button">连接检查</button>
+          <button id="permissionDiagnoseButton" class="small-button" type="button">权限诊断</button>
+          <button id="openPermissionSettingsButton" class="small-button" type="button">打开权限设置</button>
+          <button id="cacheCurrentPdfButton" class="small-button" type="button">缓存当前 PDF</button>
+          <button id="runtimeEvidenceButton" class="small-button" type="button">运行态采证</button>
+          <button id="nativeCapabilitiesRefreshButton" class="small-button" type="button">刷新 MN 能力</button>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">诊断与验收</div>
+        <div id="nativeHighlightWizardLine" class="release-acceptance-line warn">高亮采证：未运行</div>
+        <div id="nativeHighlightWizardDetail" class="release-acceptance-detail">可检查原生高亮流程。</div>
+        <div id="singleDocumentAcceptanceLine" class="release-acceptance-line warn">本文档验收：未运行</div>
+        <div id="singleDocumentAcceptanceDetail" class="release-acceptance-detail">检查当前文档工作流。</div>
+        <div id="releaseAcceptanceLine" class="release-acceptance-line warn">发布验收：未运行</div>
+        <div id="releaseAcceptanceDetail" class="release-acceptance-detail">检查发布 gate。</div>
+        <div class="config-actions">
+          <button id="settingsHighlightStatusButton" class="small-button" type="button">高亮诊断</button>
+          <button id="nativeHighlightWizardButton" class="small-button" type="button">高亮采证</button>
+          <button id="singleDocumentAcceptanceButton" class="small-button" type="button">本文档验收</button>
+          <button id="releaseAcceptanceButton" class="small-button" type="button">发布验收</button>
+        </div>
+      </section>
+    </div>
+  </section>
+  <script src="app.js?v=20260623-reply-mindmap-v1"></script>
+</body>
+</html>

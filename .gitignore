@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
+._*
+__MACOSX/
+
+# Local secrets
+.env
+*.pem
+*.p12
+*.key
+
+# Runtime state
+companion.pid
+companion_settings.json
+events.jsonl
+goal.json
+logs/
+sessions/
+queue/
+uploads/
+control/
+drafts/
+backups/
+
+# Generated release artifacts and evidence
+release/
+*.pkg
+*.dmg
+*.zip
+SHA256SUMS.txt
+
+# Local screenshots and ad-hoc captures
+mn4_screenshot.png
+*.mov
