@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.12';
+  var PluginVersion = '0.4.14';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -1643,7 +1643,6 @@ JSB.newAddon = function(mainPath) {
     } else if (action === 'context') {
       selectionText = '';
       this.lastSelectionText = '';
-      if (this.panel && this.panel.setPromptText) this.panel.setPromptText('');
     }
     return {
       action: action,

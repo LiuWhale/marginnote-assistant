@@ -2,6 +2,31 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.14 - 2026-06-23
+
+### Added
+
+- Added a settings-page diagnostic log viewer backed by `logs/diagnostics.jsonl`, with action lifecycle records, request ids, elapsed time, failure summaries, and log clearing.
+- Added file path management in settings so users can maintain multiple local search roots for MarginNote document source recovery.
+
+### Changed
+
+- Current-document source lookup now also searches configured file roots recursively by recorded file name, improving recovery when MarginNote only exposes an MNDoc filename.
+- Diagnostic logging redacts API keys, tokens, base64 payloads, and large generated content while preserving useful action, path, and error metadata.
+
+## 0.4.13 - 2026-06-23
+
+### Added
+
+- Added independent new-conversation and history pages for document-bound chat sessions.
+- Added broader PDF path recovery across MarginNote document caches and common OneDrive/iCloud paper roots.
+
+### Fixed
+
+- Reduced the risk of MarginNote 4 RemoteTextInput crashes by pausing background context refresh while text inputs are focused, slowing the refresh interval, and releasing the prompt focus after send.
+- Stopped background context refresh from mutating the prompt textarea when a PDF selection is cleared.
+- Filtered stale “missing pdfPath” assistant replies out of future model history after a PDF path becomes resolvable.
+
 ## 0.4.12 - 2026-06-23
 
 ### Changed

@@ -138,6 +138,72 @@ class PdfExportTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual(resolved, source)
 
+    def test_resolve_pdf_source_searches_onedrive_roots_from_marginnote_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            mn_docs = Path(tmp) / "empty-MNDocs"
+            mn_docs.mkdir()
+            onedrive_papers = Path(tmp) / "OneDrive/paper"
+            onedrive_papers.mkdir(parents=True)
+            source = onedrive_papers / "source.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+            db_path = Path(tmp) / "MarginNotes.sqlite"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("create table ZBOOK (ZMD5 text, ZMD5LONG text, ZPATH text, ZBOOKURL text, ZFILE text)")
+                conn.execute(
+                    "insert into ZBOOK (ZMD5, ZMD5LONG, ZPATH, ZBOOKURL, ZFILE) values (?, ?, ?, ?, ?)",
+                    ("SHORT", "LONGBOOK", "$$$MNDOCLINK$$$iCloud.QReader.MarginStudy.easy/MNDocs", "", "source.pdf"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            companion = load_companion(root)
+            companion.DB_PATH = db_path
+            companion.MN_DOC_ROOTS = [mn_docs]
+            companion.ONEDRIVE_PDF_ROOTS = [onedrive_papers]
+
+            resolved, error = companion.resolve_pdf_source({}, "LONGBOOK")
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, source)
+
+    def test_resolve_pdf_source_searches_configured_file_roots_recursively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            file_root = Path(tmp) / "managed-files"
+            nested = file_root / "papers" / "robotics"
+            nested.mkdir(parents=True)
+            source = nested / "qwen-vlami.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+            db_path = Path(tmp) / "MarginNotes.sqlite"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("create table ZBOOK (ZMD5 text, ZMD5LONG text, ZPATH text, ZBOOKURL text, ZFILE text)")
+                conn.execute(
+                    "insert into ZBOOK (ZMD5, ZMD5LONG, ZPATH, ZBOOKURL, ZFILE) values (?, ?, ?, ?, ?)",
+                    ("SHORT", "LONGBOOK", "", "", "qwen-vlami.pdf"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            companion = load_companion(root)
+            companion.DB_PATH = db_path
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source({}, "LONGBOOK")
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, source)
+
     def test_cache_pdf_from_marginnote_is_used_as_pdf_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "companion"

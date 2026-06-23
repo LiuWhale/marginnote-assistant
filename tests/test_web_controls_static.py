@@ -22,6 +22,8 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="aiChatShell"',
             'id="statusPill"',
             'id="settingsButton"',
+            'id="newConversationButton"',
+            'id="conversationHistoryButton"',
             'id="stopButton"',
             'id="liveHistory"',
             'id="promptInput"',
@@ -51,7 +53,6 @@ class WebControlsStaticTests(unittest.TestCase):
             "runToggleButton",
             "queueBadge",
             "fileInput",
-            "historyButton",
             "制卡",
             "脑图",
             "高亮",
@@ -238,6 +239,34 @@ class WebControlsStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, self.html + self.js)
 
+    def test_config_page_exposes_file_path_management_and_diagnostic_logs(self) -> None:
+        config_html = self.html.split('<section id="configPage"', 1)[1]
+
+        for marker in [
+            "文件路径管理",
+            'id="fileSearchRootsInput"',
+            'id="fileSearchRootsStatusLine"',
+            'id="saveFileSearchRootsButton"',
+            "parseFileSearchRootsInput",
+            "renderFileSearchRoots",
+            "fileSearchRoots: parseFileSearchRootsInput()",
+            "保存文件路径",
+            "日志与诊断",
+            'id="logsStatusLine"',
+            'id="logsList"',
+            'id="logsRefreshButton"',
+            'id="logsClearButton"',
+            "refreshDiagnosticLogs",
+            "renderDiagnosticLogs",
+            "postCompanion('logs_recent'",
+            "postCompanion('logs_clear'",
+        ]:
+            self.assertIn(marker, config_html + self.js)
+
+        main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+        self.assertNotIn("文件路径管理", main_html)
+        self.assertNotIn("日志与诊断", main_html)
+
     def test_pdf_math_unicode_repair_is_applied_to_visible_context(self) -> None:
         main_js = (ROOT / "main.js").read_text(encoding="utf-8")
         for marker in [
@@ -262,6 +291,30 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("startContextAutoRefresh", self.js)
         self.assertIn("bridge('context', {reason: 'auto-refresh'})", self.js)
         self.assertIn("state.contextAutoRefreshTimer", self.js)
+
+    def test_background_context_refresh_does_not_mutate_prompt_text(self) -> None:
+        main_js = (ROOT / "main.js").read_text(encoding="utf-8")
+        context_branch = main_js.split("} else if (action === 'context') {", 1)[1].split(
+            "\n    }", 1
+        )[0]
+
+        self.assertIn("this.lastSelectionText = ''", context_branch)
+        self.assertNotIn("setPromptText('')", context_branch)
+        self.assertNotIn('setPromptText("")', context_branch)
+
+    def test_background_refresh_pauses_while_text_input_is_active(self) -> None:
+        auto_refresh_body = self.js.split("function startContextAutoRefresh", 1)[1].split(
+            "\n  function refreshHistory", 1
+        )[0]
+        clear_prompt_body = self.js.split("function clearPromptInputAfterSend", 1)[1].split(
+            "\n  function actionLabel", 1
+        )[0]
+
+        self.assertIn("function isTextInputActive", self.js)
+        self.assertIn("isTextInputActive()", auto_refresh_body)
+        self.assertIn("return", auto_refresh_body)
+        self.assertIn("5000", auto_refresh_body)
+        self.assertIn("releaseTextInputFocus", clear_prompt_body)
 
     def test_ai_chat_has_stop_generation_control_but_no_queue_control(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
@@ -448,6 +501,30 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".reply-mindmap-tree-button", self.css)
         self.assertNotIn(".reply-mindmap-menu", self.css)
         self.assertIn(".ai-edit-operation", self.css)
+
+    def test_ai_chat_has_new_conversation_and_history_panel(self) -> None:
+        for marker in [
+            'id="newConversationButton"',
+            'id="conversationHistoryButton"',
+            'id="conversationHistoryPage"',
+            'id="conversationHistoryList"',
+            'id="conversationHistoryCloseButton"',
+            '<section id="conversationHistoryPage" class="config-page hidden"',
+            "function newConversation",
+            "function openConversationHistory",
+            "function closeConversationHistory",
+            "function renderConversationList",
+            "function loadConversation",
+            "function deleteConversation",
+            "conversation_new",
+            "conversation_list",
+            "conversation_load",
+            "conversation_delete",
+            "payload.conversationId",
+            "payload.sessionId",
+            ".conversation-list-item",
+        ]:
+            self.assertIn(marker, self.html + self.js + self.css)
 
     def test_parity_matrix_document_tracks_builtin_ai_chat_requirements(self) -> None:
         doc = (Path(__file__).resolve().parents[1] / "docs/MN4_AI_CHAT_PARITY.md").read_text(encoding="utf-8")

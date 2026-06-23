@@ -177,6 +177,116 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertNotIn("old uploaded note should not override", prompt)
             self.assertIn("已忽略历史上传文件", prompt)
 
+    def test_model_history_drops_stale_missing_pdf_replies_when_document_context_is_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            companion.append_history(
+                payload,
+                "详细解释这篇论文",
+                "我现在无法详细解释这篇论文，因为本次插件没有传入可解析的本地 PDF 路径，全文内容没有被读取到。",
+            )
+            companion.append_history(payload, "那之前怎么解读的其他论文", "正常历史回答")
+            model_input = "当前文档全文检索片段：\n[第1页] Abstract and evidence are available now."
+
+            history = companion.history_for_model(payload, model_input)
+
+            contents = "\n".join(item["content"] for item in history)
+            self.assertIn("正常历史回答", contents)
+            self.assertNotIn("全文内容没有被读取到", contents)
+            self.assertNotIn("没有传入可解析的本地 PDF 路径", contents)
+
+    def test_conversation_actions_create_list_load_and_delete_document_scoped_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            first = companion.handle_action({**base, "action": "conversation_new"})
+            second = companion.handle_action({**base, "action": "conversation_new"})
+
+            self.assertTrue(first["ok"])
+            self.assertTrue(second["ok"])
+            self.assertNotEqual(first["conversation"]["conversationId"], second["conversation"]["conversationId"])
+
+            companion.append_history(
+                {**base, "conversationId": first["conversation"]["conversationId"]},
+                "第一轮问题",
+                "第一轮回答",
+            )
+            companion.append_history(
+                {**base, "conversationId": second["conversation"]["conversationId"]},
+                "第二轮问题",
+                "第二轮回答",
+            )
+
+            listed = companion.handle_action({**base, "action": "conversation_list"})
+
+            self.assertTrue(listed["ok"])
+            self.assertEqual(listed["conversation_count"], 2)
+            titles = [item["title"] for item in listed["conversations"]]
+            self.assertIn("第一轮问题", titles)
+            self.assertIn("第二轮问题", titles)
+            for item in listed["conversations"]:
+                self.assertEqual(item["topicid"], "T1")
+                self.assertEqual(item["bookmd5"], "B1")
+                self.assertEqual(item["messageCount"], 2)
+                self.assertRegex(item["sessionId"], r"^[a-f0-9]{24}$")
+
+            first_item = next(item for item in listed["conversations"] if item["title"] == "第一轮问题")
+            loaded = companion.handle_action({**base, "action": "conversation_load", "sessionId": first_item["sessionId"]})
+
+            self.assertTrue(loaded["ok"])
+            self.assertEqual(loaded["conversation"]["sessionId"], first_item["sessionId"])
+            self.assertEqual([item["content"] for item in loaded["history"]], ["第一轮问题", "第一轮回答"])
+
+            deleted = companion.handle_action({**base, "action": "conversation_delete", "sessionId": first_item["sessionId"]})
+            self.assertTrue(deleted["ok"])
+            relisted = companion.handle_action({**base, "action": "conversation_list"})
+            self.assertEqual(relisted["conversation_count"], 1)
+            self.assertEqual(relisted["conversations"][0]["title"], "第二轮问题")
+
+    def test_diagnostic_logs_record_action_lifecycle_without_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.handle_action_logged(
+                {
+                    "action": "settings_update",
+                    "source": "unittest",
+                    "settings": {
+                        "model": "gpt-5.5",
+                        "openaiApiKey": "sk-test-secret-value-1234567890",
+                    },
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertRegex(result["requestId"], r"^[a-f0-9]{12}$")
+            logs = companion.read_recent_diagnostic_logs(20)
+            events = [item.get("event") for item in logs]
+            self.assertIn("action.start", events)
+            self.assertIn("action.end", events)
+            blob = json.dumps(logs, ensure_ascii=False)
+            self.assertIn(result["requestId"], blob)
+            self.assertIn("settings_update", blob)
+            self.assertIn("[redacted]", blob)
+            self.assertNotIn("sk-test-secret-value", blob)
+
+    def test_diagnostic_logs_recent_and_clear_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_diagnostic_log("warn", "unit.example", "测试日志", extra={"detail": "可分析"})
+
+            recent = companion.handle_action({"action": "logs_recent", "limit": 5})
+            self.assertTrue(recent["ok"])
+            self.assertEqual(recent["logs"][-1]["event"], "unit.example")
+            self.assertIn("diagnostics.jsonl", recent["logPath"])
+            self.assertIn("events.jsonl", recent["eventsPath"])
+
+            cleared = companion.handle_action({"action": "logs_clear"})
+            self.assertTrue(cleared["ok"])
+            self.assertEqual(companion.read_recent_diagnostic_logs(5), [])
+
     def test_auto_scope_prefers_selection_unless_prompt_requests_document(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

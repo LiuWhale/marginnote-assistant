@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260623-config-context-v1">
+  <link rel="stylesheet" href="app.css?v=20260623-diagnostics-paths-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -14,6 +14,8 @@
         <p id="contextLine">等待 MarginNote 上下文</p>
       </div>
       <div class="topbar-actions">
+        <button class="small-button" id="newConversationButton" type="button">新对话</button>
+        <button class="small-button" id="conversationHistoryButton" type="button">历史</button>
         <button class="small-button" id="settingsButton" type="button">设置</button>
         <button class="icon-button" id="closeButton" type="button" title="关闭">x</button>
       </div>
@@ -43,6 +45,24 @@
       </div>
     </section>
   </main>
+
+  <section id="conversationHistoryPage" class="config-page hidden" aria-label="历史对话">
+    <header class="config-header">
+      <div>
+        <h2>历史对话</h2>
+        <p>当前文档的独立对话</p>
+      </div>
+      <button id="conversationHistoryCloseButton" class="small-button primary-lite" type="button">返回</button>
+    </header>
+    <div class="config-body">
+      <section class="config-section">
+        <div class="config-section-title">当前文档历史</div>
+        <div id="conversationHistoryList" class="conversation-history-list">
+          <div class="conversation-empty">暂无历史对话</div>
+        </div>
+      </section>
+    </div>
+  </section>
 
   <section id="configPage" class="config-page hidden" aria-label="Codex Companion 配置">
     <header class="config-header">
@@ -114,6 +134,16 @@
         </div>
       </section>
 
+      <section class="config-section">
+        <div class="config-section-title">文件路径管理</div>
+        <div class="settings-page-note">每行一个本机根目录；当前文档找不到原文件时，Companion 会在这些目录下按文件名搜索。</div>
+        <textarea id="fileSearchRootsInput" class="path-list-input" spellcheck="false" placeholder="/Users/liuwhale/Library/CloudStorage/OneDrive-个人/paper"></textarea>
+        <div id="fileSearchRootsStatusLine" class="file-roots-status-line">已配置 0 个文件路径</div>
+        <div class="config-actions">
+          <button id="saveFileSearchRootsButton" class="small-button primary" type="button">保存文件路径</button>
+        </div>
+      </section>
+
       <section id="updateSection" class="config-section">
         <div class="config-section-title">插件更新</div>
         <div id="updateStatusLine" class="update-status-line">更新：尚未检查</div>
@@ -151,8 +181,20 @@
           <button id="nativeCapabilitiesRefreshButton" class="small-button" type="button">刷新 MN 能力</button>
         </div>
       </section>
+
+      <section class="config-section">
+        <div class="config-section-title">日志与诊断</div>
+        <div id="logsStatusLine" class="diagnostic-log-status-line">诊断日志：尚未读取</div>
+        <div id="logsList" class="diagnostic-log-list">
+          <div class="diagnostic-log-empty">暂无诊断日志</div>
+        </div>
+        <div class="config-actions">
+          <button id="logsRefreshButton" class="small-button" type="button">刷新日志</button>
+          <button id="logsClearButton" class="small-button danger-lite" type="button">清空日志</button>
+        </div>
+      </section>
     </div>
   </section>
-  <script src="app.js?v=20260623-config-context-v1"></script>
+  <script src="app.js?v=20260623-diagnostics-paths-v1"></script>
 </body>
 </html>

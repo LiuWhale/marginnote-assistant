@@ -3,9 +3,9 @@
 ## 版本信息
 
 - 插件名：Codex Companion
-- 当前发布候选：0.4.12
-- MN4 插件 manifest 版本：0.4.12
-- Companion 版本：0.4.12
+- 当前发布候选：0.4.14
+- MN4 插件 manifest 版本：0.4.14
+- Companion 版本：0.4.14
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`
@@ -15,8 +15,8 @@
 0. 发布包一键安装入口
 
 ```bash
-unzip CodexCompanion-0.4.12-latest-dist.zip
-cd CodexCompanion-0.4.12
+unzip CodexCompanion-0.4.14-latest-dist.zip
+cd CodexCompanion-0.4.14
 python3 release_smoke_test.py
 python3 release_smoke_test.py --install-dry-run
 python3 build_pkg.py --dry-run
@@ -53,7 +53,7 @@ python3 build_pkg.py --sign-identity "Developer ID Installer: <Team Name> (<Team
 签名 pkg 还不是最终可分发包。公发前必须 notarize 并 staple：
 
 ```bash
-python3 notarize_pkg.py ./release/CodexCompanion-0.4.12-latest.pkg --keychain-profile "CodexNotary"
+python3 notarize_pkg.py ./release/CodexCompanion-0.4.14-latest.pkg --keychain-profile "CodexNotary"
 ```
 
 发布维护者也可以双击 `Notarize Package.command`。该入口需要 `NOTARYTOOL_KEYCHAIN_PROFILE`，或 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_SPECIFIC_PASSWORD`。`doctor.py` 会用 `xcrun stapler validate` 和 `spctl -a -vv -t install` 把 notarization 作为独立证据；`release_acceptance.py` 会把 `signed_pkg` 和 `notarized_pkg` 分开阻断。
@@ -93,7 +93,7 @@ tail -n 30 "$HOME/.codex/marginnote-assistant/events.jsonl"
 
 应看到：
 
-- `pluginVersion` 为 `0.4.12`
+- `pluginVersion` 为 `0.4.14`
 - `webPanelLoaded`
 - `panelShownState`
 - `panelKind=webview`

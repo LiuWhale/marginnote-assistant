@@ -300,6 +300,60 @@ h1 {
   gap: 8px;
 }
 
+.path-list-input {
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+  color: var(--text);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.file-roots-status-line,
+.diagnostic-log-status-line {
+  min-height: 28px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.diagnostic-log-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.diagnostic-log-item,
+.diagnostic-log-empty {
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.diagnostic-log-meta {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.diagnostic-log-message {
+  margin-top: 3px;
+  white-space: pre-wrap;
+}
+
 .run-toggle-button {
   min-width: 54px;
   text-align: center;
@@ -1088,6 +1142,62 @@ input[type="file"] {
 
 .ai-chat-history {
   min-height: 0;
+}
+
+.conversation-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.conversation-empty {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--muted);
+}
+
+.conversation-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.conversation-list-item.active {
+  border-color: #bfdcd2;
+  background: #f5fbf8;
+}
+
+.conversation-list-main {
+  min-width: 0;
+}
+
+.conversation-list-title {
+  color: var(--ink);
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list-meta,
+.conversation-list-preview {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .draft-panel {

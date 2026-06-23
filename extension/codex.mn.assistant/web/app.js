@@ -41,12 +41,18 @@
     deferredNativeQueueIds: {},
     update: {},
     updateAutoChecked: false,
-    pluginVersion: ''
+    pluginVersion: '',
+    conversationId: '',
+    sessionId: '',
+    conversations: [],
+    diagnosticLogs: []
   };
   var MAIN_PINNED_BUTTON_LIMIT = 4;
   var requiredControlIds = [
     'aiChatShell',
     'settingsButton',
+    'newConversationButton',
+    'conversationHistoryButton',
     'promptInput',
     'sendButton',
     'stopButton',
@@ -64,7 +70,14 @@
     'updateNoticeText',
     'statusPill',
     'contextLine',
-    'readinessPanel'
+    'readinessPanel',
+    'conversationHistoryPage',
+    'conversationHistoryList',
+    'conversationHistoryCloseButton',
+    'fileSearchRootsInput',
+    'fileSearchRootsStatusLine',
+    'logsStatusLine',
+    'logsList'
   ];
   var presetButtons = [
     {
@@ -257,6 +270,27 @@
     }, 0);
   }
 
+  function isTextInputElement(el) {
+    if (!el) return false;
+    var tag = String(el.tagName || '').toLowerCase();
+    return tag === 'textarea' ||
+      tag === 'select' ||
+      tag === 'input' ||
+      el.isContentEditable === true;
+  }
+
+  function isTextInputActive() {
+    return isTextInputElement(document.activeElement);
+  }
+
+  function releaseTextInputFocus(id) {
+    var el = byId(id);
+    if (!el || !el.blur) return;
+    window.setTimeout(function() {
+      if (document.activeElement === el) el.blur();
+    }, 0);
+  }
+
   function bindButton(id, handler) {
     var el = byId(id);
     if (!el) return;
@@ -440,6 +474,134 @@
     }
   }
 
+  function renderNewConversationMessage() {
+    clearMessages();
+    addMessage('assistant', '已开启新对话。当前对话仍会绑定这篇文档；历史可从右上角“历史”恢复。');
+  }
+
+  function setCurrentConversation(conversation) {
+    conversation = conversation || {};
+    state.conversationId = String(conversation.conversationId || '');
+    state.sessionId = String(conversation.sessionId || '');
+  }
+
+  function openConversationHistory() {
+    closeConfigPage();
+    var page = byId('conversationHistoryPage');
+    if (page) page.className = 'config-page';
+    postCompanion('conversation_list', {}, function(result) {
+      state.conversations = result.conversations || [];
+      renderConversationList(state.conversations);
+    }, {showReply: false});
+  }
+
+  function closeConversationHistory() {
+    var page = byId('conversationHistoryPage');
+    if (page) page.className = 'config-page hidden';
+  }
+
+  function renderConversationList(items) {
+    var list = byId('conversationHistoryList');
+    if (!list) return;
+    list.innerHTML = '';
+    items = items || [];
+    if (!items.length) {
+      var empty = document.createElement('div');
+      empty.className = 'conversation-empty';
+      empty.textContent = '当前文档还没有历史对话。';
+      list.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < items.length; i++) {
+      (function(item) {
+        item = item || {};
+        var row = document.createElement('article');
+        row.className = 'conversation-list-item' + (item.sessionId && item.sessionId === state.sessionId ? ' active' : '');
+        var main = document.createElement('div');
+        main.className = 'conversation-list-main';
+        var title = document.createElement('div');
+        title.className = 'conversation-list-title';
+        title.textContent = item.title || '新对话';
+        var meta = document.createElement('div');
+        meta.className = 'conversation-list-meta';
+        meta.textContent = (item.updatedAt || '未保存') + ' / ' + (item.messageCount || 0) + ' 条消息';
+        var preview = document.createElement('div');
+        preview.className = 'conversation-list-preview';
+        preview.textContent = item.lastMessage || '无预览';
+        main.appendChild(title);
+        main.appendChild(meta);
+        main.appendChild(preview);
+        var actions = document.createElement('div');
+        actions.className = 'conversation-list-actions';
+        var loadButton = document.createElement('button');
+        loadButton.className = 'small-button primary-lite';
+        loadButton.type = 'button';
+        loadButton.textContent = '打开';
+        loadButton.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          loadConversation(item);
+        });
+        var deleteButton = document.createElement('button');
+        deleteButton.className = 'small-button danger-lite';
+        deleteButton.type = 'button';
+        deleteButton.textContent = '删除';
+        deleteButton.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          deleteConversation(item);
+        });
+        actions.appendChild(loadButton);
+        actions.appendChild(deleteButton);
+        row.appendChild(main);
+        row.appendChild(actions);
+        list.appendChild(row);
+      })(items[i]);
+    }
+  }
+
+  function newConversation() {
+    postCompanion('conversation_new', {}, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('新对话失败', result);
+        return;
+      }
+      setCurrentConversation(result.conversation || {});
+      renderNewConversationMessage();
+      closeConversationHistory();
+    }, {showReply: false});
+  }
+
+  function loadConversation(item) {
+    item = item || {};
+    if (!item.sessionId) return;
+    postCompanion('conversation_load', {sessionId: item.sessionId}, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('加载历史对话失败', result);
+        return;
+      }
+      setCurrentConversation(result.conversation || item);
+      renderHistoryItems(result.history || []);
+      closeConversationHistory();
+    }, {showReply: false});
+  }
+
+  function deleteConversation(item) {
+    item = item || {};
+    if (!item.sessionId) return;
+    if (window.confirm && !window.confirm('删除这条历史对话？')) return;
+    postCompanion('conversation_delete', {sessionId: item.sessionId}, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('删除历史对话失败', result);
+        return;
+      }
+      if (item.sessionId === state.sessionId) {
+        state.conversationId = '';
+        state.sessionId = '';
+        renderNewConversationMessage();
+      }
+      openConversationHistory();
+    }, {showReply: false});
+  }
+
   function isBrowserPreview() {
     return window.location && /^https?:$/.test(String(window.location.protocol || ''));
   }
@@ -500,6 +662,8 @@
     for (var extraKey in extra) {
       if (Object.prototype.hasOwnProperty.call(extra, extraKey)) payload[extraKey] = extra[extraKey];
     }
+    if (!payload.conversationId && state.conversationId) payload.conversationId = state.conversationId;
+    if (!payload.sessionId && state.sessionId) payload.sessionId = state.sessionId;
     payload.action = action;
     payload.source = payload.source || 'marginnote4-web-panel';
     payload.contextScope = currentContextScope();
@@ -778,6 +942,7 @@
 
   function clearPromptInputAfterSend() {
     setValue('promptInput', '');
+    releaseTextInputFocus('promptInput');
   }
 
   function actionLabel(action) {
@@ -2550,6 +2715,7 @@
     setValue('codexCliPathInput', state.settings.codexCliPath || state.codexCliPath || '');
     setValue('defaultContextScopeSelect', state.settings.defaultContextScope || 'auto');
     setValue('githubRepoInput', state.settings.githubRepo || (state.update && state.update.repo) || 'LiuWhale/marginnote-assistant');
+    renderFileSearchRoots(state.settings);
     if (!state.contextScopeInitialized) {
       state.contextScopeInitialized = true;
       setContextScope(state.settings.defaultContextScope || 'auto');
@@ -2567,6 +2733,7 @@
     renderMnRuntime(result);
     renderNativeCapabilities(result);
     renderUpdateStatus(result);
+    if (result.logs) renderDiagnosticLogs(result);
     renderSettingsContextMeta(state.context || {});
     if (result.nativeHighlightWizard) renderNativeHighlightWizard(result);
     if (result.releaseAcceptance || result.releasable !== undefined || result.blockerCount !== undefined) {
@@ -2618,6 +2785,95 @@
     line.className = 'goal-status-line active';
   }
 
+  function parseFileSearchRootsInput() {
+    var raw = getValue('fileSearchRootsInput');
+    var seen = {};
+    var roots = [];
+    var lines = String(raw || '').split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var value = lines[i].replace(/^\s+|\s+$/g, '');
+      if (!value || seen[value]) continue;
+      seen[value] = true;
+      roots.push(value);
+      if (roots.length >= 40) break;
+    }
+    return roots;
+  }
+
+  function renderFileSearchRoots(settings) {
+    settings = settings || state.settings || {};
+    var roots = settings.fileSearchRoots || [];
+    if (!roots || !roots.length) roots = [];
+    setValue('fileSearchRootsInput', roots.join('\n'));
+    setText(
+      'fileSearchRootsStatusLine',
+      roots.length ? ('已配置 ' + roots.length + ' 个文件路径') : '未配置额外文件路径'
+    );
+  }
+
+  function saveFileSearchRoots() {
+    postCompanion('settings_update', {
+      settings: {
+        fileSearchRoots: parseFileSearchRootsInput()
+      }
+    }, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) addFailureMessage('保存文件路径失败', result);
+    }, {showReply: false});
+  }
+
+  function renderDiagnosticLogs(result) {
+    result = result || {};
+    var logs = result.logs || state.diagnosticLogs || [];
+    state.diagnosticLogs = logs;
+    var pathText = result.logPath ? (' / ' + result.logPath) : '';
+    setText('logsStatusLine', '诊断日志：最近 ' + logs.length + ' 条' + pathText);
+    var list = byId('logsList');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!logs.length) {
+      var empty = document.createElement('div');
+      empty.className = 'diagnostic-log-empty';
+      empty.textContent = '暂无诊断日志';
+      list.appendChild(empty);
+      return;
+    }
+    for (var i = logs.length - 1; i >= 0; i--) {
+      var item = logs[i] || {};
+      var row = document.createElement('div');
+      row.className = 'diagnostic-log-item';
+      var meta = document.createElement('div');
+      meta.className = 'diagnostic-log-meta';
+      meta.textContent = [
+        item.ts || 'no-ts',
+        item.level || 'info',
+        item.event || 'event',
+        item.requestId ? ('#' + item.requestId) : ''
+      ].filter(Boolean).join(' / ');
+      var message = document.createElement('div');
+      message.className = 'diagnostic-log-message';
+      message.textContent = item.message || '';
+      row.appendChild(meta);
+      row.appendChild(message);
+      list.appendChild(row);
+    }
+  }
+
+  function refreshDiagnosticLogs() {
+    postCompanion('logs_recent', {limit: 80}, function(result) {
+      renderDiagnosticLogs(result || {});
+      if (!result || !result.ok) addFailureMessage('读取诊断日志失败', result);
+    }, {showReply: false});
+  }
+
+  function clearDiagnosticLogs() {
+    if (window.confirm && !window.confirm('确认清空诊断日志？')) return;
+    postCompanion('logs_clear', {}, function(result) {
+      renderDiagnosticLogs(result || {logs: []});
+      if (!result || !result.ok) addFailureMessage('清空诊断日志失败', result);
+    }, {showReply: false});
+  }
+
   function refreshSettings() {
     postCompanion('settings_get', {}, function(result) {
       renderControls(result || {});
@@ -2642,6 +2898,7 @@
         proxyUrl: getValue('proxyUrlInput'),
         defaultContextScope: getValue('defaultContextScopeSelect'),
         githubRepo: getValue('githubRepoInput'),
+        fileSearchRoots: parseFileSearchRootsInput(),
         customButtons: state.customButtons,
         openaiApiKey: openaiApiKey
       }
@@ -2909,8 +3166,9 @@
     if (state.contextAutoRefreshTimer) return;
     state.contextAutoRefreshTimer = window.setInterval(function() {
       if (isActiveRun()) return;
+      if (isTextInputActive()) return;
       bridge('context', {reason: 'auto-refresh'});
-    }, 1800);
+    }, 5000);
   }
 
   function refreshHistory() {
@@ -3050,9 +3308,11 @@
   }
 
   function openConfigPage() {
+    closeConversationHistory();
     var page = byId('configPage');
     if (page) page.className = 'config-page';
     renderSettingsContextMeta(state.context || {});
+    refreshDiagnosticLogs();
   }
 
   function closeConfigPage() {
@@ -3291,12 +3551,16 @@
       bridge('close', {});
     });
     bindButton('settingsButton', openConfigPage);
+    bindButton('newConversationButton', newConversation);
+    bindButton('conversationHistoryButton', openConversationHistory);
+    bindButton('conversationHistoryCloseButton', closeConversationHistory);
     bindButton('configBackButton', closeConfigPage);
     bindButton('contextButton', function() {
       bridge('context', {});
     });
     bindButton('stopButton', stopCurrent);
     bindButton('saveSettingsButton', saveSettings);
+    bindButton('saveFileSearchRootsButton', saveFileSearchRoots);
     bindButton('clearOpenAIKeyButton', clearOpenAIKey);
     bindButton('aiBackendProbeButton', probeAiBackend);
     bindButton('healthCheckButton', checkHealth);
@@ -3308,6 +3572,8 @@
       checkForUpdates(false);
     });
     bindButton('updateInstallButton', installUpdate);
+    bindButton('logsRefreshButton', refreshDiagnosticLogs);
+    bindButton('logsClearButton', clearDiagnosticLogs);
     bindButton('updateNoticeOpenSettingsButton', openUpdateSettings);
     bindButton('settingsHighlightStatusButton', diagnoseHighlights);
     bindButton('nativeHighlightWizardButton', startNativeHighlightWizard);

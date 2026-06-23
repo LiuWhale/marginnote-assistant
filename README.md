@@ -19,6 +19,8 @@ It is designed for reading, annotating, and restructuring long documents. Academ
 - Check GitHub Releases for plugin updates and install the latest release zip from settings.
 - Queue actions while another generation is running, and stop the active task.
 - Cache the current PDF through the MarginNote process to reduce macOS file-permission failures.
+- Manage extra local file search roots from settings when MarginNote only exposes a document filename.
+- View and clear structured diagnostic logs from settings for failed actions, path resolution, and Companion requests.
 - Check Companion health, MarginNote runtime state, and native bridge capabilities from settings.
 - Run release gates, package smoke tests, and deeper diagnostics from the command line.
 
@@ -134,20 +136,20 @@ curl http://127.0.0.1:48761/status
 Build a clean release zip:
 
 ```bash
-python3 package_release.py 0.4.12
+python3 package_release.py 0.4.14
 ```
 
 Smoke-test the zip:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.12-latest-dist.zip
-python3 release_smoke_test.py release/CodexCompanion-0.4.12-latest-dist.zip --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.14-latest-dist.zip
+python3 release_smoke_test.py release/CodexCompanion-0.4.14-latest-dist.zip --install-dry-run
 ```
 
 Run the release acceptance report:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.12-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.14-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked until you provide machine-specific evidence such as native highlight proof, signed/notarized package proof, or cross-machine install proof. Those gates are evidence checks, not source packaging failures.

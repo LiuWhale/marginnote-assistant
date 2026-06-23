@@ -39,6 +39,7 @@ from runtime_config import (
     sanitize_codex_cli_path,
     sanitize_custom_buttons,
     sanitize_default_context_scope,
+    sanitize_file_search_roots,
     sanitize_github_repo,
     sanitize_model,
     sanitize_openai_api_key,
@@ -55,6 +56,8 @@ ROOT = Path(os.environ.get("CODEX_MN_COMPANION_HOME", HOME / ".codex/marginnote-
 CONFIG_PATH = ROOT / ".env"
 SESSIONS_DIR = ROOT / "sessions"
 EVENTS_PATH = ROOT / "events.jsonl"
+DIAGNOSTIC_LOG_PATH = ROOT / "logs/diagnostics.jsonl"
+DIAGNOSTIC_LOG_MAX_LINES = 1000
 QUEUE_DIR = ROOT / "queue"
 SETTINGS_PATH = ROOT / "companion_settings.json"
 GOAL_PATH = ROOT / "goal.json"
@@ -69,7 +72,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.12"
+CURRENT_PLUGIN_VERSION = "0.4.14"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -94,6 +97,29 @@ MN_DOC_ROOTS = [
     HOME / "Library/Mobile Documents/iCloud~QReader~MarginStudy~easy/Documents/MNDocs",
     HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Documents/MNDocs",
     HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Application Support/MNDocs",
+]
+MN_DOC_CACHE_ROOTS = [
+    HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Caches/MD5CacheFiles/$$$MNDOCLINK$$$iCloud.QReader.MarginStudy.easy/MNDocs",
+    HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Caches/MD5CacheFiles/$$$MNDOCLINK$$$论文文件/MNDocs",
+]
+ONEDRIVE_PDF_ROOTS = [
+    HOME / "Library/CloudStorage/OneDrive-个人/paper",
+    HOME / "Library/CloudStorage/OneDrive-个人/博士/论文文件/MNDocs",
+    HOME / "Library/CloudStorage/OneDrive-个人/博士/脑图/papers",
+    HOME / "Library/CloudStorage/OneDrive-个人/PostGraduate/论文",
+    HOME / "Library/CloudStorage/OneDrive-个人/研究生/论文",
+    HOME / "Library/CloudStorage/OneDrive-个人/Notability/论文",
+]
+COMMON_CLOUD_PDF_RELS = [
+    "paper",
+    "papers",
+    "论文",
+    "MNDocs",
+    "博士/论文文件/MNDocs",
+    "博士/脑图/papers",
+    "PostGraduate/论文",
+    "研究生/论文",
+    "Notability/论文",
 ]
 STOP_SIGNAL_MAX_AGE_SECONDS = 600
 DB_PATH = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents/MN4NotebookDatabase/0/MarginNotes.sqlite"
@@ -167,6 +193,12 @@ READ_ONLY_ACTIONS = {
     "stop_current",
     "history_list",
     "history_clear",
+    "logs_recent",
+    "logs_clear",
+    "conversation_new",
+    "conversation_list",
+    "conversation_load",
+    "conversation_delete",
     "diagnose_highlights",
     "diagnose_permissions",
     "open_full_disk_access_settings",
@@ -237,6 +269,131 @@ def write_json_file(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+SENSITIVE_LOG_KEYS = {
+    "apikey",
+    "api_key",
+    "authorization",
+    "filecontent",
+    "openaiapikey",
+    "password",
+    "pdfbase64",
+    "secret",
+    "token",
+}
+LARGE_LOG_KEYS = {"cards", "content", "edittext", "history", "messages", "mindmap", "reply"}
+
+
+def diagnostic_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def sanitize_diagnostic_value(key: str, value: Any, depth: int = 0) -> Any:
+    key_lower = str(key or "").replace("_", "").lower()
+    if any(sensitive in key_lower for sensitive in SENSITIVE_LOG_KEYS):
+        return "[redacted]"
+    if key_lower in LARGE_LOG_KEYS:
+        if isinstance(value, str):
+            return {"chars": len(value), "preview": value[:160]}
+        if isinstance(value, list):
+            return {"items": len(value)}
+        if isinstance(value, dict):
+            return {"keys": sorted(str(item) for item in value.keys())[:16]}
+        return "[omitted]"
+    if depth >= 3:
+        return "[max-depth]"
+    if isinstance(value, dict):
+        output: dict[str, Any] = {}
+        for index, (child_key, child_value) in enumerate(value.items()):
+            if index >= 50:
+                output["..."] = f"{len(value) - index} more keys"
+                break
+            output[str(child_key)] = sanitize_diagnostic_value(str(child_key), child_value, depth + 1)
+        return output
+    if isinstance(value, list):
+        output_list = [sanitize_diagnostic_value(key, item, depth + 1) for item in value[:20]]
+        if len(value) > 20:
+            output_list.append(f"... {len(value) - 20} more items")
+        return output_list
+    if isinstance(value, str):
+        if len(value) > 500:
+            return value[:500] + f"... [{len(value)} chars]"
+        return value
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return str(value)[:500]
+
+
+def sanitize_diagnostic_payload(payload: Any) -> Any:
+    return sanitize_diagnostic_value("payload", payload)
+
+
+def prune_diagnostic_log() -> None:
+    try:
+        if not DIAGNOSTIC_LOG_PATH.exists():
+            return
+        lines = DIAGNOSTIC_LOG_PATH.read_text(encoding="utf-8").splitlines()
+        if len(lines) <= DIAGNOSTIC_LOG_MAX_LINES:
+            return
+        DIAGNOSTIC_LOG_PATH.write_text(
+            "\n".join(lines[-DIAGNOSTIC_LOG_MAX_LINES:]) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        return
+
+
+def append_diagnostic_log(
+    level: str,
+    event: str,
+    message: str = "",
+    *,
+    payload: Any | None = None,
+    extra: Any | None = None,
+    request_id: str = "",
+) -> dict[str, Any]:
+    record = {
+        "ts": diagnostic_timestamp(),
+        "pid": os.getpid(),
+        "level": str(level or "info"),
+        "event": str(event or ""),
+        "requestId": str(request_id or ""),
+        "message": str(message or "")[:800],
+    }
+    if payload is not None:
+        record["payload"] = sanitize_diagnostic_payload(payload)
+    if extra is not None:
+        record["extra"] = sanitize_diagnostic_payload(extra)
+    DIAGNOSTIC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with DIAGNOSTIC_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    prune_diagnostic_log()
+    return record
+
+
+def read_recent_diagnostic_logs(limit: int = 80) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit or 80), 300))
+    if not DIAGNOSTIC_LOG_PATH.exists():
+        return []
+    try:
+        lines = DIAGNOSTIC_LOG_PATH.read_text(encoding="utf-8").splitlines()[-safe_limit:]
+    except Exception:
+        return []
+    logs: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(item, dict):
+            logs.append(item)
+    return logs
+
+
+def clear_diagnostic_logs() -> None:
+    DIAGNOSTIC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DIAGNOSTIC_LOG_PATH.write_text("", encoding="utf-8")
+
+
 def write_env_setting(key: str, value: str) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     lines = CONFIG_PATH.read_text(encoding="utf-8").splitlines() if CONFIG_PATH.exists() else []
@@ -267,7 +424,7 @@ def runtime_settings() -> dict[str, Any]:
     settings["model"] = get_setting("OPENAI_MODEL", DEFAULT_MODEL)
     settings["proxyUrl"] = get_setting("CODEX_PROXY_URL", "")
     for key, value in saved.items():
-        if key in settings and key != "customButtons":
+        if key in settings and key not in {"customButtons", "fileSearchRoots"}:
             settings[key] = str(value)
     settings["permission"] = sanitize_permission(settings.get("permission"))
     settings["speed"] = sanitize_speed(settings.get("speed"))
@@ -278,6 +435,7 @@ def runtime_settings() -> dict[str, Any]:
     settings["defaultContextScope"] = sanitize_default_context_scope(settings.get("defaultContextScope"))
     settings["githubRepo"] = sanitize_github_repo(settings.get("githubRepo"))
     settings["customButtons"] = sanitize_custom_buttons(saved.get("customButtons"))
+    settings["fileSearchRoots"] = sanitize_file_search_roots(saved.get("fileSearchRoots"))
     return settings
 
 
@@ -301,6 +459,8 @@ def save_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
         current["githubRepo"] = sanitize_github_repo(values.get("githubRepo"))
     if "customButtons" in values:
         current["customButtons"] = sanitize_custom_buttons(values.get("customButtons"))
+    if "fileSearchRoots" in values:
+        current["fileSearchRoots"] = sanitize_file_search_roots(values.get("fileSearchRoots"))
     api_key = sanitize_openai_api_key(values.get("openaiApiKey")) if "openaiApiKey" in values else ""
     if api_key:
         write_env_setting("OPENAI_API_KEY", api_key)
@@ -1254,18 +1414,37 @@ def ai_backend_probe() -> dict[str, Any]:
 
 
 def session_key(payload: dict[str, Any]) -> str:
-    raw = "|".join(
-        [
-            normalize_topic_id(payload),
-            normalize_book_md5(payload),
-            str(payload.get("source") or ""),
-        ]
-    )
+    parts = [
+        normalize_topic_id(payload),
+        normalize_book_md5(payload),
+        str(payload.get("source") or ""),
+    ]
+    conversation_id = normalize_conversation_id(payload)
+    if conversation_id:
+        parts.append(conversation_id)
+    raw = "|".join(parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def safe_session_id(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if re.fullmatch(r"[a-f0-9]{24}", raw):
+        return raw
+    return ""
+
+
+def normalize_conversation_id(payload: dict[str, Any]) -> str:
+    raw = str(payload.get("conversationId") or payload.get("conversation_id") or "").strip()
+    if not raw:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "-", raw)[:80]
 
 
 def session_path(payload: dict[str, Any]) -> Path:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+    if session_id:
+        return SESSIONS_DIR / f"{session_id}.json"
     return SESSIONS_DIR / f"{session_key(payload)}.json"
 
 
@@ -1364,7 +1543,7 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
     add_candidate(KNOWN_PDF_PATHS.get(book_md5))
     names = [path.name for path in candidates if path.name]
     for name in list(dict.fromkeys(names)):
-        for root in MN_DOC_ROOTS:
+        for root in pdf_source_search_roots():
             add_candidate(root / name)
 
     command = {
@@ -2028,7 +2207,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.12-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.14-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -2692,11 +2871,170 @@ def load_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     return clean
 
 
+def conversation_title_from_history(history: list[dict[str, str]]) -> str:
+    for item in history:
+        if item.get("role") == "user":
+            text = re.sub(r"\s+", " ", str(item.get("content") or "")).strip()
+            if text:
+                return text[:40]
+    return "新对话"
+
+
+def conversation_last_message(history: list[dict[str, str]]) -> str:
+    for item in reversed(history):
+        text = re.sub(r"\s+", " ", str(item.get("content") or "")).strip()
+        if text:
+            return text[:80]
+    return ""
+
+
+def read_conversation_file(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    history = data.get("history")
+    if not isinstance(history, list):
+        history = []
+    clean_history: list[dict[str, str]] = []
+    for item in history[-16:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        content = str(item.get("content") or "")
+        if role in {"user", "assistant"} and content:
+            clean_history.append({"role": role, "content": content})
+    topic_id = str(data.get("topicid") or "")
+    book_md5 = str(data.get("bookmd5") or "")
+    conversation_id = str(data.get("conversationId") or "")
+    title = str(data.get("title") or conversation_title_from_history(clean_history) or "新对话")
+    updated_at = str(data.get("updated_at") or "")
+    return {
+        "sessionId": path.stem,
+        "conversationId": conversation_id,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "source": str(data.get("source") or ""),
+        "title": title,
+        "updatedAt": updated_at,
+        "messageCount": len(clean_history),
+        "lastMessage": conversation_last_message(clean_history),
+        "history": clean_history,
+    }
+
+
+def conversation_matches_payload(item: dict[str, Any], payload: dict[str, Any]) -> bool:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if topic_id and str(item.get("topicid") or "") != topic_id:
+        return False
+    if book_md5 and str(item.get("bookmd5") or "") != book_md5:
+        return False
+    return True
+
+
+def conversation_summary(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sessionId": item.get("sessionId") or "",
+        "conversationId": item.get("conversationId") or "",
+        "topicid": item.get("topicid") or "",
+        "bookmd5": item.get("bookmd5") or "",
+        "title": item.get("title") or "新对话",
+        "updatedAt": item.get("updatedAt") or "",
+        "messageCount": int(item.get("messageCount") or 0),
+        "lastMessage": item.get("lastMessage") or "",
+    }
+
+
+def conversation_payload_for_new(payload: dict[str, Any]) -> dict[str, Any]:
+    conversation_id = str(uuid.uuid4()).upper()
+    derived = {**payload, "conversationId": conversation_id}
+    return {
+        "sessionId": session_key(derived),
+        "conversationId": conversation_id,
+        "topicid": normalize_topic_id(payload),
+        "bookmd5": normalize_book_md5(payload),
+        "title": "新对话",
+        "updatedAt": "",
+        "messageCount": 0,
+        "lastMessage": "",
+    }
+
+
+def list_conversations(payload: dict[str, Any]) -> dict[str, Any]:
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    items: list[dict[str, Any]] = []
+    for path in SESSIONS_DIR.glob("*.json"):
+        item = read_conversation_file(path)
+        if item and conversation_matches_payload(item, payload):
+            items.append(item)
+    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    summaries = [conversation_summary(item) for item in items]
+    return {
+        "ok": True,
+        "message": f"已读取历史对话：{len(summaries)} 条。",
+        "conversations": summaries,
+        "conversation_count": len(summaries),
+    }
+
+
+def new_conversation(payload: dict[str, Any]) -> dict[str, Any]:
+    conversation = conversation_payload_for_new(payload)
+    return {
+        "ok": True,
+        "message": "已创建新对话。",
+        "conversation": conversation,
+        "history": [],
+    }
+
+
+def load_conversation(payload: dict[str, Any]) -> dict[str, Any]:
+    session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+    if not session_id:
+        return {"ok": False, "message": "加载历史对话失败：缺少有效 sessionId。"}
+    path = SESSIONS_DIR / f"{session_id}.json"
+    item = read_conversation_file(path)
+    if not item:
+        return {"ok": False, "message": "加载历史对话失败：会话不存在。"}
+    if not conversation_matches_payload(item, payload):
+        return {"ok": False, "message": "加载历史对话失败：该会话不属于当前文档。"}
+    return {
+        "ok": True,
+        "message": "已加载历史对话。",
+        "conversation": conversation_summary(item),
+        "history": item["history"],
+    }
+
+
+def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
+    session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+    if not session_id:
+        return {"ok": False, "message": "删除历史对话失败：缺少有效 sessionId。"}
+    path = SESSIONS_DIR / f"{session_id}.json"
+    item = read_conversation_file(path)
+    if not item:
+        return {"ok": False, "message": "删除历史对话失败：会话不存在。"}
+    if not conversation_matches_payload(item, payload):
+        return {"ok": False, "message": "删除历史对话失败：该会话不属于当前文档。"}
+    try:
+        path.unlink()
+    except Exception as exc:
+        return {"ok": False, "message": f"删除历史对话失败：{exc}"}
+    return {"ok": True, "message": "历史对话已删除。", "deleted": session_id}
+
+
 def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None:
     path = session_path(payload)
+    conversation_id = normalize_conversation_id(payload)
+    title = conversation_title_from_history(history)
     body = {
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
+        "source": str(payload.get("source") or ""),
+        "conversationId": conversation_id,
+        "title": title,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "history": history[-16:],
     }
@@ -2710,6 +3048,19 @@ def append_history(payload: dict[str, Any], user_text: str, assistant_text: str)
     if assistant_text:
         history.append({"role": "assistant", "content": assistant_text[:5000]})
     save_history(payload, history)
+
+
+STALE_MISSING_PDF_HISTORY_RE = re.compile(
+    r"(没有传入可解析的本地\s*PDF\s*路径|当前\s*MN\s*文档没有可解析|全文内容没有被读取到|拿不到.*pdfPath|pdfPath.*拿不到)",
+    re.I,
+)
+
+
+def history_for_model(payload: dict[str, Any], model_input: str) -> list[dict[str, str]]:
+    history = load_history(payload)[-8:]
+    if "当前文档全文检索片段" not in model_input:
+        return history
+    return [item for item in history if not STALE_MISSING_PDF_HISTORY_RE.search(str(item.get("content") or ""))]
 
 
 def history_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3479,6 +3830,148 @@ def pdf_path_from_raw_value(raw: str) -> Path:
     return Path(raw).expanduser()
 
 
+def unique_paths(paths: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        if not path:
+            continue
+        expanded = path.expanduser()
+        key = str(expanded)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(expanded)
+    return unique
+
+
+def configured_extra_pdf_roots() -> list[Path]:
+    raw = os.environ.get("CODEX_MN_PDF_ROOTS", "")
+    roots: list[Path] = []
+    if raw.strip():
+        parts = [part.strip() for part in raw.replace("\n", os.pathsep).split(os.pathsep)]
+        roots.extend(Path(part).expanduser() for part in parts if part)
+    roots.extend(Path(item).expanduser() for item in runtime_settings().get("fileSearchRoots", []) if str(item).strip())
+    return unique_paths(roots)
+
+
+def cloud_storage_pdf_roots() -> list[Path]:
+    cloud_storage = HOME / "Library/CloudStorage"
+    if not cloud_storage.is_dir():
+        return []
+    roots: list[Path] = []
+    try:
+        providers = [path for path in cloud_storage.iterdir() if path.is_dir()]
+    except Exception:
+        return []
+    for provider in providers:
+        lower_name = provider.name.casefold()
+        if "onedrive" not in lower_name and "icloud" not in lower_name:
+            continue
+        for rel in COMMON_CLOUD_PDF_RELS:
+            roots.append(provider / rel)
+    return roots
+
+
+def marginnote_doclink_roots(raw: str) -> list[Path]:
+    prefix = "$$$MNDOCLINK$$$"
+    value = str(raw or "").strip()
+    if not value.startswith(prefix):
+        return []
+    link = value[len(prefix) :].strip("/")
+    if not link:
+        return []
+    roots = [
+        HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Caches/MD5CacheFiles" / value,
+    ]
+    if link.startswith("iCloud.QReader.MarginStudy.easy/"):
+        rest = link.split("/", 1)[1] if "/" in link else ""
+        if rest:
+            roots.append(HOME / "Library/Mobile Documents/iCloud~QReader~MarginStudy~easy/Documents" / rest)
+    cloud_storage = HOME / "Library/CloudStorage"
+    if cloud_storage.is_dir():
+        try:
+            providers = [path for path in cloud_storage.iterdir() if path.is_dir() and "onedrive" in path.name.casefold()]
+        except Exception:
+            providers = []
+        for provider in providers:
+            roots.append(provider / link)
+            roots.append(provider / "博士" / link)
+    return roots
+
+
+def pdf_root_hints_from_raw_values(raw_values: list[str]) -> list[Path]:
+    roots: list[Path] = []
+    for raw in raw_values:
+        if not raw:
+            continue
+        roots.extend(marginnote_doclink_roots(raw))
+        candidate = pdf_path_from_raw_value(raw)
+        if candidate.is_absolute():
+            roots.append(candidate.parent if candidate.suffix.lower() == ".pdf" else candidate)
+    return unique_paths(roots)
+
+
+def pdf_filename_candidates(raw_values: list[str]) -> list[str]:
+    names: list[str] = []
+    for raw in raw_values:
+        if not raw:
+            continue
+        if raw.startswith("$$$MNDOCLINK$$$"):
+            continue
+        candidate = pdf_path_from_raw_value(raw)
+        name = candidate.name or raw
+        if name and name.lower().endswith(".pdf") and name not in names:
+            names.append(name)
+    return names
+
+
+def pdf_source_search_roots(path_hints: list[Path] | None = None) -> list[Path]:
+    roots: list[Path] = []
+    roots.extend(path_hints or [])
+    roots.extend(MN_DOC_ROOTS)
+    roots.extend(MN_DOC_CACHE_ROOTS)
+    roots.extend(ONEDRIVE_PDF_ROOTS)
+    roots.extend(cloud_storage_pdf_roots())
+    roots.extend(configured_extra_pdf_roots())
+    return unique_paths(roots)
+
+
+def find_pdf_by_filename_in_roots(filenames: list[str], roots: list[Path]) -> Path | None:
+    for root in roots:
+        for name in filenames:
+            candidate = root / name
+            if candidate.is_file() and candidate.suffix.lower() == ".pdf":
+                return candidate
+    max_checked = 30000
+    checked = 0
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for current_root, dirnames, files in os.walk(root):
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if name not in {".git", "node_modules", "__pycache__"} and not name.startswith(".")
+            ]
+            checked += 1
+            if checked > max_checked:
+                return None
+            for name in filenames:
+                if name in files:
+                    candidate = Path(current_root) / name
+                    if candidate.is_file() and candidate.suffix.lower() == ".pdf":
+                        return candidate
+    return None
+
+
+def summarize_pdf_search_roots(roots: list[Path], limit: int = 8) -> str:
+    visible = [str(root) for root in roots[:limit]]
+    if len(roots) > limit:
+        visible.append(f"... 另有 {len(roots) - limit} 个目录")
+    return "; ".join(visible)
+
+
 def resolve_pdf_source_from_mn_database(book_md5: str) -> tuple[Path | None, str | None]:
     if not book_md5:
         return None, None
@@ -3514,23 +4007,16 @@ def resolve_pdf_source_from_mn_database(book_md5: str) -> tuple[Path | None, str
         if candidate.is_absolute() and candidate.is_file() and candidate.suffix.lower() == ".pdf":
             return candidate, None
 
-    filenames = []
-    for raw in raw_values:
-        if not raw:
-            continue
-        if raw.startswith("$$$MNDOCLINK$$$"):
-            continue
-        candidate = pdf_path_from_raw_value(raw)
-        name = candidate.name or raw
-        if name and name.lower().endswith(".pdf") and name not in filenames:
-            filenames.append(name)
-    for root in MN_DOC_ROOTS:
-        for name in filenames:
-            candidate = root / name
-            if candidate.is_file() and candidate.suffix.lower() == ".pdf":
-                return candidate, None
+    filenames = pdf_filename_candidates(raw_values)
+    search_roots = pdf_source_search_roots(pdf_root_hints_from_raw_values(raw_values))
+    found = find_pdf_by_filename_in_roots(filenames, search_roots)
+    if found:
+        return found, None
     if filenames:
-        return None, f"MarginNote ZBOOK 记录了 PDF 文件名，但在 MNDocs 中未找到：{', '.join(filenames[:3])}"
+        return None, (
+            "MarginNote ZBOOK 记录了 PDF 文件名，但在已知文档目录中未找到："
+            f"{', '.join(filenames[:3])}。已查目录：{summarize_pdf_search_roots(search_roots)}"
+        )
     return None, None
 
 
@@ -4371,7 +4857,26 @@ def ensure_pdf_text_cache(payload: dict[str, Any]) -> tuple[dict[str, Any] | Non
     book_md5 = normalize_book_md5(payload)
     source_pdf, source_error = resolve_pdf_source(payload, book_md5)
     if not source_pdf:
+        append_diagnostic_log(
+            "warn",
+            "pdf.resolve",
+            source_error or "当前文档没有可读取的 PDF 路径或缓存。",
+            payload=payload,
+            extra={
+                "bookmd5": book_md5,
+                "searchRoots": summarize_pdf_search_roots(pdf_source_search_roots(), limit=12),
+            },
+            request_id=str(payload.get("_request_id") or ""),
+        )
         return None, source_error or "当前文档没有可读取的 PDF 路径或缓存。"
+    append_diagnostic_log(
+        "info",
+        "pdf.resolve",
+        "已解析当前文档 PDF 路径。",
+        payload=payload,
+        extra={"bookmd5": book_md5, "sourcePdf": str(source_pdf)},
+        request_id=str(payload.get("_request_id") or ""),
+    )
     try:
         source_sha = sha256_file(source_pdf)
     except Exception as exc:
@@ -4739,7 +5244,8 @@ def call_openai(payload: dict[str, Any], task: str) -> tuple[str | None, str]:
         return None, "local"
     settings = runtime_settings()
     model = settings["model"]
-    history = load_history(payload)[-8:]
+    model_input = build_model_input(payload, task)
+    history = history_for_model(payload, model_input)
     input_items: list[dict[str, Any]] = [
         {
             "role": "developer",
@@ -4751,7 +5257,7 @@ def call_openai(payload: dict[str, Any], task: str) -> tuple[str | None, str]:
     ]
     for item in history:
         input_items.append({"role": item["role"], "content": item["content"]})
-    input_items.append({"role": "user", "content": build_model_input(payload, task)})
+    input_items.append({"role": "user", "content": model_input})
     body = {
         "model": model,
         "input": input_items,
@@ -5430,6 +5936,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 f"AI 后端：{ai_backend_label(settings['aiBackend'])}\n"
                 f"代理：{'已配置' if settings.get('proxyUrl') else '未配置'}\n"
                 f"OpenAI：{'已配置' if get_setting('OPENAI_API_KEY') else '未配置'}\n"
+                f"文件路径：{len(settings.get('fileSearchRoots') or [])} 个\n"
                 f"自定义按钮：{len(settings.get('customButtons') or [])}"
             ),
             "settings": settings,
@@ -5553,6 +6060,37 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return history_payload(payload)
     if action == "history_clear":
         return clear_history(payload)
+    if action == "logs_recent":
+        try:
+            limit = int(payload.get("limit") or 80)
+        except Exception:
+            limit = 80
+        logs = read_recent_diagnostic_logs(limit)
+        return {
+            "ok": True,
+            "message": f"已读取最近 {len(logs)} 条诊断日志。",
+            "logs": logs,
+            "logPath": str(DIAGNOSTIC_LOG_PATH),
+            "events": read_recent_events(20),
+            "eventsPath": str(EVENTS_PATH),
+        }
+    if action == "logs_clear":
+        clear_diagnostic_logs()
+        return {
+            "ok": True,
+            "message": "诊断日志已清空。",
+            "logs": [],
+            "logPath": str(DIAGNOSTIC_LOG_PATH),
+            "eventsPath": str(EVENTS_PATH),
+        }
+    if action == "conversation_new":
+        return new_conversation(payload)
+    if action == "conversation_list":
+        return list_conversations(payload)
+    if action == "conversation_load":
+        return load_conversation(payload)
+    if action == "conversation_delete":
+        return delete_conversation(payload)
     if action == "draft_save":
         return save_draft(payload)
     if action == "draft_get":
@@ -5606,6 +6144,65 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
     if action == "ai_backend_probe":
         return ai_backend_probe()
     return {"ok": False, "message": f"未知动作：{action or '(empty)'}"}
+
+
+def action_log_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": bool(result.get("ok")),
+        "message": str(result.get("message") or "")[:500],
+        "hasReply": bool(result.get("reply")),
+        "backend": str(result.get("backend") or result.get("ai_backend") or ""),
+        "requestId": str(result.get("requestId") or ""),
+        "queuePending": (
+            result.get("queue", {}).get("pending")
+            if isinstance(result.get("queue"), dict)
+            else None
+        ),
+    }
+
+
+def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        payload = {}
+    payload = dict(payload)
+    request_id = str(payload.get("_request_id") or payload.get("requestId") or uuid.uuid4().hex[:12])
+    payload["_request_id"] = request_id
+    action = str(payload.get("action") or "").strip()
+    started = time.time()
+    append_diagnostic_log(
+        "info",
+        "action.start",
+        f"开始动作：{action or '(empty)'}",
+        payload=payload,
+        request_id=request_id,
+    )
+    try:
+        result = handle_action(payload)
+    except Exception as exc:
+        append_diagnostic_log(
+            "error",
+            "action.exception",
+            f"动作异常：{exc}",
+            payload=payload,
+            extra={"durationMs": int((time.time() - started) * 1000), "error": repr(exc)},
+            request_id=request_id,
+        )
+        raise
+    if not isinstance(result, dict):
+        result = {"ok": False, "message": "动作没有返回可用结果。"}
+    result["requestId"] = request_id
+    append_diagnostic_log(
+        "info" if result.get("ok") else "warn",
+        "action.end",
+        str(result.get("message") or ("动作完成。" if result.get("ok") else "动作失败。")),
+        payload=payload,
+        extra={
+            "durationMs": int((time.time() - started) * 1000),
+            "result": action_log_result_summary(result),
+        },
+        request_id=request_id,
+    )
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -5685,8 +6282,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"ok": False, "message": "Not found"})
             return
         try:
-            result = handle_action(payload if isinstance(payload, dict) else {})
+            result = handle_action_logged(payload if isinstance(payload, dict) else {})
         except Exception as exc:
+            append_diagnostic_log(
+                "error",
+                "action.http_exception",
+                f"Companion 动作失败：{exc}",
+                payload=payload if isinstance(payload, dict) else {},
+                extra={"path": self.path, "error": repr(exc)},
+            )
             result = {"ok": False, "message": f"Companion 动作失败：{exc}"}
         self._send_json(200 if result.get("ok") else 400, result)
 

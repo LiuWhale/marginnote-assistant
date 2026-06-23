@@ -17,6 +17,7 @@ DEFAULT_RUNTIME_SETTINGS = {
     "defaultContextScope": "auto",
     "githubRepo": "LiuWhale/marginnote-assistant",
     "customButtons": [],
+    "fileSearchRoots": [],
 }
 AI_BACKENDS = {"auto", "codex_cli", "openai_api", "local"}
 AI_BACKEND_LABELS = {
@@ -172,6 +173,31 @@ def sanitize_custom_buttons(value: Any) -> list[dict[str, Any]]:
         if len(buttons) >= 20:
             break
     return buttons
+
+
+def sanitize_file_search_roots(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidates = re.split(r"[\r\n]+", value)
+    elif isinstance(value, list):
+        candidates = value
+    else:
+        return []
+    roots: list[str] = []
+    seen: set[str] = set()
+    for item in candidates[:80]:
+        text = str(item or "").strip()
+        if not text or any(char in text for char in "\r\n\t"):
+            continue
+        if len(text) > 1000:
+            continue
+        path = str(Path(text).expanduser())
+        if path in seen:
+            continue
+        seen.add(path)
+        roots.append(path)
+        if len(roots) >= 40:
+            break
+    return roots
 
 
 def sanitize_openai_api_key(value: Any) -> str:
