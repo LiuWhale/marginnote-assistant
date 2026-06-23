@@ -2747,8 +2747,8 @@
     setText('updateStatusDetail', message);
     var installButton = byId('updateInstallButton');
     if (installButton) {
-      installButton.disabled = !update.available || status === 'downloading' || status === 'installing';
-      installButton.textContent = status === 'installing' ? '安装中' : '下载并安装';
+      installButton.disabled = false;
+      installButton.textContent = '打开下载页';
     }
     var notice = byId('updateNotice');
     if (notice) {
@@ -2778,28 +2778,11 @@
 
   function installUpdate() {
     var update = state.update || {};
-    if (!update.available) {
-      addMessage('assistant', '当前没有可安装的新版本。请先检查更新。');
-      return;
-    }
-    state.update = Object.assign({}, update, {
-      ok: true,
-      state: 'downloading',
-      available: true,
-      message: '正在下载并安装更新，请稍等。'
-    });
-    renderUpdateStatus({update: state.update, settings: state.settings || {}});
-    addMessage('assistant', '正在下载并安装更新，请稍等。');
-    postCompanion('update_install', {
-      githubRepo: getValue('githubRepoInput')
-    }, function(result) {
-      renderControls(result || {});
-      if (!result || !result.ok) {
-        addFailureMessage('安装更新失败', result);
-        return;
-      }
-      addMessage('assistant', result.message || '已开始安装更新。');
-    }, {showReply: false});
+    var repo = getValue('githubRepoInput') || update.repo || 'LiuWhale/marginnote-assistant';
+    var fallback = 'https://github.com/' + repo.replace(/^\/+|\/+$/g, '') + '/releases';
+    var url = update.releaseUrl || update.downloadUrl || fallback;
+    bridge('open_url', {url: url});
+    addMessage('assistant', '已打开下载页面：' + url);
   }
 
   function trimText(text, limit) {

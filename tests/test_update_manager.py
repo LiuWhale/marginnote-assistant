@@ -27,8 +27,8 @@ class UpdateManagerTests(unittest.TestCase):
         html = b"""
         <html>
           <body>
-            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.5/CodexCompanion-0.4.5-latest.pkg">pkg</a>
-            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.5/CodexCompanion-0.4.5-latest-dist.zip">zip</a>
+            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.6/CodexCompanion-0.4.6-latest.pkg">pkg</a>
+            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.6/CodexCompanion-0.4.6-latest-dist.zip">zip</a>
           </body>
         </html>
         """
@@ -46,7 +46,7 @@ class UpdateManagerTests(unittest.TestCase):
                     return None
 
                 def geturl(self) -> str:
-                    return "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.5"
+                    return "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.6"
 
             def fake_urlopen(req: Any, settings: dict[str, Any], timeout: float) -> FakeResponse:
                 requested_urls.append(req.full_url)
@@ -65,11 +65,11 @@ class UpdateManagerTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["available"])
-        self.assertEqual(result["latestVersion"], "0.4.5")
-        self.assertEqual(result["assetName"], "CodexCompanion-0.4.5-latest-dist.zip")
+        self.assertEqual(result["latestVersion"], "0.4.6")
+        self.assertEqual(result["assetName"], "CodexCompanion-0.4.6-latest-dist.zip")
         self.assertEqual(
             result["downloadUrl"],
-            "https://github.com/LiuWhale/marginnote-assistant/releases/download/v0.4.5/CodexCompanion-0.4.5-latest-dist.zip",
+            "https://github.com/LiuWhale/marginnote-assistant/releases/download/v0.4.6/CodexCompanion-0.4.6-latest-dist.zip",
         )
         self.assertEqual(requested_urls, ["https://github.com/LiuWhale/marginnote-assistant/releases/latest"])
 
@@ -78,14 +78,14 @@ class UpdateManagerTests(unittest.TestCase):
         latest_html = b"""
         <html>
           <body>
-            <include-fragment src="https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.5"></include-fragment>
+            <include-fragment src="https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.6"></include-fragment>
           </body>
         </html>
         """
         assets_html = b"""
         <html>
           <body>
-            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.5/CodexCompanion-0.4.5-latest-dist.zip">zip</a>
+            <a href="/LiuWhale/marginnote-assistant/releases/download/v0.4.6/CodexCompanion-0.4.6-latest-dist.zip">zip</a>
           </body>
         </html>
         """
@@ -113,12 +113,12 @@ class UpdateManagerTests(unittest.TestCase):
                 if req.full_url.endswith("/releases/latest"):
                     return FakeResponse(
                         latest_html,
-                        "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.5",
+                        "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.6",
                     )
-                if req.full_url.endswith("/releases/expanded_assets/v0.4.5"):
+                if req.full_url.endswith("/releases/expanded_assets/v0.4.6"):
                     return FakeResponse(
                         assets_html,
-                        "https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.5",
+                        "https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.6",
                     )
                 raise AssertionError(f"unexpected URL: {req.full_url}")
 
@@ -134,13 +134,13 @@ class UpdateManagerTests(unittest.TestCase):
                 module.urlopen_with_proxy = old_urlopen
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["latestVersion"], "0.4.5")
-        self.assertEqual(result["assetName"], "CodexCompanion-0.4.5-latest-dist.zip")
+        self.assertEqual(result["latestVersion"], "0.4.6")
+        self.assertEqual(result["assetName"], "CodexCompanion-0.4.6-latest-dist.zip")
         self.assertEqual(
             requested_urls,
             [
                 "https://github.com/LiuWhale/marginnote-assistant/releases/latest",
-                "https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.5",
+                "https://github.com/LiuWhale/marginnote-assistant/releases/expanded_assets/v0.4.6",
             ],
         )
 
@@ -148,15 +148,15 @@ class UpdateManagerTests(unittest.TestCase):
         module = load_update_manager()
 
         release = {
-            "tag_name": "v0.4.5",
-            "html_url": "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.5",
-            "name": "Codex Companion 0.4.5",
+            "tag_name": "v0.4.6",
+            "html_url": "https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.6",
+            "name": "Codex Companion 0.4.6",
             "body": "Fixes and updater.",
             "assets": [
-                {"name": "CodexCompanion-0.4.5-latest.pkg", "browser_download_url": "https://example/pkg"},
+                {"name": "CodexCompanion-0.4.6-latest.pkg", "browser_download_url": "https://example/pkg"},
                 {
-                    "name": "CodexCompanion-0.4.5-latest-dist.zip",
-                    "browser_download_url": "https://example/CodexCompanion-0.4.5-latest-dist.zip",
+                    "name": "CodexCompanion-0.4.6-latest-dist.zip",
+                    "browser_download_url": "https://example/CodexCompanion-0.4.6-latest-dist.zip",
                     "size": 42,
                 },
             ],
@@ -167,16 +167,16 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertTrue(parsed["ok"])
         self.assertTrue(parsed["available"])
         self.assertEqual(parsed["repo"], "LiuWhale/marginnote-assistant")
-        self.assertEqual(parsed["latestVersion"], "0.4.5")
+        self.assertEqual(parsed["latestVersion"], "0.4.6")
         self.assertEqual(parsed["currentVersion"], "0.4.1")
-        self.assertEqual(parsed["assetName"], "CodexCompanion-0.4.5-latest-dist.zip")
-        self.assertEqual(parsed["downloadUrl"], "https://example/CodexCompanion-0.4.5-latest-dist.zip")
+        self.assertEqual(parsed["assetName"], "CodexCompanion-0.4.6-latest-dist.zip")
+        self.assertEqual(parsed["downloadUrl"], "https://example/CodexCompanion-0.4.6-latest-dist.zip")
 
     def test_release_metadata_rejects_release_without_installable_zip(self) -> None:
         module = load_update_manager()
 
         parsed = module.parse_latest_release(
-            {"tag_name": "v0.4.5", "assets": [{"name": "CodexCompanion.pkg", "browser_download_url": "https://example/pkg"}]},
+            {"tag_name": "v0.4.6", "assets": [{"name": "CodexCompanion.pkg", "browser_download_url": "https://example/pkg"}]},
             current_version="0.4.1",
             repo="LiuWhale/marginnote-assistant",
         )
@@ -187,17 +187,17 @@ class UpdateManagerTests(unittest.TestCase):
     def test_validate_release_zip_requires_installable_package_shape(self) -> None:
         module = load_update_manager()
         with tempfile.TemporaryDirectory() as tmp:
-            archive_path = Path(tmp) / "CodexCompanion-0.4.5-latest-dist.zip"
+            archive_path = Path(tmp) / "CodexCompanion-0.4.6-latest-dist.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("CodexCompanion-0.4.5/install.sh", "#!/bin/zsh\n")
-                archive.writestr("CodexCompanion-0.4.5/companion/companion.py", "print('ok')\n")
-                archive.writestr("CodexCompanion-0.4.5/extension/codex.mn.assistant/mnaddon.json", "{}\n")
+                archive.writestr("CodexCompanion-0.4.6/install.sh", "#!/bin/zsh\n")
+                archive.writestr("CodexCompanion-0.4.6/companion/companion.py", "print('ok')\n")
+                archive.writestr("CodexCompanion-0.4.6/extension/codex.mn.assistant/mnaddon.json", "{}\n")
 
             result = module.validate_release_zip(archive_path)
 
             self.assertTrue(result["ok"])
-            self.assertEqual(result["packageRoot"], "CodexCompanion-0.4.5")
-            self.assertEqual(result["installScript"], str(Path(tmp) / "CodexCompanion-0.4.5" / "install.sh"))
+            self.assertEqual(result["packageRoot"], "CodexCompanion-0.4.6")
+            self.assertEqual(result["installScript"], str(Path(tmp) / "CodexCompanion-0.4.6" / "install.sh"))
 
     def test_update_status_file_round_trips_install_dry_run(self) -> None:
         module = load_update_manager()
@@ -210,14 +210,14 @@ class UpdateManagerTests(unittest.TestCase):
                 {
                     "state": "available",
                     "repo": "LiuWhale/marginnote-assistant",
-                    "latestVersion": "0.4.5",
+                    "latestVersion": "0.4.6",
                 },
             )
             loaded = json.loads(status_path.read_text(encoding="utf-8"))
 
             self.assertEqual(written["state"], "available")
             self.assertEqual(loaded["repo"], "LiuWhale/marginnote-assistant")
-            self.assertEqual(module.read_update_status(root)["latestVersion"], "0.4.5")
+            self.assertEqual(module.read_update_status(root)["latestVersion"], "0.4.6")
 
     def test_installing_status_reports_permission_failure_from_install_log(self) -> None:
         module = load_update_manager()
@@ -237,7 +237,7 @@ class UpdateManagerTests(unittest.TestCase):
                     "state": "installing",
                     "repo": "LiuWhale/marginnote-assistant",
                     "currentVersion": "0.4.2",
-                    "latestVersion": "0.4.5",
+                    "latestVersion": "0.4.6",
                     "installLog": str(log_path),
                 },
             )
@@ -253,7 +253,7 @@ class UpdateManagerTests(unittest.TestCase):
         module = load_update_manager()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            archive_path = root / "updates" / "CodexCompanion-0.4.5-latest-dist.zip"
+            archive_path = root / "updates" / "CodexCompanion-0.4.6-latest-dist.zip"
             archive_path.parent.mkdir(parents=True)
             archive_path.write_text("zip", encoding="utf-8")
             popen_called = False
@@ -265,9 +265,9 @@ class UpdateManagerTests(unittest.TestCase):
                     "available": True,
                     "repo": "LiuWhale/marginnote-assistant",
                     "currentVersion": current_version,
-                    "latestVersion": "0.4.5",
-                    "assetName": "CodexCompanion-0.4.5-latest-dist.zip",
-                    "downloadUrl": "https://example/CodexCompanion-0.4.5-latest-dist.zip",
+                    "latestVersion": "0.4.6",
+                    "assetName": "CodexCompanion-0.4.6-latest-dist.zip",
+                    "downloadUrl": "https://example/CodexCompanion-0.4.6-latest-dist.zip",
                 }
 
             def fake_download(root_arg: Path, settings: dict[str, Any], update: dict[str, Any]) -> Path:
@@ -276,8 +276,8 @@ class UpdateManagerTests(unittest.TestCase):
             def fake_validate(path: Path) -> dict[str, Any]:
                 return {
                     "ok": True,
-                    "packageRootPath": str(root / "updates" / "CodexCompanion-0.4.5"),
-                    "installScript": str(root / "updates" / "CodexCompanion-0.4.5" / "install.sh"),
+                    "packageRootPath": str(root / "updates" / "CodexCompanion-0.4.6"),
+                    "installScript": str(root / "updates" / "CodexCompanion-0.4.6" / "install.sh"),
                 }
 
             def fake_popen(*args: Any, **kwargs: Any) -> None:
@@ -295,7 +295,7 @@ class UpdateManagerTests(unittest.TestCase):
             module.subprocess.Popen = fake_popen
             try:
                 module.check_extension_write_access = lambda: (False, "权限不足：无法写入 MarginNote 扩展目录。")
-                result = module.install_update(root, {"githubRepo": "LiuWhale/marginnote-assistant"}, "0.4.5")
+                result = module.install_update(root, {"githubRepo": "LiuWhale/marginnote-assistant"}, "0.4.6")
             finally:
                 module.check_for_update = old_check
                 module.download_asset = old_download

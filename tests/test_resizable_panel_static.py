@@ -619,6 +619,11 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("cache_pdf_from_marginnote", self.main)
         self.assertIn("pdfBase64", self.main)
 
+    def test_native_bridge_can_open_external_update_url(self) -> None:
+        self.assertIn("codexpaper://open_url", self.controller)
+        self.assertIn("UIApplication.sharedApplication().openURL", self.controller)
+        self.assertIn("NSURL.URLWithString", self.controller)
+
     def test_native_poll_can_execute_pdf_cache_command_without_system_click(self) -> None:
         self.assertIn("nativeAction", self.main)
         self.assertIn("cache_pdf_from_current_document", self.main)

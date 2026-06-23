@@ -478,6 +478,17 @@ CodexWebPanelController.prototype.handleBridgeUrl = function(raw) {
     if (this.addon && this.addon.uploadPdfToCompanion) this.addon.uploadPdfToCompanion(pdfPath);
     return false;
   }
+  if (lower.indexOf('codexpaper://open_url') === 0) {
+    var openUrl = params.url || '';
+    if (/^https?:\/\//i.test(openUrl)) {
+      try {
+        UIApplication.sharedApplication().openURL(NSURL.URLWithString(openUrl));
+      } catch (err) {
+        this.setStatus('无法打开链接：' + openUrl);
+      }
+    }
+    return false;
+  }
   if (lower.indexOf('codexpaper://action') === 0) {
     var action = params.name || params.action || 'chat';
     var prompt = params.prompt || '';

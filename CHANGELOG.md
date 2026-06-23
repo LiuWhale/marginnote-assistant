@@ -2,6 +2,12 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.6 - 2026-06-23
+
+### Changed
+
+- Changed the update action from in-plugin install to opening the GitHub Release download page, avoiding macOS Full Disk Access requirements for self-updates.
+
 ## 0.4.5 - 2026-06-23
 
 ### Changed
