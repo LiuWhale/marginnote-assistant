@@ -2148,6 +2148,93 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("localhost", captured["env"]["NO_PROXY"])
             self.assertTrue((companion.CODEX_LITE_HOME / "auth.json").exists())
 
+    def test_codex_cli_retries_transient_cloud_config_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings(
+                {
+                    "speed": "fast",
+                    "aiBackend": "codex_cli",
+                    "codexCliPath": "/tmp/codex",
+                    "model": "gpt-5.5",
+                    "proxyUrl": "http://127.0.0.1:1082",
+                }
+            )
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            calls: list[list[str]] = []
+            codex_invocations: list[list[str]] = []
+
+            class FakePopen:
+                pid = 4321
+
+                def __init__(self, args: list[str], **kwargs: Any) -> None:
+                    calls.append(args)
+                    if args and args[0] == "/tmp/codex":
+                        codex_invocations.append(args)
+                    self.returncode = 1 if args and args[0] == "/tmp/codex" and len(codex_invocations) == 1 else 0
+                    if self.returncode == 0:
+                        if "--output-last-message" in args:
+                            output_path = Path(args[args.index("--output-last-message") + 1])
+                            output_path.write_text("retry ok", encoding="utf-8")
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    if self.returncode != 0:
+                        return "", "Error: timed out waiting for cloud config bundle after 15s"
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = lambda args, **kwargs: FakePopen(args, **kwargs)
+            try:
+                text, backend = companion.call_codex_cli({"prompt": "ping"}, "chat")
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual(text, "retry ok")
+            self.assertEqual(backend, "codex-cli")
+            self.assertEqual(len(codex_invocations), 2)
+
+    def test_codex_cli_cloud_config_timeout_message_is_actionable_after_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings(
+                {
+                    "speed": "fast",
+                    "aiBackend": "codex_cli",
+                    "codexCliPath": "/tmp/codex",
+                    "model": "gpt-5.5",
+                    "proxyUrl": "http://127.0.0.1:1082",
+                }
+            )
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+
+            class FakePopen:
+                pid = 4321
+                returncode = 1
+
+                def __init__(self, args: list[str], **kwargs: Any) -> None:
+                    pass
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "", "Error: timed out waiting for cloud config bundle after 15s"
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = lambda args, **kwargs: FakePopen(args, **kwargs)
+            try:
+                text, backend = companion.call_codex_cli({"prompt": "ping"}, "chat")
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual(backend, "codex-cli-error")
+            self.assertIn("Codex CLI 网络/代理初始化超时", text or "")
+            self.assertIn("已自动重试一次", text or "")
+            self.assertIn("127.0.0.1:1082", text or "")
+
     def test_codex_cli_discovery_prefers_user_npm_cli_over_old_homebrew_cli(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

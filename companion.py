@@ -5543,6 +5543,28 @@ def extract_response_text(data: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+def is_retryable_codex_cli_startup_error(detail: str) -> bool:
+    text = str(detail or "").lower()
+    return "timed out waiting for cloud config bundle" in text
+
+
+def format_codex_cli_failure(detail: str, settings: dict[str, str], retried: bool = False) -> str:
+    if len(detail) > 1400:
+        detail = detail[:1400] + "..."
+    if is_retryable_codex_cli_startup_error(detail):
+        proxy_url = sanitize_proxy_url(settings.get("proxyUrl", ""))
+        retry_text = "已自动重试一次，仍失败；" if retried else ""
+        proxy_text = f"当前代理：{proxy_url}。" if proxy_url else "当前未配置代理。"
+        return (
+            "Codex CLI 网络/代理初始化超时："
+            f"{retry_text}CLI 在 15 秒内没有拿到 cloud config bundle。"
+            "这通常是代理链路、网络抖动或 Codex CLI 云端配置初始化失败，不是当前 PDF 或脑图问题。"
+            f"{proxy_text}请重试，或检查代理/Codex CLI 登录；也可以在设置中配置 OpenAI Key 作为备用后端。"
+            f" 原始错误：{detail}"
+        )
+    return f"Codex CLI 调用失败或无输出：{detail}"
+
+
 def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]:
     settings = runtime_settings()
     cli = codex_cli_status(settings)
@@ -5560,61 +5582,66 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
     timeout = CODEX_CLI_TIMEOUTS[speed]
     reasoning = CODEX_CLI_REASONING[speed]
     CONTROL_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = CONTROL_DIR / f"codex-cli-output-{uuid.uuid4().hex}.txt"
-    process = None
-    try:
-        process = subprocess.Popen(
-            [
-                path,
-                "exec",
-                "--sandbox",
-                "read-only",
-                "-m",
-                settings["model"],
-                "-c",
-                f"model_reasoning_effort={reasoning}",
-                "--skip-git-repo-check",
-                "--output-last-message",
-                str(output_path),
-                prompt,
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(ROOT),
-            env=codex_cli_env(settings),
-            start_new_session=True,
-        )
-        register_current_generation_process(process, "codex-cli")
-        stdout, stderr = process.communicate(input="", timeout=timeout)
-        returncode = process.returncode
-    except subprocess.TimeoutExpired:
-        cancel_current_generation_process()
-        return f"Codex CLI 调用超时（{timeout}s）。自动模式会回退到其他后端；强制 CLI 时请检查 CLI 登录状态。", "codex-cli-error"
-    except Exception as exc:
-        return f"Codex CLI 调用失败：{exc}", "codex-cli-error"
-    finally:
-        if process is not None:
-            clear_current_generation_process(process)
-    final_text = ""
-    try:
-        final_text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
-    finally:
+    retried_startup_error = False
+    last_detail = "Codex CLI 返回为空。"
+    for attempt in range(2):
+        output_path = CONTROL_DIR / f"codex-cli-output-{uuid.uuid4().hex}.txt"
+        process = None
         try:
-            output_path.unlink()
-        except FileNotFoundError:
-            pass
-    stdout = (stdout or "").strip()
-    stderr = (stderr or "").strip()
-    if returncode == 0 and final_text:
-        return final_text, "codex-cli"
-    if returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
-        return stdout, "codex-cli"
-    detail = stdout or stderr or "Codex CLI 返回为空。"
-    if len(detail) > 1400:
-        detail = detail[:1400] + "..."
-    return f"Codex CLI 调用失败或无输出：{detail}", "codex-cli-error"
+            process = subprocess.Popen(
+                [
+                    path,
+                    "exec",
+                    "--sandbox",
+                    "read-only",
+                    "-m",
+                    settings["model"],
+                    "-c",
+                    f"model_reasoning_effort={reasoning}",
+                    "--skip-git-repo-check",
+                    "--output-last-message",
+                    str(output_path),
+                    prompt,
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=str(ROOT),
+                env=codex_cli_env(settings),
+                start_new_session=True,
+            )
+            register_current_generation_process(process, "codex-cli")
+            stdout, stderr = process.communicate(input="", timeout=timeout)
+            returncode = process.returncode
+        except subprocess.TimeoutExpired:
+            cancel_current_generation_process()
+            return f"Codex CLI 调用超时（{timeout}s）。自动模式会回退到其他后端；强制 CLI 时请检查 CLI 登录状态。", "codex-cli-error"
+        except Exception as exc:
+            return f"Codex CLI 调用失败：{exc}", "codex-cli-error"
+        finally:
+            if process is not None:
+                clear_current_generation_process(process)
+        final_text = ""
+        try:
+            final_text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
+        finally:
+            try:
+                output_path.unlink()
+            except FileNotFoundError:
+                pass
+        stdout = (stdout or "").strip()
+        stderr = (stderr or "").strip()
+        if returncode == 0 and final_text:
+            return final_text, "codex-cli"
+        if returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
+            return stdout, "codex-cli"
+        last_detail = stdout or stderr or "Codex CLI 返回为空。"
+        if attempt == 0 and is_retryable_codex_cli_startup_error(last_detail):
+            retried_startup_error = True
+            continue
+        return format_codex_cli_failure(last_detail, settings, retried=retried_startup_error), "codex-cli-error"
+    return format_codex_cli_failure(last_detail, settings, retried=retried_startup_error), "codex-cli-error"
 
 
 def call_openai(payload: dict[str, Any], task: str) -> tuple[str | None, str]:

@@ -1366,14 +1366,15 @@
       (backend === 'auto' && (state.codexCliAvailable || state.openaiConfigured));
     if (hasRealAi) {
       panel.className = 'readiness-panel ready';
-      line.textContent = '真实 AI 已配置';
+      line.textContent = '真实 AI 后端已发现';
       detail.textContent =
         'AI 后端：' + (backendLabels[backend] || backend) +
         ' / Codex CLI：' + (state.codexCliAvailable ? '已发现' : '未发现') +
         ' / OpenAI：' + (state.openaiConfigured ? '已配置' : '未配置') +
         ' / 模型：' + (settings.model || state.settings.model || '未设置') +
         ' / 速度：' + (settings.speed || state.settings.speed || '未设置') +
-        ' / 代理：' + ((settings.proxyUrl || state.settings.proxyUrl) ? '已配置' : '未配置');
+        ' / 代理：' + ((settings.proxyUrl || state.settings.proxyUrl) ? '已配置' : '未配置') +
+        ' / 生成仍取决于 CLI 登录、代理和网络';
     } else if (backend === 'local') {
       panel.className = 'readiness-panel warn';
       line.textContent = '本地工具/诊断模式';
