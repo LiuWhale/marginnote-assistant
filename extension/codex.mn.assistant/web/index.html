@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260624-mindmap-target-v1">
+  <link rel="stylesheet" href="app.css?v=20260624-send-button-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -50,7 +50,10 @@
     <section class="composer ai-chat-composer">
       <div class="composer-input-row">
         <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
-        <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">发送</button>
+        <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">
+          <span class="send-button-main">发送</span>
+          <span class="send-button-sub">可排队</span>
+        </button>
       </div>
       <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
         <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
@@ -211,6 +214,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260624-mindmap-target-v1"></script>
+  <script src="app.js?v=20260624-send-button-v1"></script>
 </body>
 </html>

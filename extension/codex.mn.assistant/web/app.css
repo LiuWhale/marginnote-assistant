@@ -1843,12 +1843,37 @@ textarea:focus {
 }
 
 .send-button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   width: 74px;
   height: 82px;
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
   font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  white-space: normal;
+  padding: 0 8px;
+}
+
+.send-button-main,
+.send-button-sub {
+  display: block;
+  width: 100%;
+}
+
+.send-button-main {
+  font-size: 14px;
+}
+
+.send-button-sub {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.86;
 }
 
 .button-grid button.primary {
@@ -1979,7 +2004,8 @@ button[data-busy="queue-available"][data-action-state="ready"]::after {
 
   .send-button {
     width: 68px;
-    height: 52px;
+    height: 58px;
+    padding: 0 6px;
   }
 
   #queueBadge {

@@ -454,6 +454,18 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('data-action="chat"', composer)
         self.assertLess(composer.index('id="promptInput"'), composer.index('id="sendButton"'))
 
+    def test_send_button_label_is_two_centered_lines(self) -> None:
+        composer = self.html.split('<section class="composer ai-chat-composer">', 1)[1].split("</section>", 1)[0]
+        for marker in [
+            'class="send-button-main">发送</span>',
+            'class="send-button-sub">可排队</span>',
+            "flex-direction: column",
+            "align-items: center",
+            "justify-content: center",
+            ".send-button-sub",
+        ]:
+            self.assertIn(marker, composer + self.css)
+
     def test_send_action_always_uses_chat(self) -> None:
         send_body = self.js.split("function sendAction", 1)[1].split("\n  function normalizePdfCacheState", 1)[0]
         self.assertIn("executeAction('chat'", send_body)

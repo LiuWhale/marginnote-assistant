@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.24 - 2026-06-24
+
+### Fixed
+
+- Centered the bottom send button label and split it into two lines, `发送` and `可排队`, so the queue hint stays readable in narrow MarginNote panel widths.
+- Bumped the WebView resource cache key so MarginNote reloads the updated send-button layout after installing the release.
+
 ## 0.4.23 - 2026-06-24
 
 ### Added
