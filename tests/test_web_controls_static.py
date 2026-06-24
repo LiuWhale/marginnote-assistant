@@ -468,6 +468,20 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("可继续输入。", self.js)
         self.assertNotIn("可继续输入或点击按钮；忙碌时会在消息里给出后续引导。", self.js)
 
+    def test_progress_polling_is_scoped_to_current_request_id(self) -> None:
+        request_body = self.js.split("function requestTextAction", 1)[1].split("\n  function promptValue", 1)[0]
+        progress_body = self.js.split("function refreshProgressRunState", 1)[1].split(
+            "\n  function startProgressStatusPolling", 1
+        )[0]
+
+        self.assertIn("newRequestId()", self.js)
+        self.assertIn("startProgress(action", request_body)
+        self.assertIn("requestId", request_body)
+        self.assertIn("_request_id: requestId", request_body)
+        self.assertIn("state.progressRequestId", progress_body)
+        self.assertIn("run.requestId", progress_body)
+        self.assertIn("return;", progress_body.split("run.requestId", 1)[1])
+
     def test_stop_button_cancels_current_queue_item_and_busy_state(self) -> None:
         self.assertIn("currentQueueId", self.js)
         for function_name in ["requestTextAction", "requestGoalAction", "requestDraftAction"]:

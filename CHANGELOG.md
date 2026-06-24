@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.18 - 2026-06-24
+
+### Fixed
+
+- Fixed intermittent chat progress cards that could stop counting or show `0s` because `/status` polling accepted a stale completed run from a previous request.
+- Generation run state now carries the current request id, and the WebView progress poller ignores run-state updates that do not belong to the active request.
+
 ## 0.4.17 - 2026-06-24
 
 ### Added

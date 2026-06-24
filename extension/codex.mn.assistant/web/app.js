@@ -25,6 +25,7 @@
     progressStatusInFlight: false,
     progressBody: null,
     progressStartedAt: 0,
+    progressRequestId: '',
     progressAction: '',
     progressStage: '',
     progressDetail: '',
@@ -189,6 +190,13 @@
   function getChecked(id) {
     var el = byId(id);
     return !!(el && el.checked);
+  }
+
+  function newRequestId() {
+    return (
+      Date.now().toString(16) +
+      Math.random().toString(16).slice(2, 10)
+    ).slice(0, 24);
   }
 
   function normalizeContextScope(scope) {
@@ -922,8 +930,9 @@
     setWebRunLock(true);
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在执行：' + actionLabel(action)});
-    startProgress(action, '正在询问 Codex', 'Web 面板正在直接调用本地 Companion，不再经过 MN4 原生请求层。');
-    postCompanion(action, {prompt: prompt, _web_run_owner: true}, function(result) {
+    var requestId = newRequestId();
+    startProgress(action, '正在询问 Codex', 'Web 面板正在直接调用本地 Companion，不再经过 MN4 原生请求层。', requestId);
+    postCompanion(action, {prompt: prompt, _web_run_owner: true, _request_id: requestId}, function(result) {
       setWebRunLock(false);
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
@@ -2396,6 +2405,8 @@
       if (!run || !(run.active || run.action || run.stage || run.detail)) return;
       var runAction = String(run.action || '');
       if (runAction && state.progressAction && runAction !== state.progressAction) return;
+      var runRequestId = String(run.requestId || run.request_id || '');
+      if (state.progressRequestId && (!runRequestId || runRequestId !== state.progressRequestId)) return;
       state.progressStage = run.stage || state.progressStage;
       state.progressDetail = run.detail || state.progressDetail;
       state.progressAction = run.action || state.progressAction;
@@ -2429,8 +2440,9 @@
     updateProgressText();
   }
 
-  function startProgress(action, stage, detail) {
+  function startProgress(action, stage, detail, requestId) {
     finishProgress('');
+    state.progressRequestId = requestId || newRequestId();
     state.progressAction = action;
     state.progressStage = stage || '准备执行';
     state.progressDetail = detail || '正在收集当前上下文并准备请求。';
@@ -2452,6 +2464,7 @@
     }
     state.progressBody = null;
     state.progressStartedAt = 0;
+    state.progressRequestId = '';
     state.progressAction = '';
     state.progressStage = '';
     state.progressDetail = '';
@@ -2531,8 +2544,9 @@
     setWebRunLock(true);
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在执行目标：' + (goal.title || '未命名目标')});
-    startProgress('goal_run', '正在执行队列目标', '队列中的目标正在作为一次性任务提交给 Companion。');
-    postCompanion('goal_run', {goal: goal, prompt: goalText, _web_run_owner: true}, function(result) {
+    var requestId = newRequestId();
+    startProgress('goal_run', '正在执行队列目标', '队列中的目标正在作为一次性任务提交给 Companion。', requestId);
+    postCompanion('goal_run', {goal: goal, prompt: goalText, _web_run_owner: true, _request_id: requestId}, function(result) {
       setWebRunLock(false);
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
@@ -2566,8 +2580,9 @@
     setWebRunLock(true);
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在生成草稿：' + actionLabel(action)});
-    startProgress(action, '正在生成草稿', '正在把当前上下文发送给 Companion，并等待卡片/脑图草稿。');
-    postCompanion(action, {prompt: prompt, _web_run_owner: true}, function(result) {
+    var requestId = newRequestId();
+    startProgress(action, '正在生成草稿', '正在把当前上下文发送给 Companion，并等待卡片/脑图草稿。', requestId);
+    postCompanion(action, {prompt: prompt, _web_run_owner: true, _request_id: requestId}, function(result) {
       if (!result || !result.ok) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
@@ -3159,8 +3174,9 @@
     setWebRunLock(true);
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在执行目标：' + (goal.title || '未命名目标')});
-    startProgress('goal_run', '已提交目标', 'Companion 正在把目标作为一次性任务执行。');
-    postCompanion('goal_run', {goal: goal, _web_run_owner: true}, function(result) {
+    var requestId = newRequestId();
+    startProgress('goal_run', '已提交目标', 'Companion 正在把目标作为一次性任务执行。', requestId);
+    postCompanion('goal_run', {goal: goal, _web_run_owner: true, _request_id: requestId}, function(result) {
       setWebRunLock(false);
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});

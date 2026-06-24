@@ -17,7 +17,7 @@ DEFAULT_URL = "http://127.0.0.1:48761"
 ROOT = Path(__file__).resolve().parent
 DEFAULT_NEXT_STEP_EN = "reopen the Codex panel or restart MarginNote 4, then click Refresh MN capability."
 DEFAULT_ADDON_ID = "codex.mn.assistant"
-CURRENT_PLUGIN_VERSION = "0.4.17"
+CURRENT_PLUGIN_VERSION = "0.4.18"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
 
 

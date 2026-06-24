@@ -72,7 +72,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.17"
+CURRENT_PLUGIN_VERSION = "0.4.18"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1044,6 +1044,7 @@ def active_run_status(max_age_seconds: int = 1800) -> dict[str, Any]:
         "topicid": str(state.get("topicid") or ""),
         "bookmd5": str(state.get("bookmd5") or ""),
         "queue_id": str(state.get("queue_id") or ""),
+        "requestId": str(state.get("requestId") or state.get("request_id") or ""),
         "source": str(state.get("source") or ""),
         "started_at": str(state.get("started_at") or ""),
         "updated_at": str(state.get("updated_at") or ""),
@@ -1060,6 +1061,7 @@ def update_run_state(
     topicid: str = "",
     bookmd5: str = "",
     queue_id: str = "",
+    request_id: str = "",
     source: str = "",
 ) -> dict[str, Any]:
     existing = read_json_file(RUN_STATE_PATH, {})
@@ -1071,6 +1073,9 @@ def update_run_state(
         previous_active
         and str(existing.get("action") or "") == str(action or existing.get("action") or "")
         and str(existing.get("queue_id") or "") == str(queue_id or existing.get("queue_id") or "")
+        and str(existing.get("requestId") or existing.get("request_id") or "") == str(
+            request_id or existing.get("requestId") or existing.get("request_id") or ""
+        )
     )
     started_epoch = existing.get("started_epoch") if same_run else now
     started_at = existing.get("started_at") if same_run else now_text
@@ -1082,6 +1087,7 @@ def update_run_state(
         "topicid": str(topicid or existing.get("topicid") or ""),
         "bookmd5": str(bookmd5 or existing.get("bookmd5") or ""),
         "queue_id": str(queue_id or existing.get("queue_id") or ""),
+        "requestId": str(request_id or existing.get("requestId") or existing.get("request_id") or ""),
         "source": str(source or existing.get("source") or ""),
         "started_epoch": started_epoch,
         "started_at": started_at,
@@ -2303,7 +2309,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.17-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.18-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -3241,6 +3247,7 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
     queue_id = str(payload.get("_queue_id") or payload.get("queue_id") or "")
+    request_id = str(payload.get("_request_id") or payload.get("requestId") or "")
     label = generation_action_label(action)
     update_run_state(
         True,
@@ -3250,6 +3257,7 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
         topicid=topic_id,
         bookmd5=book_md5,
         queue_id=queue_id,
+        request_id=request_id,
         source=str(payload.get("source") or ""),
     )
     try:
@@ -3263,6 +3271,7 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
             topicid=topic_id,
             bookmd5=book_md5,
             queue_id=queue_id,
+            request_id=request_id,
             source=str(payload.get("source") or ""),
         )
         raise
@@ -3279,6 +3288,7 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
         topicid=topic_id,
         bookmd5=book_md5,
         queue_id=queue_id,
+        request_id=request_id,
         source=str(payload.get("source") or ""),
     )
     result["run"] = run

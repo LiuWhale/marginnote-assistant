@@ -530,17 +530,21 @@ class CompanionControlsTests(unittest.TestCase):
                 topicid="T1",
                 bookmd5="B1",
                 queue_id="Q1",
+                request_id="REQ1",
             )
 
             self.assertTrue(started["active"])
+            self.assertEqual(started["requestId"], "REQ1")
             queue = companion.queue_status_payload("T1", "B1")
             self.assertTrue(queue["run"]["active"])
             self.assertEqual(queue["run"]["action"], "chat")
             self.assertEqual(queue["run"]["stage"], "正在询问 Codex")
             self.assertEqual(queue["run"]["detail"], "模型正在生成回答")
             self.assertEqual(queue["run"]["queue_id"], "Q1")
+            self.assertEqual(queue["run"]["requestId"], "REQ1")
             self.assertGreaterEqual(queue["run"]["elapsed_seconds"], 0)
             self.assertEqual(companion.status_payload()["run"]["action"], "chat")
+            self.assertEqual(companion.status_payload()["run"]["requestId"], "REQ1")
             queue_reply = companion.handle_action({"action": "queue_status", "topicid": "T1", "bookmd5": "B1"})
             self.assertIn("运行状态", queue_reply["reply"])
             self.assertIn("正在询问 Codex", queue_reply["reply"])
