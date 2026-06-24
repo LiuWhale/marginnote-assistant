@@ -1,21 +1,65 @@
 # Current Release Audit
 
-审计时间：2026-06-12 13:45 CST
+审计时间：2026-06-24 15:11 CST
 
-本文档记录当前 Codex Companion RC 的可验证状态。它不是最终发布承诺，而是当前证据基线。
+本文档记录当前 Codex Companion 公开预览版的可验证状态。它不是最终 v1.0 发布承诺，而是当前证据基线。历史条目保留当时版本号和当时判断。
 
 ## 版本与包
 
-- 当前发布候选：0.4.0 RC
-- MN4 插件 manifest：0.4.0
-- Companion：0.4.0 RC
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.0-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.0-latest-dist.zip`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.0-latest.pkg`
-- 最新 OneDrive pkg：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.0-latest.pkg`
-- 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`，避免在 zip 内文档写入自身 hash 后造成自引用漂移。
+- 当前发布候选：0.4.25 公开预览版
+- MN4 插件 manifest：0.4.25
+- Companion：0.4.25
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.25`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.25-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.25-latest-dist.zip`
+- 当前 zip sha256：`e76fc13c4878df9e67d60d2e134eae485bad8c0576604122c844d3d9e3dac8a9`
+- 最新本地 pkg：尚未生成 0.4.25 signed/notarized pkg
+- 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前最终 gate 因缺 `.pkg` entry 仍会阻塞 `release_sha256_manifest`。
 
 ## 当前证据
+
+### 2026-06-24 15:11 v0.4.25 双语文档与诊断日志重构发布
+
+本轮把 GitHub 默认 README 改为英文首页，并新增完整中文 `README.zh-CN.md`。两个 README 顶部互相链接，release zip 和 `release_smoke_test.py` 都要求包含双语 README。`README-FIRST.txt` 也提示解压包用户查看英文/中文 README。
+
+代码侧把诊断日志脱敏、裁剪、读取和清空逻辑从 `companion.py` 抽到 `diagnostic_log.py`，保留 `companion.append_diagnostic_log/read_recent_diagnostic_logs/clear_diagnostic_logs` 等原有 API。发布包 smoke 也新增 `companion/diagnostic_log.py` 必需文件检查，避免打包时漏掉新模块。
+
+版本已提升到 `0.4.25`，涉及 Companion、doctor、release acceptance、single-document acceptance、release handoff、MN4 manifest、MN4 `PluginVersion`、README、release checklist、package/smoke/pkg builder 默认版本。`CHANGELOG.md` 已把原 `Unreleased` 内容归档为 `0.4.25 - 2026-06-24`。
+
+验证结果：
+
+```text
+python3 -m unittest discover -s tests
+368 tests passed
+
+python3 -m py_compile companion.py diagnostic_log.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py build_pkg.py notarize_pkg.py
+PASS
+
+node --check extension/codex.mn.assistant/web/app.js
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/CodexWebPanelController.js
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip
+PASS sha256=e76fc13c4878df9e67d60d2e134eae485bad8c0576604122c844d3d9e3dac8a9 files=108
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip --install-dry-run
+PASS installDryRun=True
+```
+
+GitHub Release 已创建：`v0.4.25`，asset 为 `CodexCompanion-0.4.25-latest-dist.zip`，digest 与本地 sha256 一致。
+
+本机插件已替换并重启：`plutil` 显示 MN4 扩展 manifest `version=0.4.25`；Companion `/status` 返回 `pluginVersion=0.4.25`；重启 MarginNote 4 后，`/status.mnRuntime` 显示 `ready=true`、`webControlsReady=true`、`nativeApiReady=true`、`staleRuntime=false`、`runtimeHandlerStale=false`、`missingNativeHandlerFeatures=[]`。
+
+复跑 `release_acceptance.py release/CodexCompanion-0.4.25-latest-dist.zip --json` 后：
+
+```text
+PASS: unit_tests, syntax_checks, release_zip_smoke, install_dry_run, runtime_web_controls, native_api_matrix
+WARN: release_maintainer_prerequisites
+BLOCK: native_visible_highlight, release_sha256_manifest, signed_pkg, notarized_pkg, cross_machine_install, single_document_acceptance
+```
+
+结论：0.4.25 是可下载和本机可运行的公开预览版，GitHub/OneDrive/release zip/运行态基础 gate 已对齐；它仍不是最终 v1.0，因为原生可见高亮、signed/notarized pkg、跨机器安装、单文档完整验收和 pkg hash manifest 证据未补齐。
 
 ### 2026-06-12 17:05 高亮入口改为下一选区优先
 

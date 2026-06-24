@@ -48,9 +48,9 @@
    - 用单独导出器生成带标注 PDF 副本。
    - 明确告诉用户这不是 MN4 原生高亮。
 
-## 当前新增的运行时探测
+## 当前运行时探测
 
-0.4.0 RC 已加入 `nativeApiCapabilities` 运行时事件。MN4 面板加载时，插件会只读检查
+0.4.x 已加入 `nativeApiCapabilities` 运行时事件。MN4 面板加载时，插件会只读检查
 `studyController`、`notebookController`、共享 `resolveDocumentController()` 发现的一组 document-controller 候选、`selectedNote`、`Database` 和
 `Application` 上是否暴露 `AppendHighlight`、`highlightFromSelection`、`TextHighlightTool`、`UpdateAnnotationOfNotes`、
 `importPdfAnnotations`、`ExportHighlightedPages` 等候选 selector。document-controller 候选包括
@@ -69,7 +69,7 @@
 - `imageFromSelection`
 - `highlightFromSelection`
 
-因此 0.4.0 RC 新增了 `request_native_highlight_selection`。它通过 Companion 队列发送
+因此 0.4.x 新增了 `request_native_highlight_selection`。它通过 Companion 队列发送
 `nativeAction=highlight_current_selection`，由 MN4 插件在轮询时尝试调用最近一次 PDF 选区事件里的
 `documentController.highlightFromSelection()`。这条路线仍然保持保守：
 
@@ -90,7 +90,7 @@
 
 这样 `nativeApiCapabilities.documentControllerCandidates`、`nativeHighlightSelectionFailed.candidateLabels` 和
 `selectedDocumentControllerLabel` 更稳定，后续能从事件日志直接判断 MN4 当前到底把可高亮的 document controller 暴露在哪个属性上。
-这仍然只是发现与诊断能力；只有在活跃 PDF 选区下看到 `nativeHighlightSelectionPosted`、同一 topic/book 作用域内的 `ZHIGHLIGHTS` blob 和页面肉眼可见高亮后，原生高亮才算发布完成。`Collect Native Highlight Evidence.command` 现在会先通过 `/marginnote/action` 请求打开中的 MN4 插件执行一次 `request_native_highlight_selection`；如果插件进入 `nativeHighlightNextSelectionArmed`，采证脚本不会立刻结束，而是在默认 90 秒窗口内继续等待用户重新选区后的 `nativeHighlightSelectionPosted` 或 `nativeHighlightSelectionFailed`。最终证据只用最新 posted event 的 topic/book 和同一作用域的 blob 查询结果通过验收；缺 scope、scope 不匹配、blob 行数为 0、本次尝试失败或只是 armed 后超时，都会写进 evidence 并继续阻塞。
+这仍然只是发现与诊断能力；只有在活跃 PDF 选区下看到 `nativeHighlightSelectionPosted`、同一 topic/book 作用域内的 `ZHIGHLIGHTS` blob 和页面肉眼可见高亮后，原生高亮才算发布完成。0.4.25 本机运行态已确认 `native_api_matrix` PASS，能找到 `studyController.readerController.currentDocumentController.highlightFromSelection`，但这仍不等价于可见高亮发布证据。`Collect Native Highlight Evidence.command` 现在会先通过 `/marginnote/action` 请求打开中的 MN4 插件执行一次 `request_native_highlight_selection`；如果插件进入 `nativeHighlightNextSelectionArmed`，采证脚本不会立刻结束，而是在默认 90 秒窗口内继续等待用户重新选区后的 `nativeHighlightSelectionPosted` 或 `nativeHighlightSelectionFailed`。最终证据只用最新 posted event 的 topic/book 和同一作用域的 blob 查询结果通过验收；缺 scope、scope 不匹配、blob 行数为 0、本次尝试失败或只是 armed 后超时，都会写进 evidence 并继续阻塞。
 
 2026-06-11 继续增强高亮命令执行：`native_api_capability_matrix` 现在把
 `studyController.readerController`、`readerViewController`、`pdfController`、`pdfViewController` 等已存在的
@@ -100,7 +100,7 @@ PDF 控制器目标视为可尝试路线。若 selector 不可枚举但控制器
 
 ## 当前可用的 PDF 副本导出路线
 
-0.4.0 RC 已把 `export_annotated_pdf` 从占位动作升级为安全降级实现：
+0.4.x 已把 `export_annotated_pdf` 从占位动作升级为安全降级实现：
 
 - Companion 解析当前文档本地 PDF 路径：优先使用当前 book 的 Companion PDF 缓存副本，其次使用插件传入的 `pdfPath`，否则只读查询 MN4 `ZBOOK` 表并尝试在 MNDocs 根目录下定位 `ZFILE/ZBOOKURL`，最后才使用已知路径映射。
 - Companion 从 `selectionText`、`annotationText` 或 `sourceExcerpt` 中提取可搜索文本。

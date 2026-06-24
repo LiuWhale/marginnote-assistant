@@ -66,11 +66,19 @@ node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/Mar
 node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant/CodexWebPanelController.js"
 node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant/web/app.js"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/companion.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/diagnostic_log.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/runtime_config.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/update_manager.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/send_action.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/refresh_mn_runtime.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/audit_highlights.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/doctor.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/release_acceptance.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/release_smoke_test.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/package_release.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/prepare_release_handoff.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/single_document_acceptance.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/build_pkg.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/notarize_pkg.py"
 python3 -m json.tool "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant/mnaddon.json" >/dev/null
 ```
@@ -83,7 +91,7 @@ curl -s http://127.0.0.1:48761/status | python3 -m json.tool
 python3 "$HOME/.codex/marginnote-assistant/doctor.py"
 ```
 
-`Latest RC package` 应显示 installable clean zip，并确认本地 release 包与 OneDrive 镜像哈希一致。
+`Latest release package` 应显示 installable clean zip，并确认本地 release 包与 OneDrive 镜像哈希一致。
 
 3. 打开 MN4 notebook 后验证插件事件
 

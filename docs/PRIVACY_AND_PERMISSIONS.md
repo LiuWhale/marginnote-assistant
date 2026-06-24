@@ -20,6 +20,14 @@ MN4 插件会把当前选中文本、当前节点文本、topic id 和 book md5 
 ~/.codex/marginnote-assistant/events.jsonl
 ```
 
+结构化诊断日志保存在：
+
+```text
+~/.codex/marginnote-assistant/logs/diagnostics.jsonl
+```
+
+0.4.25 起，诊断日志的脱敏、裁剪、读取和清空逻辑由 `diagnostic_log.py` 负责。日志会隐藏 OpenAI Key、Authorization、token、password、`pdfBase64`、上传文件内容等敏感字段；大块回答、脑图、卡片和历史消息只保留长度、预览或键名摘要，用于排错而不是保存完整内容。
+
 ## OpenAI 调用
 
 如果没有配置 `OPENAI_API_KEY`，且本机 Codex CLI 也不可用，Companion 不会把文本发到 OpenAI，也不会用本地模板生成问答、卡片、脑图或完整精读。此时只保留本地权限诊断、运行态采证、PDF 缓存和导出等工具能力。

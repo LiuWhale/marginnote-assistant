@@ -53,6 +53,27 @@
 tail -n 50 "$HOME/.codex/marginnote-assistant/events.jsonl"
 ```
 
+查看最近结构化诊断日志：
+
+```bash
+tail -n 50 "$HOME/.codex/marginnote-assistant/logs/diagnostics.jsonl"
+```
+
+检查当前发布包：
+
+```bash
+python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip
+python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip --install-dry-run
+```
+
+检查当前运行态：
+
+```bash
+curl -fsS http://127.0.0.1:48761/status
+```
+
+0.4.25 本机验收中，`runtime_web_controls` 和 `native_api_matrix` 已 PASS；最终 `release_acceptance.py` 仍会因为原生可见高亮、缺 signed/notarized pkg、缺跨机器证据和缺单文档完整 PASS evidence 返回非零。
+
 ## 验收判断
 
 队列命令只有在以下链路都出现时才算真正执行：
@@ -64,3 +85,12 @@ tail -n 50 "$HOME/.codex/marginnote-assistant/events.jsonl"
 - 脑图任务出现 `createMindmapFinished`。
 - 事件出现 `commandsAcked`。
 - 数据库中能查到新增卡片/脑图节点。
+
+最终发布验收还需要：
+
+- `release_smoke_test.py` 和 `--install-dry-run` 通过。
+- `/status.mnRuntime.ready=true`，且 `runtimeHandlerStale=false`。
+- `nativeApiCapabilities` 为当前插件版本。
+- 同一 topic/book 的 `single_document_acceptance` 通过。
+- 原生可见高亮 evidence 证明页面可见高亮和同 scope `ZHIGHLIGHTS` blob。
+- signed/notarized pkg 和跨机器安装 evidence。
