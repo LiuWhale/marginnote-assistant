@@ -25,6 +25,7 @@ from typing import Any
 from urllib import error, request
 from urllib.parse import parse_qs, unquote, urlparse
 
+import diagnostic_log
 import update_manager
 from runtime_config import (
     CODEX_CLI_REASONING,
@@ -57,7 +58,7 @@ CONFIG_PATH = ROOT / ".env"
 SESSIONS_DIR = ROOT / "sessions"
 EVENTS_PATH = ROOT / "events.jsonl"
 DIAGNOSTIC_LOG_PATH = ROOT / "logs/diagnostics.jsonl"
-DIAGNOSTIC_LOG_MAX_LINES = 1000
+DIAGNOSTIC_LOG_MAX_LINES = diagnostic_log.DEFAULT_MAX_LINES
 QUEUE_DIR = ROOT / "queue"
 SETTINGS_PATH = ROOT / "companion_settings.json"
 GOAL_PATH = ROOT / "goal.json"
@@ -250,6 +251,17 @@ NATIVE_QUEUE_ACTIONS = {
     "write_draft",
 }
 
+diagnostic_log.configure(DIAGNOSTIC_LOG_PATH, max_lines=DIAGNOSTIC_LOG_MAX_LINES)
+SENSITIVE_LOG_KEYS = diagnostic_log.SENSITIVE_LOG_KEYS
+LARGE_LOG_KEYS = diagnostic_log.LARGE_LOG_KEYS
+diagnostic_timestamp = diagnostic_log.diagnostic_timestamp
+sanitize_diagnostic_value = diagnostic_log.sanitize_diagnostic_value
+sanitize_diagnostic_payload = diagnostic_log.sanitize_diagnostic_payload
+prune_diagnostic_log = diagnostic_log.prune_diagnostic_log
+append_diagnostic_log = diagnostic_log.append_diagnostic_log
+read_recent_diagnostic_logs = diagnostic_log.read_recent_diagnostic_logs
+clear_diagnostic_logs = diagnostic_log.clear_diagnostic_logs
+
 
 def read_json_file(path: Path, fallback: Any) -> Any:
     if not path.exists():
@@ -263,131 +275,6 @@ def read_json_file(path: Path, fallback: Any) -> Any:
 def write_json_file(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-SENSITIVE_LOG_KEYS = {
-    "apikey",
-    "api_key",
-    "authorization",
-    "filecontent",
-    "openaiapikey",
-    "password",
-    "pdfbase64",
-    "secret",
-    "token",
-}
-LARGE_LOG_KEYS = {"cards", "content", "edittext", "history", "messages", "mindmap", "reply"}
-
-
-def diagnostic_timestamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
-
-
-def sanitize_diagnostic_value(key: str, value: Any, depth: int = 0) -> Any:
-    key_lower = str(key or "").replace("_", "").lower()
-    if any(sensitive in key_lower for sensitive in SENSITIVE_LOG_KEYS):
-        return "[redacted]"
-    if key_lower in LARGE_LOG_KEYS:
-        if isinstance(value, str):
-            return {"chars": len(value), "preview": value[:160]}
-        if isinstance(value, list):
-            return {"items": len(value)}
-        if isinstance(value, dict):
-            return {"keys": sorted(str(item) for item in value.keys())[:16]}
-        return "[omitted]"
-    if depth >= 3:
-        return "[max-depth]"
-    if isinstance(value, dict):
-        output: dict[str, Any] = {}
-        for index, (child_key, child_value) in enumerate(value.items()):
-            if index >= 50:
-                output["..."] = f"{len(value) - index} more keys"
-                break
-            output[str(child_key)] = sanitize_diagnostic_value(str(child_key), child_value, depth + 1)
-        return output
-    if isinstance(value, list):
-        output_list = [sanitize_diagnostic_value(key, item, depth + 1) for item in value[:20]]
-        if len(value) > 20:
-            output_list.append(f"... {len(value) - 20} more items")
-        return output_list
-    if isinstance(value, str):
-        if len(value) > 500:
-            return value[:500] + f"... [{len(value)} chars]"
-        return value
-    if isinstance(value, (bool, int, float)) or value is None:
-        return value
-    return str(value)[:500]
-
-
-def sanitize_diagnostic_payload(payload: Any) -> Any:
-    return sanitize_diagnostic_value("payload", payload)
-
-
-def prune_diagnostic_log() -> None:
-    try:
-        if not DIAGNOSTIC_LOG_PATH.exists():
-            return
-        lines = DIAGNOSTIC_LOG_PATH.read_text(encoding="utf-8").splitlines()
-        if len(lines) <= DIAGNOSTIC_LOG_MAX_LINES:
-            return
-        DIAGNOSTIC_LOG_PATH.write_text(
-            "\n".join(lines[-DIAGNOSTIC_LOG_MAX_LINES:]) + "\n",
-            encoding="utf-8",
-        )
-    except Exception:
-        return
-
-
-def append_diagnostic_log(
-    level: str,
-    event: str,
-    message: str = "",
-    *,
-    payload: Any | None = None,
-    extra: Any | None = None,
-    request_id: str = "",
-) -> dict[str, Any]:
-    record = {
-        "ts": diagnostic_timestamp(),
-        "pid": os.getpid(),
-        "level": str(level or "info"),
-        "event": str(event or ""),
-        "requestId": str(request_id or ""),
-        "message": str(message or "")[:800],
-    }
-    if payload is not None:
-        record["payload"] = sanitize_diagnostic_payload(payload)
-    if extra is not None:
-        record["extra"] = sanitize_diagnostic_payload(extra)
-    DIAGNOSTIC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with DIAGNOSTIC_LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    prune_diagnostic_log()
-    return record
-
-
-def read_recent_diagnostic_logs(limit: int = 80) -> list[dict[str, Any]]:
-    safe_limit = max(1, min(int(limit or 80), 300))
-    if not DIAGNOSTIC_LOG_PATH.exists():
-        return []
-    try:
-        lines = DIAGNOSTIC_LOG_PATH.read_text(encoding="utf-8").splitlines()[-safe_limit:]
-    except Exception:
-        return []
-    logs: list[dict[str, Any]] = []
-    for line in lines:
-        try:
-            item = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(item, dict):
-            logs.append(item)
-    return logs
-
-
-def clear_diagnostic_logs() -> None:
-    DIAGNOSTIC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DIAGNOSTIC_LOG_PATH.write_text("", encoding="utf-8")
 
 
 def write_env_setting(key: str, value: str) -> None:

@@ -231,7 +231,7 @@ python3 -m unittest discover -s tests
 Check Python syntax:
 
 ```bash
-python3 -m py_compile companion.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py
+python3 -m py_compile companion.py diagnostic_log.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py
 ```
 
 Check WebView JavaScript:
