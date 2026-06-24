@@ -204,6 +204,169 @@ class PdfExportTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual(resolved, source)
 
+    def test_resolve_pdf_source_uses_payload_document_title_without_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+            source = file_root / "Yuan 等 2026. Qwen-RobotManip Technical Report.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+
+            companion = load_companion(root)
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source(
+                {"documentTitle": "Yuan 等 2026. Qwen-RobotManip Technical Report.pdf"},
+                "BOOK_WITHOUT_DB",
+            )
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, source)
+
+    def test_resolve_pdf_source_prefers_configured_root_for_payload_document_title(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            configured_root = Path(tmp) / "configured"
+            mn_root = Path(tmp) / "mn-docs"
+            configured_root.mkdir()
+            mn_root.mkdir()
+            filename = "Yuan 等 2026. Qwen-RobotManip Technical Report.pdf"
+            configured_source = configured_root / filename
+            mn_source = mn_root / filename
+            configured_source.write_bytes(b"%PDF-1.4\n% configured\n")
+            mn_source.write_bytes(b"%PDF-1.4\n% mn\n")
+
+            companion = load_companion(root)
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = [mn_root]
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(configured_root)]})
+
+            resolved, error = companion.resolve_pdf_source({"documentTitle": filename}, "BOOK_WITHOUT_DB")
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, configured_source)
+
+    def test_resolve_pdf_source_finds_configured_pdf_by_selection_text_without_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+            distractor = file_root / "other.pdf"
+            source = file_root / "robot-foundation-model.pdf"
+            create_pdf(distractor, "Unrelated control barrier function notes.")
+            create_pdf(
+                source,
+                "Foundation models in language and multimodality achieve strong generalization because heterogeneous data sources can be aligned.",
+            )
+
+            companion = load_companion(root)
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source(
+                {
+                    "selectionText": (
+                        "Foundation models in language and multimodality achieve strong generalization "
+                        "because heterogeneous data sources can be aligned."
+                    )
+                },
+                "BOOK_WITHOUT_DB",
+            )
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, source)
+
+    def test_resolve_pdf_source_scores_selection_text_instead_of_first_loose_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+            distractor = file_root / "a-first-overlap.pdf"
+            source = file_root / "z-real-source.pdf"
+            selection = (
+                "Foundation models align multimodal robot data for strong "
+                "generalization across tasks."
+            )
+            create_pdf(
+                distractor,
+                "These models use data for strong generalization in unrelated control tasks.",
+            )
+            create_pdf(source, selection)
+
+            companion = load_companion(root)
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source({"selectionText": selection}, "BOOK_WITHOUT_DB")
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, source)
+
+    def test_resolve_pdf_source_explains_directory_needs_filename_or_selection_when_database_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+
+            companion = load_companion(root)
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source({}, "BOOK_WITHOUT_DB")
+
+            self.assertIsNone(resolved)
+            self.assertIn("已配置文件搜索目录", error or "")
+            self.assertIn("文件名", error or "")
+            self.assertIn("选区", error or "")
+
+    def test_document_context_permission_error_requests_native_pdf_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            source = Path(tmp) / "source.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+
+            companion = load_companion(root)
+            companion.KNOWN_PDF_PATHS = {"BOOK1": source}
+
+            def denied_hash(path: Path) -> str:
+                raise PermissionError("Operation not permitted")
+
+            companion.sha256_file = denied_hash
+
+            context = companion.document_context_for_model({"topicid": "TOPIC1", "bookmd5": "BOOK1"}, "")
+
+            self.assertFalse(context["ok"])
+            self.assertIn("已自动请求 MN4 插件缓存当前 PDF", context["error"])
+            polled = companion.poll_commands("TOPIC1", "BOOK1")
+            self.assertEqual(polled["commands"][0]["nativeAction"], "cache_pdf_from_current_document")
+            self.assertIn(str(source), polled["commands"][0]["pdfPathCandidates"])
+
     def test_cache_pdf_from_marginnote_is_used_as_pdf_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "companion"

@@ -2788,6 +2788,35 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(polled["commands"][0]["pdfPath"], str(source))
             self.assertIn(str(source), polled["commands"][0]["pdfPathCandidates"])
 
+    def test_request_pdf_cache_queues_document_title_candidates_without_pdf_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+            source = file_root / "Yuan 等 2026. Qwen-RobotManip Technical Report.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            result = companion.handle_action(
+                {
+                    "action": "request_pdf_cache",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "documentTitle": "Yuan 等 2026. Qwen-RobotManip Technical Report.pdf",
+                    "source": "unit-test",
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["queued"]["command"]["nativeAction"], "cache_pdf_from_current_document")
+            self.assertEqual(result["queued"]["command"]["pdfPath"], str(source))
+            self.assertIn(str(source), result["queued"]["command"]["pdfPathCandidates"])
+
     def test_request_draft_write_queues_native_write_command_for_plugin_poll(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

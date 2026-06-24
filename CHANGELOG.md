@@ -2,6 +2,17 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.15 - 2026-06-24
+
+### Added
+
+- Added automatic current-PDF discovery from MarginNote document title/file-name metadata, so configured file roots can work without manually entering a full PDF path.
+- Added selection-text PDF discovery: when no filename is available, Companion can scan configured file roots and identify the current PDF from the active PDF selection text.
+
+### Changed
+
+- Improved missing-PDF diagnostics to distinguish saved directory roots from missing document filename/selection evidence, instead of asking users to manually add a `bookmd5` mapping.
+
 ## 0.4.14 - 2026-06-23
 
 ### Added

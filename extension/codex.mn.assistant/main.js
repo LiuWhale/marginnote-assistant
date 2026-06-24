@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.14';
+  var PluginVersion = '0.4.15';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -331,6 +331,43 @@ JSB.newAddon = function(mainPath) {
     ]);
   }
 
+  function documentTitleFromDocumentObject(doc) {
+    var direct = firstStringValue(doc, [
+      'documentTitle',
+      'title',
+      'name',
+      'fileName',
+      'filename',
+      'bookTitle',
+      'bookName',
+      'ZFILE',
+      'ZBOOKURL'
+    ]);
+    if (direct) return direct;
+    var path = pdfPathFromDocumentObject(doc);
+    if (path) {
+      var parts = path.split('/');
+      return parts.length ? parts[parts.length - 1] : path;
+    }
+    var nestedKeys = ['document', 'currentDocument', 'book', 'currentBook', 'file', 'source'];
+    for (var i = 0; i < nestedKeys.length; i++) {
+      var item = valueOf(doc, nestedKeys[i]);
+      direct = firstStringValue(item, [
+        'documentTitle',
+        'title',
+        'name',
+        'fileName',
+        'filename',
+        'bookTitle',
+        'bookName',
+        'ZFILE',
+        'ZBOOKURL'
+      ]);
+      if (direct) return direct;
+    }
+    return '';
+  }
+
   function pdfPathFromDocumentObject(doc) {
     var direct = firstStringValue(doc, [
       'pdfPath',
@@ -362,6 +399,32 @@ JSB.newAddon = function(mainPath) {
         'url'
       ]);
       if (direct) return direct;
+    }
+    return '';
+  }
+
+  function documentTitleFromNotebookObject(notebook) {
+    var direct = firstStringValue(notebook, [
+      'documentTitle',
+      'title',
+      'name',
+      'fileName',
+      'filename',
+      'bookTitle',
+      'bookName',
+      'ZFILE',
+      'ZBOOKURL'
+    ]);
+    if (direct) return direct;
+    try {
+      if (notebook && notebook.documents && countOf(notebook.documents) > 0) {
+        return documentTitleFromDocumentObject(objectAt(notebook.documents, 0));
+      }
+    } catch (err) {}
+    var path = pdfPathFromNotebookObject(notebook);
+    if (path) {
+      var parts = path.split('/');
+      return parts.length ? parts[parts.length - 1] : path;
     }
     return '';
   }
@@ -433,6 +496,27 @@ JSB.newAddon = function(mainPath) {
     return '';
   }
 
+  function documentTitleFromNotebookController(nc) {
+    var direct = firstStringValue(nc, [
+      'documentTitle',
+      'currentDocumentTitle',
+      'fileName',
+      'filename',
+      'bookTitle',
+      'bookName',
+      'title',
+      'name'
+    ]);
+    if (direct) return direct;
+    var objectKeys = ['documentController', 'docController', 'notebook', 'topic', 'document', 'currentDocument', 'book', 'currentBook'];
+    for (var i = 0; i < objectKeys.length; i++) {
+      var item = valueOf(nc, objectKeys[i]);
+      direct = documentTitleFromNotebookObject(item) || documentTitleFromDocumentObject(item);
+      if (direct) return direct;
+    }
+    return '';
+  }
+
   function pdfPathFromNotebookController(nc) {
     var direct = firstStringValue(nc, [
       'pdfPath',
@@ -464,6 +548,16 @@ JSB.newAddon = function(mainPath) {
     try {
       var notebook = Database.sharedInstance().getNotebookById(String(topicId));
       return md5FromNotebookObject(notebook);
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function documentTitleFromDatabaseTopic(topicId) {
+    if (!topicId) return '';
+    try {
+      var notebook = Database.sharedInstance().getNotebookById(String(topicId));
+      return documentTitleFromNotebookObject(notebook);
     } catch (err) {
       return '';
     }
@@ -1150,6 +1244,7 @@ JSB.newAddon = function(mainPath) {
       canInstallSelectionPopupMenu = false;
     }
     var hasPdfPath = !!(context && (context.pdfPath || context.documentPath));
+    var hasDocumentIdentity = !!(hasPdfPath || (context && (context.documentTitle || context.documentFileName || context.sourceFileName)));
     var highlightBlocked = '';
     var highlightNext = '点击“高亮选区”，MN4 会调用 documentController.highlightFromSelection().';
     if (!selectionControllerExists) {
@@ -1230,12 +1325,12 @@ JSB.newAddon = function(mainPath) {
       cacheCurrentPdf: {
         label: '由 MN 插件进程缓存当前 PDF',
         available: true,
-        ready: hasPdfPath,
+        ready: hasDocumentIdentity,
         entryAction: 'request_pdf_cache',
         nativeAction: 'cache_pdf_from_current_document',
-        blockedReason: hasPdfPath ? '' : 'needs-current-pdf-path',
+        blockedReason: hasDocumentIdentity ? '' : 'needs-current-pdf-identity',
         nextStep: '打开目标 PDF 后点击“缓存PDF”，由 MN4 插件进程读取文件并上传给 Companion。',
-        evidence: hasPdfPath ? ['resolveContext.pdfPath'] : []
+        evidence: hasPdfPath ? ['resolveContext.pdfPath'] : (hasDocumentIdentity ? ['resolveContext.documentTitle'] : [])
       },
       annotatedPdfExport: {
         label: '导出带标注 PDF 副本',
@@ -1622,6 +1717,10 @@ JSB.newAddon = function(mainPath) {
       pdfPathFromDatabaseTopic(topicId) ||
       safeString(defaults.objectForKey('mindbooks_lastpdfpath')) ||
       safeString(defaults.objectForKey('mindbooks_lastbookpath'));
+    var documentTitle = documentTitleFromNotebookController(nc) ||
+      documentTitleFromDatabaseTopic(topicId) ||
+      safeString(defaults.objectForKey('mindbooks_lastbooktitle')) ||
+      safeString(defaults.objectForKey('mindbooks_lastbookname'));
     var selectedNote = this.getSelectedNote();
     var selectedNoteText = '';
     var selectedNoteTitle = '';
@@ -1657,6 +1756,9 @@ JSB.newAddon = function(mainPath) {
       bookmd5: bookMd5,
       pdfPath: pdfPath,
       documentPath: pdfPath,
+      documentTitle: documentTitle,
+      documentFileName: documentTitle,
+      sourceFileName: documentTitle,
       source: 'marginnote4-plugin',
       pluginVersion: PluginVersion
     };

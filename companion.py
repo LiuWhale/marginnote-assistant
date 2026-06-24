@@ -72,7 +72,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.14"
+CURRENT_PLUGIN_VERSION = "0.4.15"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -2207,7 +2207,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.14-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.15-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -3926,6 +3926,91 @@ def pdf_filename_candidates(raw_values: list[str]) -> list[str]:
     return names
 
 
+def payload_pdf_name_values(payload: dict[str, Any]) -> list[str]:
+    keys = [
+        "fileName",
+        "filename",
+        "documentFileName",
+        "documentTitle",
+        "documentName",
+        "sourceFileName",
+        "sourceDocumentTitle",
+        "bookTitle",
+        "bookName",
+        "title",
+        "ZFILE",
+        "ZBOOKURL",
+    ]
+    values: list[str] = []
+    for key in keys:
+        value = str(payload.get(key) or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def normalize_pdf_title_key(text: str) -> str:
+    value = Path(str(text or "").strip()).name
+    value = re.sub(r"\.pdf$", "", value, flags=re.IGNORECASE)
+    value = repair_pdf_extracted_math_text(value).casefold()
+    value = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def iter_pdf_files_in_roots(roots: list[Path], max_files: int = 5000) -> list[Path]:
+    files: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        if not root:
+            continue
+        path = root.expanduser()
+        if path.is_file() and path.suffix.lower() == ".pdf":
+            key = str(path)
+            if key not in seen:
+                seen.add(key)
+                files.append(path)
+            continue
+        if not path.is_dir():
+            continue
+        for current_root, dirnames, names in os.walk(path):
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if name not in {".git", "node_modules", "__pycache__"} and not name.startswith(".")
+            ]
+            for name in names:
+                if not name.lower().endswith(".pdf"):
+                    continue
+                candidate = Path(current_root) / name
+                key = str(candidate)
+                if key in seen:
+                    continue
+                seen.add(key)
+                files.append(candidate)
+                if len(files) >= max_files:
+                    return files
+    return files
+
+
+def find_pdf_by_title_in_roots(raw_values: list[str], roots: list[Path]) -> Path | None:
+    filenames = pdf_filename_candidates(raw_values)
+    found = find_pdf_by_filename_in_roots(filenames, roots)
+    if found:
+        return found
+    title_keys = [normalize_pdf_title_key(value) for value in raw_values]
+    title_keys = [value for value in title_keys if len(value) >= 4]
+    if not title_keys:
+        return None
+    for candidate in iter_pdf_files_in_roots(roots):
+        candidate_key = normalize_pdf_title_key(candidate.name)
+        if not candidate_key:
+            continue
+        for title_key in title_keys:
+            if title_key == candidate_key or title_key in candidate_key or candidate_key in title_key:
+                return candidate
+    return None
+
+
 def pdf_source_search_roots(path_hints: list[Path] | None = None) -> list[Path]:
     roots: list[Path] = []
     roots.extend(path_hints or [])
@@ -3937,8 +4022,20 @@ def pdf_source_search_roots(path_hints: list[Path] | None = None) -> list[Path]:
     return unique_paths(roots)
 
 
+def payload_title_search_roots() -> list[Path]:
+    roots: list[Path] = []
+    roots.extend(configured_extra_pdf_roots())
+    roots.extend(ONEDRIVE_PDF_ROOTS)
+    roots.extend(cloud_storage_pdf_roots())
+    roots.extend(MN_DOC_ROOTS)
+    roots.extend(MN_DOC_CACHE_ROOTS)
+    return unique_paths(roots)
+
+
 def find_pdf_by_filename_in_roots(filenames: list[str], roots: list[Path]) -> Path | None:
     for root in roots:
+        if root.is_file() and root.suffix.lower() == ".pdf" and root.name in filenames:
+            return root
         for name in filenames:
             candidate = root / name
             if candidate.is_file() and candidate.suffix.lower() == ".pdf":
@@ -3963,6 +4060,142 @@ def find_pdf_by_filename_in_roots(filenames: list[str], roots: list[Path]) -> Pa
                     if candidate.is_file() and candidate.suffix.lower() == ".pdf":
                         return candidate
     return None
+
+
+def configured_single_pdf_file() -> Path | None:
+    files = [path for path in configured_extra_pdf_roots() if path.is_file() and path.suffix.lower() == ".pdf"]
+    return files[0] if len(files) == 1 else None
+
+
+def selection_text_for_pdf_discovery(payload: dict[str, Any]) -> str:
+    for key in ("selectionText", "selectedText", "activeSelectionText", "sourceExcerpt"):
+        text = repair_pdf_extracted_math_text(str(payload.get(key) or "")).strip()
+        text = re.sub(r"\s+", " ", text)
+        if len(text) >= 60:
+            return text[:900]
+    return ""
+
+
+def find_pdf_by_selection_text_in_roots(selection_text: str, roots: list[Path]) -> Path | None:
+    query = re.sub(r"\s+", " ", repair_pdf_extracted_math_text(selection_text or "")).strip()
+    if len(query) < 60:
+        return None
+    candidates = iter_pdf_files_in_roots(roots, max_files=1200)
+    if not candidates:
+        return None
+    python, dependency_error = find_pymupdf_python()
+    if not python:
+        return None
+    script = r"""
+import json
+import re
+import sys
+
+import fitz
+
+needle = re.sub(r"\s+", " ", sys.argv[1]).strip().casefold()
+paths = json.loads(sys.argv[2])
+probe = needle[:260]
+stop_words = {
+    "about", "after", "also", "because", "been", "being", "between", "both",
+    "could", "from", "have", "into", "more", "such", "than", "that", "their",
+    "there", "these", "this", "through", "under", "using", "were", "when",
+    "where", "which", "with", "would",
+}
+tokens = []
+seen_tokens = set()
+for token in re.findall(r"[0-9a-z\u4e00-\u9fff]{4,}", needle):
+    if token in stop_words or token in seen_tokens:
+        continue
+    tokens.append(token)
+    seen_tokens.add(token)
+    if len(tokens) >= 48:
+        break
+threshold = max(5, int(len(tokens) * 0.58 + 0.999)) if tokens else 9999
+compact_probe = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", probe)
+
+def norm(text):
+    return re.sub(r"\s+", " ", str(text or "")).strip().casefold()
+
+def compact(text):
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", str(text or "").casefold())
+
+def score_text(text):
+    compact_text = compact(text)
+    if compact_probe and len(compact_probe) >= 48 and compact_probe in compact_text:
+        return 10000
+    if not tokens:
+        return 0
+    hits = 0
+    for token in tokens:
+        if token in text:
+            hits += 1
+    return hits
+
+best_path = ""
+best_score = 0
+for path in paths:
+    try:
+        doc = fitz.open(path)
+    except Exception:
+        continue
+    try:
+        for page in doc:
+            text = norm(page.get_text("text") or "")
+            page_score = 10000 if probe and probe in text else score_text(text)
+            if page_score > best_score:
+                best_score = page_score
+                best_path = path
+    except Exception:
+        pass
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+if best_score >= 10000 or best_score >= threshold:
+    print("__CODEX_MN_PDF_MATCH__" + best_path)
+else:
+    print("__CODEX_MN_PDF_MATCH__")
+"""
+    try:
+        completed = subprocess.run(
+            [str(python), "-c", script, query, json.dumps([str(path) for path in candidates], ensure_ascii=False)],
+            text=True,
+            capture_output=True,
+            timeout=90,
+            check=False,
+        )
+    except Exception:
+        return None
+    found_text = ""
+    for line in (completed.stdout or "").splitlines():
+        if line.startswith("__CODEX_MN_PDF_MATCH__"):
+            found_text = line.removeprefix("__CODEX_MN_PDF_MATCH__").strip()
+    if found_text:
+        found = Path(found_text).expanduser()
+        try:
+            if found.is_file() and found.suffix.lower() == ".pdf":
+                return found
+        except OSError:
+            return None
+    return None
+
+
+def unresolved_pdf_source_message(db_error: str = "") -> str:
+    configured_roots = configured_extra_pdf_roots()
+    existing_roots = [path for path in configured_roots if path.exists()]
+    if existing_roots:
+        permission_hint = f"；同时读取 MarginNote 数据库失败：{db_error}" if db_error else ""
+        return (
+            "已配置文件搜索目录，但当前请求没有可用于匹配的 PDF 文件名/标题，"
+            "也没有足够长的 PDF 选区文本可用于反查全文。"
+            "请在当前 PDF 中任意选中一段正文后再问，或让 MN4 传入 documentTitle/documentFileName"
+            f"{permission_hint}。"
+        )
+    if db_error:
+        return f"当前 MN 文档没有可解析的本地 PDF 路径；读取 MarginNote 数据库失败：{db_error}"
+    return "当前 MN 文档没有可解析的本地 PDF 路径；请先让插件传入 pdfPath/documentTitle，或在 PDF 中选中一段正文后重试。"
 
 
 def summarize_pdf_search_roots(roots: list[Path], limit: int = 8) -> str:
@@ -4033,6 +4266,13 @@ def resolve_pdf_source(payload: dict[str, Any], book_md5: str) -> tuple[Path | N
     cached = cached_pdf_for_book(book_md5)
     if cached:
         return cached, None
+
+    payload_names = payload_pdf_name_values(payload)
+    if payload_names:
+        payload_found = find_pdf_by_title_in_roots(payload_names, payload_title_search_roots())
+        if payload_found:
+            return payload_found, None
+
     db_source, db_error = resolve_pdf_source_from_mn_database(book_md5)
     if db_source:
         return db_source, None
@@ -4041,11 +4281,20 @@ def resolve_pdf_source(payload: dict[str, Any], book_md5: str) -> tuple[Path | N
         return known, None
     if known:
         return None, f"已知文档路径不存在：{known}"
+
+    single_configured_pdf = configured_single_pdf_file()
+    if single_configured_pdf:
+        return single_configured_pdf, None
+
+    selection_text = selection_text_for_pdf_discovery(payload)
+    if selection_text:
+        text_found = find_pdf_by_selection_text_in_roots(selection_text, configured_extra_pdf_roots())
+        if text_found:
+            return text_found, None
+
     if explicit_error:
         return None, explicit_error
-    if db_error:
-        return None, db_error
-    return None, "当前 MN 文档没有可解析的本地 PDF 路径；请先让插件传入 pdfPath，或把该 bookmd5 加入已知路径映射。"
+    return None, unresolved_pdf_source_message(db_error or "")
 
 
 def normalized_highlight_queries(payload: dict[str, Any]) -> list[str]:
@@ -4853,6 +5102,11 @@ print(json.dumps({"pages": pages}, ensure_ascii=False))
     return pages if isinstance(pages, list) else []
 
 
+def is_macos_file_permission_error(exc: Exception) -> bool:
+    text = str(exc)
+    return isinstance(exc, PermissionError) or "Operation not permitted" in text or "权限" in text
+
+
 def ensure_pdf_text_cache(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     book_md5 = normalize_book_md5(payload)
     source_pdf, source_error = resolve_pdf_source(payload, book_md5)
@@ -4880,7 +5134,16 @@ def ensure_pdf_text_cache(payload: dict[str, Any]) -> tuple[dict[str, Any] | Non
     try:
         source_sha = sha256_file(source_pdf)
     except Exception as exc:
-        return None, f"读取 PDF 哈希失败：{exc}"
+        message = f"读取 PDF 哈希失败：{exc}"
+        if is_macos_file_permission_error(exc):
+            cache_request = request_pdf_cache(payload)
+            if cache_request.get("ok"):
+                return None, (
+                    f"{message}\n\n"
+                    "已自动请求 MN4 插件缓存当前 PDF。保持该文档在 MarginNote 4 中打开，"
+                    "插件轮询后会由 MN4 进程读取 PDF 并上传到 Companion 缓存；缓存完成后再发送一次即可读取全文。"
+                )
+        return None, message
     cache_path = pdf_text_cache_path(book_md5 or source_sha[:16], source_sha)
     cached = read_json_file(cache_path, {})
     if isinstance(cached, dict) and cached.get("sourceSha256") == source_sha and isinstance(cached.get("chunks"), list):

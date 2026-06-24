@@ -279,6 +279,18 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("repairContextPayload", self.js)
         self.assertIn("repairPdfExtractedMathText(text)", self.js)
 
+    def test_native_context_exports_document_title_for_file_root_resolution(self) -> None:
+        main_js = (ROOT / "main.js").read_text(encoding="utf-8")
+        for marker in [
+            "documentTitleFromDocumentObject",
+            "documentTitleFromNotebookController",
+            "documentFileName",
+            "sourceFileName",
+            "documentTitle: documentTitle",
+            "documentFileName: documentTitle",
+        ]:
+            self.assertIn(marker, main_js)
+
     def test_empty_selection_update_clears_stale_web_context(self) -> None:
         set_prompt_body = self.js.split("setPrompt: function(payload)", 1)[1].split("\n    setStatus:", 1)[0]
 
