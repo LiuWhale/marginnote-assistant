@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.16 - 2026-06-24
+
+### Fixed
+
+- Fixed PDF discovery after switching to another MarginNote document whose title is reported without `.pdf` and with a MarginNote copy suffix such as `#1`.
+- Fixed native PDF cache requests when the background Companion process cannot list a configured OneDrive/iCloud file directory: Companion now derives likely PDF candidate paths directly from `documentTitle` and passes them to the MN4 native plugin.
+
 ## 0.4.15 - 2026-06-24
 
 ### Added

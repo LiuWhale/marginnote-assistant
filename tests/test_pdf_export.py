@@ -256,6 +256,36 @@ class PdfExportTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual(resolved, configured_source)
 
+    def test_resolve_pdf_source_derives_filename_from_marginnote_copy_title(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "companion"
+            root.mkdir()
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+            source = file_root / "Liu et al. 2026. Safe online reinforcement learning with diffusion world model and Langevin dynamics.pdf"
+            source.write_bytes(b"%PDF-1.4\n")
+
+            companion = load_companion(root)
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source(
+                {
+                    "documentTitle": (
+                        "Liu et al. 2026. Safe online reinforcement learning with diffusion world model "
+                        "and Langevin dynamics #1"
+                    )
+                },
+                "BOOK_WITHOUT_DB",
+            )
+
+            self.assertIsNone(error)
+            self.assertEqual(resolved, source)
+
     def test_resolve_pdf_source_finds_configured_pdf_by_selection_text_without_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "companion"

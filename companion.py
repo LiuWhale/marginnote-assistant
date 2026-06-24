@@ -72,7 +72,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.15"
+CURRENT_PLUGIN_VERSION = "0.4.16"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1542,6 +1542,7 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
             add_candidate(pdf_path_from_raw_value(raw))
     add_candidate(KNOWN_PDF_PATHS.get(book_md5))
     names = [path.name for path in candidates if path.name]
+    names.extend(pdf_filename_candidates(payload_pdf_name_values(payload)))
     for name in list(dict.fromkeys(names)):
         for root in pdf_source_search_roots():
             add_candidate(root / name)
@@ -2207,7 +2208,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.15-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.16-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -3920,9 +3921,22 @@ def pdf_filename_candidates(raw_values: list[str]) -> list[str]:
         if raw.startswith("$$$MNDOCLINK$$$"):
             continue
         candidate = pdf_path_from_raw_value(raw)
-        name = candidate.name or raw
-        if name and name.lower().endswith(".pdf") and name not in names:
-            names.append(name)
+        name = str(candidate.name or raw).strip()
+        if not name:
+            continue
+        name = name.replace("/", " ").replace("\\", " ").strip()
+        base = re.sub(r"\.pdf$", "", name, flags=re.IGNORECASE).strip()
+        variants: list[str] = []
+        if base:
+            copy_base = re.sub(r"\s*#\d+\s*$", "", base).strip()
+            if copy_base and copy_base != base:
+                variants.append(copy_base + ".pdf")
+            variants.append(base + ".pdf")
+        if name.lower().endswith(".pdf"):
+            variants.append(name)
+        for variant in variants:
+            if variant and variant.lower().endswith(".pdf") and variant not in names:
+                names.append(variant)
     return names
 
 
