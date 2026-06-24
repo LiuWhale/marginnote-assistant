@@ -2770,6 +2770,7 @@ class CompanionControlsTests(unittest.TestCase):
             source = Path(tmp) / "source.pdf"
             source.write_bytes(b"%PDF-1.4\n")
             companion.KNOWN_PDF_PATHS = {"BOOK1": source}
+            companion.cache_pdf_from_source_path = lambda payload, candidate: None
 
             result = companion.handle_action(
                 {
@@ -2793,9 +2794,33 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(polled["commands"][0]["pdfPath"], str(source))
             self.assertIn(str(source), polled["commands"][0]["pdfPathCandidates"])
 
+    def test_request_pdf_cache_caches_readable_source_without_native_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            source = Path(tmp) / "source.pdf"
+            source.write_bytes(b"%PDF-1.4\nreadable backend source\n%%EOF\n")
+            companion.KNOWN_PDF_PATHS = {"BOOK1": source}
+
+            result = companion.handle_action(
+                {
+                    "action": "request_pdf_cache",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "source": "unit-test",
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["pdfCache"]["state"], "cached")
+            self.assertEqual(result["queue"]["pending"], 0)
+            self.assertTrue(Path(result["pdfCache"]["path"]).is_file())
+            self.assertEqual(Path(result["pdfCache"]["path"]).read_bytes(), source.read_bytes())
+            self.assertNotIn("queued", result)
+
     def test_queue_status_exposes_pending_pdf_cache_progress(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            companion.cache_pdf_from_source_path = lambda payload, candidate: None
 
             result = companion.handle_action(
                 {
@@ -2846,6 +2871,34 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(status["pdfCache"]["path"], result["pdfCache"]["path"])
             self.assertIn("已就绪", status["pdfCache"]["label"])
 
+    def test_cache_pdf_success_clears_stale_native_cache_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.enqueue_command(
+                {
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "command": {
+                        "nativeAction": "cache_pdf_from_current_document",
+                        "message": "cache stale pdf",
+                    },
+                }
+            )
+            self.assertEqual(companion.poll_commands("TOPIC1", "BOOK1")["pending"], 1)
+
+            result = companion.handle_action(
+                {
+                    "action": "cache_pdf_from_marginnote",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "fileName": "source.pdf",
+                    "pdfBase64": base64.b64encode(b"%PDF-1.4\ncached\n").decode("ascii"),
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(companion.poll_commands("TOPIC1", "BOOK1")["pending"], 0)
+
     def test_request_pdf_cache_queues_document_title_candidates_without_pdf_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -2859,6 +2912,7 @@ class CompanionControlsTests(unittest.TestCase):
             companion.ONEDRIVE_PDF_ROOTS = []
             companion.cloud_storage_pdf_roots = lambda: []
             companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+            companion.cache_pdf_from_source_path = lambda payload, candidate: None
 
             result = companion.handle_action(
                 {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-auto-start-v1">
+  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-file-picker-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -46,6 +46,7 @@
       <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
         <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
         <div id="pdfCacheBannerText" class="pdf-cache-banner-text">PDF缓存：等待当前文档</div>
+        <button id="pdfCacheFileBannerButton" class="small-button pdf-cache-action" type="button">选择PDF</button>
       </div>
     </section>
   </main>
@@ -141,7 +142,7 @@
       <section class="config-section">
         <div class="config-section-title">文件路径管理</div>
         <div class="settings-page-note">每行一个本机根目录；当前文档找不到原文件时，Companion 会在这些目录下按文件名搜索。</div>
-        <textarea id="fileSearchRootsInput" class="path-list-input" spellcheck="false" placeholder="/Users/liuwhale/Library/CloudStorage/OneDrive-个人/paper"></textarea>
+        <textarea id="fileSearchRootsInput" class="path-list-input" spellcheck="false" placeholder="~/Documents/papers"></textarea>
         <div id="fileSearchRootsStatusLine" class="file-roots-status-line">已配置 0 个文件路径</div>
         <div class="config-actions">
           <button id="saveFileSearchRootsButton" class="small-button primary" type="button">保存文件路径</button>
@@ -182,6 +183,7 @@
           <button id="permissionDiagnoseButton" class="small-button" type="button">权限诊断</button>
           <button id="openPermissionSettingsButton" class="small-button" type="button">打开权限设置</button>
           <button id="cacheCurrentPdfButton" class="small-button" type="button">缓存当前 PDF</button>
+          <button id="pdfCacheFileButton" class="small-button primary-lite" type="button">选择 PDF 缓存</button>
           <button id="nativeCapabilitiesRefreshButton" class="small-button" type="button">刷新 MN 能力</button>
         </div>
       </section>
@@ -199,6 +201,7 @@
       </section>
     </div>
   </section>
-  <script src="app.js?v=20260624-pdf-cache-auto-start-v1"></script>
+  <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
+  <script src="app.js?v=20260624-pdf-cache-file-picker-v1"></script>
 </body>
 </html>

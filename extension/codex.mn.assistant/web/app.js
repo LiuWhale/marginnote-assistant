@@ -76,6 +76,9 @@
     'pdfCacheBanner',
     'pdfCacheBannerLight',
     'pdfCacheBannerText',
+    'pdfCacheFileBannerButton',
+    'pdfCacheFileInput',
+    'pdfCacheFileButton',
     'contextLine',
     'readinessPanel',
     'conversationHistoryPage',
@@ -1838,6 +1841,96 @@
         addFailureMessage('请求缓存 PDF 失败', result);
       }
     });
+  }
+
+  function choosePdfCacheFile() {
+    var input = byId('pdfCacheFileInput');
+    if (!input) {
+      addMessage('assistant', '当前面板没有可用的 PDF 文件选择控件。');
+      return;
+    }
+    input.value = '';
+    input.click();
+  }
+
+  function uploadSelectedPdfCacheFile(ev) {
+    var input = ev && ev.currentTarget ? ev.currentTarget : byId('pdfCacheFileInput');
+    if (!input || !input.files || !input.files.length) return;
+    var file = input.files[0];
+    var fileName = file && file.name ? String(file.name) : 'document.pdf';
+    if (!/\.pdf$/i.test(fileName) && String(file.type || '') !== 'application/pdf') {
+      renderPdfCacheBanner({
+        state: 'error',
+        label: 'PDF缓存：缓存失败',
+        detail: '请选择 PDF 文件。',
+        pending: false
+      });
+      return;
+    }
+    if (file.size > 80000000) {
+      renderPdfCacheBanner({
+        state: 'error',
+        label: 'PDF缓存：缓存失败',
+        detail: 'PDF 超过 80 MB，暂不缓存。',
+        pending: false
+      });
+      return;
+    }
+    var ctx = state.context || {};
+    if (!String(ctx.bookmd5 || ctx.docmd5 || '')) {
+      renderPdfCacheBanner({
+        state: 'error',
+        label: 'PDF缓存：缓存失败',
+        detail: '当前还没有 MarginNote 文档标识，请先刷新上下文。',
+        pending: false
+      });
+      return;
+    }
+    renderPdfCacheBanner({
+      state: 'waiting_native',
+      label: 'PDF缓存：正在上传',
+      detail: '正在读取你选择的 PDF，并写入 Companion 缓存。',
+      pending: true
+    });
+    var reader = new FileReader();
+    reader.onload = function() {
+      var dataUrl = String(reader.result || '');
+      postCompanion('cache_pdf_from_marginnote', {
+        source: 'browser_pdf_file_upload',
+        fileName: fileName,
+        pdfPath: 'browser-file://' + fileName,
+        documentPath: 'browser-file://' + fileName,
+        pdfBase64: dataUrl
+      }, function(result) {
+        renderControls(result || {});
+        if (result && result.ok) {
+          renderPdfCacheBanner(result.pdfCache || {
+            state: 'cached',
+            label: 'PDF缓存：缓存完成',
+            detail: '已通过文件选择写入缓存。',
+            pending: false
+          });
+          addMessage('assistant', result.reply || result.message || 'PDF 缓存完成。');
+          return;
+        }
+        renderPdfCacheBanner({
+          state: 'error',
+          label: 'PDF缓存：缓存失败',
+          detail: result && result.message ? result.message : '文件上传缓存失败。',
+          pending: false
+        });
+        addFailureMessage('选择 PDF 缓存失败', result);
+      }, {showReply: false});
+    };
+    reader.onerror = function() {
+      renderPdfCacheBanner({
+        state: 'error',
+        label: 'PDF缓存：缓存失败',
+        detail: 'Web 面板读取所选 PDF 失败。',
+        pending: false
+      });
+    };
+    reader.readAsDataURL(file);
   }
 
   function refreshNativeCapabilities() {
@@ -3736,6 +3829,8 @@
     bindButton('healthCheckButton', checkHealth);
     bindButton('permissionDiagnoseButton', diagnosePermissions);
     bindButton('cacheCurrentPdfButton', cacheCurrentPdf);
+    bindButton('pdfCacheFileButton', choosePdfCacheFile);
+    bindButton('pdfCacheFileBannerButton', choosePdfCacheFile);
     bindButton('runtimeEvidenceButton', collectRuntimeEvidence);
     bindButton('nativeCapabilitiesRefreshButton', refreshNativeCapabilities);
     bindButton('updateCheckButton', function() {
@@ -3772,6 +3867,10 @@
     bindButton('draftRejectButton', rejectDraft);
     bindButton('historyButton', refreshHistory);
     bindButton('clearHistoryButton', clearHistory);
+    var pdfCacheFileInput = byId('pdfCacheFileInput');
+    if (pdfCacheFileInput) {
+      pdfCacheFileInput.addEventListener('change', uploadSelectedPdfCacheFile);
+    }
     byId('promptInput').addEventListener('keydown', function(ev) {
       if (ev.isComposing || ev.keyCode === 229) return;
       if (ev.keyCode === 13 && !ev.shiftKey) {

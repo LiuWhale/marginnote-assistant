@@ -388,6 +388,7 @@ class PdfExportTests(unittest.TestCase):
                 raise PermissionError("Operation not permitted")
 
             companion.sha256_file = denied_hash
+            companion.cache_pdf_from_source_path = lambda payload, candidate: None
 
             context = companion.document_context_for_model({"topicid": "TOPIC1", "bookmd5": "BOOK1"}, "")
 

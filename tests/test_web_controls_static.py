@@ -189,6 +189,7 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('id="pdfCacheBanner"', composer)
         self.assertIn('id="pdfCacheBannerLight"', composer)
         self.assertIn('id="pdfCacheBannerText"', composer)
+        self.assertIn('id="pdfCacheFileBannerButton"', composer)
         self.assertLess(composer.index('id="promptInput"'), composer.index('id="pdfCacheBanner"'))
         self.assertIn("renderPdfCacheBanner", self.js)
         self.assertIn("waiting_native", self.js)
@@ -201,6 +202,28 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".pdf-cache-banner.cached .pdf-cache-light", self.css)
         self.assertIn(".pdf-cache-banner.waiting .pdf-cache-light", self.css)
         self.assertIn(".pdf-cache-banner.error .pdf-cache-light", self.css)
+
+    def test_pdf_cache_has_manual_file_picker_fallback(self) -> None:
+        config_html = self.html.split('<section id="configPage"', 1)[1]
+        composer = self.html.split('<section class="composer ai-chat-composer">', 1)[1].split("</section>", 1)[0]
+
+        for marker in [
+            'id="pdfCacheFileInput"',
+            'type="file"',
+            'accept="application/pdf,.pdf"',
+            'id="pdfCacheFileButton"',
+            'id="pdfCacheFileBannerButton"',
+            "choosePdfCacheFile",
+            "uploadSelectedPdfCacheFile",
+            "readAsDataURL(file)",
+            "cache_pdf_from_marginnote",
+            "pdfBase64",
+            "browser_pdf_file_upload",
+        ]:
+            self.assertIn(marker, self.html + self.js)
+        self.assertIn('id="pdfCacheFileButton"', config_html)
+        self.assertIn('id="pdfCacheFileBannerButton"', composer)
+        self.assertIn(".pdf-cache-action", self.css)
 
     def test_pdf_cache_status_light_follows_native_status_text(self) -> None:
         set_status_body = self.js.split("setStatus: function(payload)", 1)[1].split(

@@ -2,6 +2,18 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.22 - 2026-06-24
+
+### Added
+
+- Added Companion-side direct PDF caching before falling back to MarginNote native upload, so readable local or cloud PDFs can be cached without waiting for the MN4 plugin process.
+- Added a manual "choose PDF to cache" fallback in the chat footer and configuration page. This lets the Web panel upload the selected PDF bytes directly to Companion when macOS blocks LaunchAgent access to OneDrive or iCloud paths.
+
+### Fixed
+
+- Kept the native MN4 cache queue as a fallback only when Companion cannot read or receive the PDF bytes directly.
+- Removed the old personal OneDrive default path list from production code; automatic lookup now uses generic CloudStorage provider scanning plus user-managed file roots.
+
 ## 0.4.21 - 2026-06-24
 
 ### Added

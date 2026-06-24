@@ -72,7 +72,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.21"
+CURRENT_PLUGIN_VERSION = "0.4.22"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -102,14 +102,7 @@ MN_DOC_CACHE_ROOTS = [
     HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Caches/MD5CacheFiles/$$$MNDOCLINK$$$iCloud.QReader.MarginStudy.easy/MNDocs",
     HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Caches/MD5CacheFiles/$$$MNDOCLINK$$$论文文件/MNDocs",
 ]
-ONEDRIVE_PDF_ROOTS = [
-    HOME / "Library/CloudStorage/OneDrive-个人/paper",
-    HOME / "Library/CloudStorage/OneDrive-个人/博士/论文文件/MNDocs",
-    HOME / "Library/CloudStorage/OneDrive-个人/博士/脑图/papers",
-    HOME / "Library/CloudStorage/OneDrive-个人/PostGraduate/论文",
-    HOME / "Library/CloudStorage/OneDrive-个人/研究生/论文",
-    HOME / "Library/CloudStorage/OneDrive-个人/Notability/论文",
-]
+ONEDRIVE_PDF_ROOTS: list[Path] = []
 COMMON_CLOUD_PDF_RELS = [
     "paper",
     "papers",
@@ -778,6 +771,47 @@ def pending_pdf_cache_command(topic_id: str, book_md5: str) -> dict[str, Any] | 
     return None
 
 
+def clear_pending_pdf_cache_commands(topic_id: str, book_md5: str) -> dict[str, int]:
+    if not topic_id:
+        return {"removed": 0, "remaining": 0}
+    paths = queue_paths_for_topic(topic_id, book_md5)
+    removed = 0
+    remaining = 0
+    for path in paths:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            continue
+        kept: list[str] = []
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except Exception:
+                kept.append(line)
+                continue
+            command = record.get("command") if isinstance(record, dict) else None
+            is_same_scope = str(record.get("topicid") or "") == topic_id and (
+                not book_md5 or str(record.get("bookmd5") or "") == book_md5
+            )
+            is_pdf_cache_command = (
+                isinstance(command, dict)
+                and str(command.get("nativeAction") or "") == "cache_pdf_from_current_document"
+            )
+            if is_same_scope and is_pdf_cache_command:
+                removed += 1
+                continue
+            kept.append(line)
+        remaining += len(kept)
+        if kept:
+            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        else:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+    return {"removed": removed, "remaining": remaining}
+
+
 def pdf_cache_progress_payload(topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
     access = pdf_cache_access_status(book_md5)
     status = str(access.get("status") or "MISSING").upper()
@@ -875,6 +909,7 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
     index = pdf_cache_index()
     index[key] = record
     save_pdf_cache_index(index)
+    cleared_queue = clear_pending_pdf_cache_commands(normalize_topic_id(payload), book_md5)
     pdf_cache = pdf_cache_progress_payload(normalize_topic_id(payload), book_md5)
     return {
         "ok": True,
@@ -885,6 +920,71 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
             "后续导出标注 PDF 会优先使用这个缓存副本，不再要求后台 LaunchAgent 直接读取原始 PDF。"
         ),
         "cache": record,
+        "clearedPdfCacheQueue": cleared_queue,
+        "pdfCache": pdf_cache,
+    }
+
+
+def cache_pdf_from_source_path(payload: dict[str, Any], source_pdf: Path) -> dict[str, Any] | None:
+    book_md5 = normalize_book_md5(payload)
+    key = pdf_cache_key(book_md5)
+    if not key or not source_pdf or source_pdf.suffix.lower() != ".pdf":
+        return None
+    try:
+        if not source_pdf.is_file():
+            return None
+        data = source_pdf.read_bytes()
+    except Exception as exc:
+        append_diagnostic_log(
+            "warn",
+            "pdf.cache.direct",
+            f"后台直接读取 PDF 失败：{exc}",
+            payload=payload,
+            extra={"sourcePdf": str(source_pdf)},
+            request_id=str(payload.get("_request_id") or ""),
+        )
+        return None
+    if len(data) < 8 or not data.startswith(b"%PDF") or len(data) > 80_000_000:
+        return None
+
+    PDF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    name = safe_upload_name(str(payload.get("fileName") or source_pdf.name or "document.pdf"))
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    target = PDF_CACHE_DIR / f"{key}-{name}"
+    target.write_bytes(data)
+    record = {
+        "bookmd5": book_md5,
+        "path": str(target),
+        "sourcePdf": str(source_pdf),
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    index = pdf_cache_index()
+    index[key] = record
+    save_pdf_cache_index(index)
+    cleared_queue = clear_pending_pdf_cache_commands(normalize_topic_id(payload), book_md5)
+    pdf_cache = pdf_cache_progress_payload(normalize_topic_id(payload), book_md5)
+    append_diagnostic_log(
+        "info",
+        "pdf.cache.direct",
+        "后台已直接缓存当前 PDF。",
+        payload=payload,
+        extra={"sourcePdf": str(source_pdf), "cachePath": str(target), "size": len(data)},
+        request_id=str(payload.get("_request_id") or ""),
+    )
+    return {
+        "ok": True,
+        "message": f"已直接缓存当前 PDF：{name}",
+        "reply": (
+            "Companion 后台已直接读取并缓存当前 PDF。\n\n"
+            f"缓存文件：`{target}`\n"
+            "后续全文解读会优先使用这个缓存副本。"
+        ),
+        "cache": record,
+        "clearedPdfCacheQueue": cleared_queue,
+        "queue": queue_status_payload(normalize_topic_id(payload), book_md5),
         "pdfCache": pdf_cache,
     }
 
@@ -1647,6 +1747,11 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
         for root in pdf_source_search_roots():
             add_candidate(root / name)
 
+    for candidate in candidates:
+        direct_result = cache_pdf_from_source_path(payload, candidate)
+        if direct_result:
+            return direct_result
+
     command = {
         "nativeAction": "cache_pdf_from_current_document",
         "message": "请 MN4 插件缓存当前 PDF。",
@@ -2309,7 +2414,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.21-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.22-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
