@@ -14,6 +14,7 @@
     queue: {pending: 0},
     pdfCache: {state: 'unknown'},
     contextDocumentKey: '',
+    autoPdfCacheRequestedKey: '',
     openaiConfigured: false,
     codexCliAvailable: false,
     codexCliPath: '',
@@ -3483,6 +3484,35 @@
     );
   }
 
+  function autoRequestPdfCacheForCurrentContext() {
+    var ctx = state.context || {};
+    var topicid = String(ctx.topicid || ctx.notebookid || '');
+    var bookmd5 = String(ctx.bookmd5 || ctx.docmd5 || '');
+    var docKey = String(bookmd5 || ctx.documentTitle || ctx.pdfPath || ctx.documentPath || '');
+    if (!topicid || !bookmd5 || !docKey) return;
+    if (state.autoPdfCacheRequestedKey === docKey) return;
+    var cacheState = normalizePdfCacheState(state.pdfCache);
+    if (cacheState === 'cached' || cacheState === 'waiting_native') return;
+    state.autoPdfCacheRequestedKey = docKey;
+    renderPdfCacheBanner({
+      state: 'waiting_native',
+      label: 'PDF缓存：缓存中',
+      detail: '已自动请求缓存当前文档；保持该 PDF 在 MarginNote 中打开。',
+      pending: true
+    });
+    postCompanion('request_pdf_cache', {auto: true}, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) {
+        renderPdfCacheBanner({
+          state: 'error',
+          label: 'PDF 缓存失败',
+          detail: result && result.message ? result.message : '自动缓存请求失败。',
+          pending: false
+        });
+      }
+    }, {showReply: false});
+  }
+
   function renderContext(ctx) {
     state.context = repairContextPayload(ctx || {});
     var docKey = String(
@@ -3504,6 +3534,7 @@
     renderSettingsContextMeta(state.context);
 
     renderContextPreview();
+    autoRequestPdfCacheForCurrentContext();
     updateActionAvailability();
   }
 

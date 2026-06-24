@@ -225,6 +225,26 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("className = 'pdf-cache-banner idle'", render_body)
         self.assertNotIn("pdf-cache-banner hidden", render_body)
 
+    def test_context_ready_auto_requests_pdf_cache_once_per_document(self) -> None:
+        state_header = self.js.split("var state = {", 1)[1].split("\n  };", 1)[0]
+        render_context_body = self.js.split("function renderContext(ctx)", 1)[1].split(
+            "\n  function renderContextSourceLine", 1
+        )[0]
+
+        self.assertIn("autoPdfCacheRequestedKey", state_header)
+        self.assertIn("function autoRequestPdfCacheForCurrentContext", self.js)
+        auto_cache_body = self.js.split("function autoRequestPdfCacheForCurrentContext", 1)[1].split(
+            "\n  function renderContext", 1
+        )[0]
+        self.assertIn("autoRequestPdfCacheForCurrentContext()", render_context_body)
+        self.assertIn("request_pdf_cache", auto_cache_body)
+        self.assertIn("state.autoPdfCacheRequestedKey = docKey", auto_cache_body)
+        self.assertIn("normalizePdfCacheState(state.pdfCache)", auto_cache_body)
+        self.assertIn("cached", auto_cache_body)
+        self.assertIn("waiting_native", auto_cache_body)
+        self.assertIn("topicid", auto_cache_body)
+        self.assertIn("bookmd5", auto_cache_body)
+
     def test_update_button_opens_release_page_without_installing(self) -> None:
         install_body = self.js.split("function installUpdate()", 1)[1].split("\n  function trimText", 1)[0]
 

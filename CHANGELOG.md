@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.21 - 2026-06-24
+
+### Added
+
+- Added automatic current-document PDF cache requests after the Web panel receives MarginNote context with `topicid` and `bookmd5`.
+- Automatic PDF caching is deduplicated per document and skips documents that are already cached or waiting for native MN4 upload.
+
 ## 0.4.20 - 2026-06-24
 
 ### Fixed
