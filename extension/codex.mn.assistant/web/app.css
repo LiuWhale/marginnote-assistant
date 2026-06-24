@@ -1903,11 +1903,11 @@ textarea:focus {
   opacity: 1;
 }
 
-button[data-busy="queue-available"][data-action-state="ready"] {
+button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton) {
   border-style: dashed;
 }
 
-button[data-busy="queue-available"][data-action-state="ready"]::after {
+button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton)::after {
   content: "可排队";
 }
 

@@ -466,6 +466,11 @@ class WebControlsStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, composer + self.css)
 
+    def test_send_button_is_excluded_from_busy_queue_pseudo_label(self) -> None:
+        self.assertIn('button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton)', self.css)
+        self.assertIn('button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton)::after', self.css)
+        self.assertNotIn('button[data-busy="queue-available"][data-action-state="ready"]::after {\n  content: "可排队";', self.css)
+
     def test_send_action_always_uses_chat(self) -> None:
         send_body = self.js.split("function sendAction", 1)[1].split("\n  function normalizePdfCacheState", 1)[0]
         self.assertIn("executeAction('chat'", send_body)
