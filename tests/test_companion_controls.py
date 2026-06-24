@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import os
@@ -2787,6 +2788,59 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(polled["commands"][0]["nativeAction"], "cache_pdf_from_current_document")
             self.assertEqual(polled["commands"][0]["pdfPath"], str(source))
             self.assertIn(str(source), polled["commands"][0]["pdfPathCandidates"])
+
+    def test_queue_status_exposes_pending_pdf_cache_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.handle_action(
+                {
+                    "action": "request_pdf_cache",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "documentTitle": "Ding 等 2025. Fast and Robust Visuomotor Riemannian Flow Matching Policy.pdf",
+                    "source": "unit-test",
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["pdfCache"]["state"], "waiting_native")
+            self.assertTrue(result["pdfCache"]["pending"])
+            self.assertIn("MN4", result["pdfCache"]["label"])
+
+            status = companion.queue_status_payload("TOPIC1", "BOOK1")
+
+            self.assertEqual(status["pending"], 1)
+            self.assertEqual(status["pdfCache"]["state"], "waiting_native")
+            self.assertTrue(status["pdfCache"]["pending"])
+            self.assertIn("保持当前 PDF 打开", status["pdfCache"]["detail"])
+
+    def test_cache_pdf_from_marginnote_marks_pdf_cache_ready_in_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            pdf_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
+
+            result = companion.handle_action(
+                {
+                    "action": "cache_pdf_from_marginnote",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "fileName": "cached.pdf",
+                    "pdfBase64": base64.b64encode(pdf_bytes).decode("ascii"),
+                    "source": "unit-test",
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["pdfCache"]["state"], "cached")
+            self.assertFalse(result["pdfCache"]["pending"])
+            self.assertTrue(Path(result["pdfCache"]["path"]).is_file())
+
+            status = companion.queue_status_payload("TOPIC1", "BOOK1")
+
+            self.assertEqual(status["pdfCache"]["state"], "cached")
+            self.assertEqual(status["pdfCache"]["path"], result["pdfCache"]["path"])
+            self.assertIn("已就绪", status["pdfCache"]["label"])
 
     def test_request_pdf_cache_queues_document_title_candidates_without_pdf_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

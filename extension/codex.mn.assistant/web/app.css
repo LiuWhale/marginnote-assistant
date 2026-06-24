@@ -138,6 +138,44 @@ h1 {
   background: var(--error-bg);
 }
 
+.pdf-cache-banner {
+  margin: 0 14px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+  color: var(--muted);
+}
+
+.pdf-cache-banner.hidden {
+  display: none;
+}
+
+.pdf-cache-banner.waiting {
+  border-color: #f0d896;
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.pdf-cache-banner.cached {
+  border-color: #bfdcd2;
+  background: #f2fbf7;
+  color: var(--accent-strong);
+}
+
+.pdf-cache-banner.permission,
+.pdf-cache-banner.error {
+  border-color: #f0b8b3;
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.pdf-cache-banner-text {
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .danger-lite {
   border-color: #f0b8b3;
   color: var(--error);

@@ -12,6 +12,8 @@
     goal: {},
     files: [],
     queue: {pending: 0},
+    pdfCache: {state: 'unknown'},
+    contextDocumentKey: '',
     openaiConfigured: false,
     codexCliAvailable: false,
     codexCliPath: '',
@@ -69,6 +71,8 @@
     'updateNotice',
     'updateNoticeText',
     'statusPill',
+    'pdfCacheBanner',
+    'pdfCacheBannerText',
     'contextLine',
     'readinessPanel',
     'conversationHistoryPage',
@@ -821,6 +825,15 @@
     var dedupeKey = queueId || nativeAction;
     var label = labels[nativeAction] || nativeAction;
     window.CodexPanel.setStatus({text: '等待 MarginNote 原生处理：' + label});
+    if (nativeAction === 'cache_pdf_from_current_document') {
+      renderPdfCacheBanner({
+        state: 'waiting_native',
+        label: 'PDF缓存：等待 MN4 缓存',
+        detail: '保持当前 PDF 打开，MN4 插件会读取并上传到 Companion 缓存。',
+        pending: true,
+        queueId: queueId
+      });
+    }
     if (!state.deferredNativeQueueIds[dedupeKey]) {
       state.deferredNativeQueueIds[dedupeKey] = true;
       addMessage(
@@ -1800,12 +1813,20 @@
   function cacheCurrentPdf() {
     var context = state.context || {};
     var path = state.lastSourcePdfPath || context.pdfPath || context.documentPath || '';
-    if (!path) {
-      addMessage('assistant', '先点“检查权限”或刷新上下文，让 Companion 知道当前 PDF 路径。');
-      return;
-    }
-    bridge('upload_pdf', {path: path});
-    addMessage('assistant', '已请求 MarginNote 上传当前 PDF 缓存；完成后再点“检查权限”或导出 PDF。');
+    renderPdfCacheBanner({
+      state: 'waiting_native',
+      label: 'PDF缓存：等待 MN4 缓存',
+      detail: '保持当前 PDF 打开，MN4 插件会读取并上传到 Companion 缓存。',
+      pending: true
+    });
+    postCompanion('request_pdf_cache', {pdfPath: path}, function(result) {
+      renderControls(result || {});
+      if (result && result.ok) {
+        addMessage('assistant', result.reply || '已请求 MN4 插件缓存当前 PDF。');
+      } else {
+        addFailureMessage('请求缓存 PDF 失败', result);
+      }
+    });
   }
 
   function refreshNativeCapabilities() {
@@ -2698,6 +2719,53 @@
     }
   }
 
+  function normalizePdfCacheState(cache) {
+    cache = cache || {};
+    var raw = String(cache.state || cache.status || 'unknown').toLowerCase();
+    if (raw === 'ok') return 'cached';
+    if (raw === 'permission') return 'permission';
+    if (raw === 'error') return 'error';
+    if (raw === 'warn' || raw === 'warning') return 'warning';
+    if (raw === 'waiting_native' || raw === 'pending' || raw === 'caching') return 'waiting_native';
+    if (raw === 'missing') return 'missing';
+    return raw || 'unknown';
+  }
+
+  function renderPdfCacheBanner(cache) {
+    if (cache) state.pdfCache = cache;
+    cache = state.pdfCache || {};
+    var banner = byId('pdfCacheBanner');
+    var text = byId('pdfCacheBannerText');
+    if (!banner || !text) return;
+    var pdfState = normalizePdfCacheState(cache);
+    if (!pdfState || pdfState === 'unknown' || pdfState === 'missing') {
+      banner.className = 'pdf-cache-banner hidden';
+      text.textContent = '';
+      return;
+    }
+    var label = cache.label || 'PDF缓存';
+    var detail = cache.detail || '';
+    if (pdfState === 'waiting_native' && !detail) {
+      detail = '保持当前 PDF 打开，MN4 插件正在上传缓存。';
+    } else if (pdfState === 'cached' && !detail) {
+      detail = '全文读取已就绪。';
+    } else if (pdfState === 'permission' && !detail) {
+      detail = '后台读取受限，等待 MN4 插件上传缓存。';
+    }
+    var className = 'pdf-cache-banner ';
+    if (pdfState === 'waiting_native' || pdfState === 'warning') {
+      className += 'waiting';
+    } else if (pdfState === 'cached') {
+      className += 'cached';
+    } else if (pdfState === 'permission') {
+      className += 'permission';
+    } else {
+      className += 'error';
+    }
+    banner.className = className;
+    text.textContent = detail ? label + '：' + detail : label;
+  }
+
   function renderControls(result) {
     result = result || {};
     state.settings = result.settings || state.settings || {};
@@ -2706,6 +2774,7 @@
     state.goal = result.goalOneShot ? {} : (result.goal || state.goal || {});
     state.files = result.files || state.files || [];
     state.queue = result.queue || state.queue || {pending: 0};
+    renderPdfCacheBanner(result.pdfCache || (state.queue && state.queue.pdfCache));
     updateReadiness(result);
     setValue('aiBackendSelect', state.settings.aiBackend || state.aiBackend || 'auto');
     setValue('permissionSelect', state.settings.permission || 'notes');
@@ -3360,6 +3429,19 @@
 
   function renderContext(ctx) {
     state.context = repairContextPayload(ctx || {});
+    var docKey = String(
+      state.context.bookmd5 ||
+      state.context.docmd5 ||
+      state.context.documentTitle ||
+      state.context.pdfPath ||
+      state.context.documentPath ||
+      ''
+    );
+    if (docKey && state.contextDocumentKey && docKey !== state.contextDocumentKey) {
+      state.pdfCache = {state: 'unknown'};
+      renderPdfCacheBanner(state.pdfCache);
+    }
+    if (docKey) state.contextDocumentKey = docKey;
     renderContextSourceLine(state.context);
     var connected = state.context.topicid || state.context.notebookid || state.context.docmd5 || state.context.bookmd5;
     setText('contextLine', connected ? '已连接 MarginNote 上下文' : '等待 MarginNote 上下文');

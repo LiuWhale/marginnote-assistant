@@ -47,7 +47,7 @@ Codex Companion
    Double-click: Collect Cross-Machine Evidence.command
    This writes codex-companion-cross-machine-evidence-*.json to your Desktop.
    Or from Terminal, Run:
-   python3 release_acceptance.py ./CodexCompanion-0.4.16-latest-dist.zip --collect-cross-machine-evidence ./cross-machine-evidence.json
+   python3 release_acceptance.py ./CodexCompanion-0.4.17-latest-dist.zip --collect-cross-machine-evidence ./cross-machine-evidence.json
    Then copy cross-machine-evidence.json back and run:
    python3 release_acceptance.py --cross-machine-evidence ./cross-machine-evidence.json
 13. Release maintainers can build a macOS pkg wrapper:
@@ -56,7 +56,7 @@ Codex Companion
    Or double-click: Build Signed Package.command
    This requires exactly one Developer ID Installer certificate in Keychain.
 14. Release maintainers can notarize and staple a signed pkg:
-   Run: python3 notarize_pkg.py ./CodexCompanion-0.4.16-latest.pkg --keychain-profile "..."
+   Run: python3 notarize_pkg.py ./CodexCompanion-0.4.17-latest.pkg --keychain-profile "..."
    Or double-click: Notarize Package.command
    This requires a notarytool keychain profile or APPLE_ID, APPLE_TEAM_ID, and APPLE_APP_SPECIFIC_PASSWORD.
 

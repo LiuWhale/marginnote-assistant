@@ -2,6 +2,17 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.17 - 2026-06-24
+
+### Added
+
+- Added a main-chat PDF cache status banner for the current document, showing when MN4 is still caching the PDF, when the cached copy is ready, or when macOS file permissions blocked direct reading.
+
+### Changed
+
+- The "cache current PDF" control now uses the same native MN4 queue path as automatic fallback caching, so it can work even when the background Companion process cannot read the original PDF path.
+- Queue/status responses now include structured `pdfCache` progress data for the active document.
+
 ## 0.4.16 - 2026-06-24
 
 ### Fixed

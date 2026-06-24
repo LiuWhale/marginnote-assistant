@@ -25,6 +25,8 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="newConversationButton"',
             'id="conversationHistoryButton"',
             'id="stopButton"',
+            'id="pdfCacheBanner"',
+            'id="pdfCacheBannerText"',
             'id="liveHistory"',
             'id="promptInput"',
             'id="sendButton"',
@@ -179,6 +181,16 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('id="updateNoticeOpenSettingsButton"', main_html)
         self.assertNotIn('id="updateInstallButton"', main_html)
         self.assertNotIn('id="githubRepoInput"', main_html)
+
+    def test_main_surface_exposes_pdf_cache_progress_banner(self) -> None:
+        main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+
+        self.assertIn('id="pdfCacheBanner"', main_html)
+        self.assertIn('id="pdfCacheBannerText"', main_html)
+        self.assertIn("renderPdfCacheBanner", self.js)
+        self.assertIn("waiting_native", self.js)
+        self.assertIn("PDF缓存", self.js)
+        self.assertIn(".pdf-cache-banner", self.css)
 
     def test_update_button_opens_release_page_without_installing(self) -> None:
         install_body = self.js.split("function installUpdate()", 1)[1].split("\n  function trimText", 1)[0]

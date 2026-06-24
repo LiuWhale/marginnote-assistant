@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260623-diagnostics-paths-v1">
+  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-progress-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -24,6 +24,10 @@
     <section class="status-row ai-chat-status-row">
       <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
       <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
+    </section>
+
+    <section id="pdfCacheBanner" class="pdf-cache-banner hidden" aria-live="polite">
+      <div id="pdfCacheBannerText" class="pdf-cache-banner-text"></div>
     </section>
 
     <section id="updateNotice" class="update-notice hidden">
@@ -195,6 +199,6 @@
       </section>
     </div>
   </section>
-  <script src="app.js?v=20260623-diagnostics-paths-v1"></script>
+  <script src="app.js?v=20260624-pdf-cache-progress-v1"></script>
 </body>
 </html>

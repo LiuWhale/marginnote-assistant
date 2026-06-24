@@ -72,7 +72,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.16"
+CURRENT_PLUGIN_VERSION = "0.4.17"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -759,6 +759,86 @@ def pdf_cache_access_status(book_md5: str) -> dict[str, Any]:
     return result
 
 
+def pending_pdf_cache_command(topic_id: str, book_md5: str) -> dict[str, Any] | None:
+    if not topic_id:
+        return None
+    for path in queue_paths_for_topic(topic_id, book_md5):
+        for record in read_queue_lines(path):
+            if str(record.get("topicid") or "") != topic_id:
+                continue
+            if book_md5 and str(record.get("bookmd5") or "") != book_md5:
+                continue
+            command = record.get("command") if isinstance(record, dict) else None
+            if not isinstance(command, dict):
+                continue
+            if str(command.get("nativeAction") or "") != "cache_pdf_from_current_document":
+                continue
+            command["_queue_id"] = str(record.get("id") or "")
+            return command
+    return None
+
+
+def pdf_cache_progress_payload(topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
+    access = pdf_cache_access_status(book_md5)
+    status = str(access.get("status") or "MISSING").upper()
+    pending_command = pending_pdf_cache_command(topic_id, book_md5)
+    base: dict[str, Any] = {
+        "state": "missing",
+        "label": "PDF缓存：未就绪",
+        "detail": str(access.get("message") or "当前文档尚无可读取的 PDF 缓存。"),
+        "pending": False,
+        "status": status,
+        "path": str(access.get("path") or ""),
+        "sourcePdf": str(access.get("sourcePdf") or ""),
+        "cached_at": str(access.get("cached_at") or ""),
+        "queueId": "",
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    if status == "OK" and access.get("readable"):
+        base.update(
+            {
+                "state": "cached",
+                "label": "PDF缓存：已就绪",
+                "detail": "Companion 已能读取当前文档的缓存副本，全文解读会优先使用它。",
+                "pending": False,
+            }
+        )
+        return base
+    if pending_command:
+        candidate = str(pending_command.get("pdfPath") or pending_command.get("documentPath") or "")
+        detail = "保持当前 PDF 打开，MN4 插件会读取并上传到 Companion 缓存。"
+        if candidate:
+            detail = f"{detail} 候选文件：{candidate}"
+        base.update(
+            {
+                "state": "waiting_native",
+                "label": "PDF缓存：等待 MN4 缓存",
+                "detail": detail,
+                "pending": True,
+                "queueId": str(pending_command.get("_queue_id") or ""),
+            }
+        )
+        return base
+    if status == "PERMISSION":
+        base.update(
+            {
+                "state": "permission",
+                "label": "PDF缓存：权限受限",
+                "detail": f"后台不能读取文件：{access.get('message') or 'Operation not permitted'}。已请求 MN4 进程缓存时会显示等待状态。",
+            }
+        )
+        return base
+    if status in {"ERROR", "WARN"}:
+        base.update(
+            {
+                "state": "error" if status == "ERROR" else "warning",
+                "label": "PDF缓存：读取异常",
+                "detail": str(access.get("message") or "缓存文件暂时不可读。"),
+            }
+        )
+    return base
+
+
 def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
     book_md5 = normalize_book_md5(payload)
     key = pdf_cache_key(book_md5)
@@ -795,6 +875,7 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
     index = pdf_cache_index()
     index[key] = record
     save_pdf_cache_index(index)
+    pdf_cache = pdf_cache_progress_payload(normalize_topic_id(payload), book_md5)
     return {
         "ok": True,
         "message": f"已缓存当前 PDF：{name}",
@@ -804,6 +885,7 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
             "后续导出标注 PDF 会优先使用这个缓存副本，不再要求后台 LaunchAgent 直接读取原始 PDF。"
         ),
         "cache": record,
+        "pdfCache": pdf_cache,
     }
 
 
@@ -1116,6 +1198,18 @@ def queue_status_payload(topic_id: str = "", book_md5: str = "") -> dict[str, An
         "pending": int(pending or 0),
         "stop": stop_status(),
         "run": active_run_status(),
+        "pdfCache": pdf_cache_progress_payload(topic_id, book_md5) if book_md5 else {
+            "state": "unknown",
+            "label": "PDF缓存：未识别文档",
+            "detail": "当前上下文没有 bookmd5，暂时无法跟踪 PDF 缓存。",
+            "pending": False,
+            "status": "UNKNOWN",
+            "path": "",
+            "sourcePdf": "",
+            "cached_at": "",
+            "queueId": "",
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        },
         "guide": [
             "排队用途：外部脚本或自动化可以把动作放入 Companion 队列，MN4 插件打开 notebook 后会轮询并执行。",
             "面板内的普通按钮会直接执行；如果要无人值守批处理，使用 send_action.py 不带 --direct 入队。",
@@ -1571,6 +1665,7 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "queued": queued["queued"],
         "queue": queue_status_payload(topic_id, book_md5),
+        "pdfCache": pdf_cache_progress_payload(topic_id, book_md5),
     }
 
 
@@ -2208,7 +2303,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.16-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.17-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -6298,6 +6393,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             "message": f"当前队列待处理：{queue['pending']}",
             "reply": reply,
             "queue": queue,
+            "pdfCache": queue.get("pdfCache"),
         }
     if action == "stop_current":
         run_before = active_run_status()
