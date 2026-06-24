@@ -2,6 +2,18 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.23 - 2026-06-24
+
+### Added
+
+- Added a persistent top-of-chat target mindmap selector with green/yellow/red status, so generated mindmaps are explicitly tied to the current document or the selected MN node before writing.
+- Added Companion-side per-document mindmap target bindings in `control/mindmap-targets.json`; document targets use stable `mindmap-target:<hash>` root IDs so later generations append to the same Codex mindmap root.
+
+### Fixed
+
+- Reused an existing document mindmap root by appending generated children instead of skipping the whole write when the root already exists.
+- Added native write-target validation for selected-node mindmap writes, preventing a stale target from silently creating or merging into the wrong location.
+
 ## 0.4.22 - 2026-06-24
 
 ### Added

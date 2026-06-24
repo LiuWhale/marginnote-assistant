@@ -15,12 +15,12 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE_ZIP = ROOT / "release/CodexCompanion-0.4.22-latest-dist.zip"
-DEFAULT_PACKAGE_PKG = ROOT / "release/CodexCompanion-0.4.22-latest.pkg"
+DEFAULT_PACKAGE_ZIP = ROOT / "release/CodexCompanion-0.4.23-latest-dist.zip"
+DEFAULT_PACKAGE_PKG = ROOT / "release/CodexCompanion-0.4.23-latest.pkg"
 DEFAULT_OUTPUT_PARENT = ROOT / "release/handoff"
 DEFAULT_ONEDRIVE_PARENT = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion/Release Handoff"
 LIVE_EXTENSION = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
-CURRENT_PLUGIN_VERSION = "0.4.22"
+CURRENT_PLUGIN_VERSION = "0.4.23"
 CROSS_MACHINE_EVIDENCE_SCHEMA = "codex-companion-cross-machine-install-v1"
 NATIVE_HIGHLIGHT_EVIDENCE_SCHEMA = "codex-companion-native-highlight-v1"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
@@ -583,15 +583,15 @@ def write_handoff_markdown(
             "Cross-machine install evidence:",
             "",
             "```bash",
-            "python3 release_acceptance.py ./CodexCompanion-0.4.22-latest-dist.zip --collect-cross-machine-evidence ./cross-machine-evidence.json",
+            "python3 release_acceptance.py ./CodexCompanion-0.4.23-latest-dist.zip --collect-cross-machine-evidence ./cross-machine-evidence.json",
             "python3 release_acceptance.py --cross-machine-evidence ./cross-machine-evidence.json",
             "```",
             "",
             "Signing and notarization:",
             "",
             "```bash",
-            "python3 build_pkg.py release/CodexCompanion-0.4.22-latest-dist.zip --auto-sign --json",
-            "python3 notarize_pkg.py release/CodexCompanion-0.4.22-latest.pkg --keychain-profile <profile> --json",
+            "python3 build_pkg.py release/CodexCompanion-0.4.23-latest-dist.zip --auto-sign --json",
+            "python3 notarize_pkg.py release/CodexCompanion-0.4.23-latest.pkg --keychain-profile <profile> --json",
             "```",
             "",
         ]

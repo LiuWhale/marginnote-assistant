@@ -79,6 +79,64 @@ h1 {
   flex: 0 0 auto;
 }
 
+.mindmap-target-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+}
+
+.mindmap-target-light {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.16);
+}
+
+.mindmap-target-bar label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mindmap-target-bar select {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 8px;
+}
+
+.mindmap-target-refresh {
+  flex: 0 0 auto;
+  height: 30px;
+}
+
+.mindmap-target-bar.confirmed .mindmap-target-light {
+  background: #16a05d;
+  box-shadow: 0 0 0 2px rgba(22, 160, 93, 0.18);
+}
+
+.mindmap-target-bar.suggested .mindmap-target-light {
+  background: #d99a00;
+  box-shadow: 0 0 0 2px rgba(217, 154, 0, 0.18);
+}
+
+.mindmap-target-bar.blocked .mindmap-target-light,
+.mindmap-target-bar.error .mindmap-target-light {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+}
+
 .icon-button,
 .small-button,
 .goal-toggle-button,

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-file-picker-v1">
+  <link rel="stylesheet" href="app.css?v=20260624-mindmap-target-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -19,6 +19,15 @@
         <button class="small-button" id="settingsButton" type="button">设置</button>
         <button class="icon-button" id="closeButton" type="button" title="关闭">x</button>
       </div>
+    </section>
+
+    <section id="mindmapTargetBar" class="mindmap-target-bar" aria-label="目标脑图">
+      <span id="mindmapTargetLight" class="mindmap-target-light" aria-hidden="true"></span>
+      <label for="mindmapTargetSelect">目标脑图</label>
+      <select id="mindmapTargetSelect">
+        <option value="document_root">当前文档 · Codex 脑图</option>
+      </select>
+      <button id="mindmapTargetRefreshButton" class="small-button mindmap-target-refresh" type="button">刷新</button>
     </section>
 
     <section class="status-row ai-chat-status-row">
@@ -202,6 +211,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260624-pdf-cache-file-picker-v1"></script>
+  <script src="app.js?v=20260624-mindmap-target-v1"></script>
 </body>
 </html>

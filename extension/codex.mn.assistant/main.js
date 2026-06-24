@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.22';
+  var PluginVersion = '0.4.23';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -2700,7 +2700,27 @@ JSB.newAddon = function(mainPath) {
     var rootCodexIdValue = valueOf(tree, 'codexId');
     var rootTitle = rootTitleValue ? String(rootTitleValue) : 'Codex 节点';
     var rootCodexId = rootCodexIdValue ? String(rootCodexIdValue) : '';
-    var wantsMergeIntoSelected = !!valueOf(tree, 'mergeIntoSelected');
+    var writeTarget = valueOf(tree, 'writeTarget') || {};
+    var targetMode = String(valueOf(writeTarget, 'mode') || '');
+    var targetSelectedNoteId = String(valueOf(writeTarget, 'selectedNoteId') || '');
+    var wantsMergeIntoSelected = !!valueOf(tree, 'mergeIntoSelected') || targetMode === 'merge_children_into_selected_node';
+    var wantsDocumentRoot = targetMode === 'document_root';
+    if (wantsMergeIntoSelected && selected && targetSelectedNoteId && noteIdentifier(selected) !== targetSelectedNoteId) {
+      var mismatchMessage = '目标脑图节点已变化，请重新选择目标脑图后再生成。';
+      if (this.panel) this.panel.setStatus(mismatchMessage);
+      try {
+        Application.sharedInstance().showHUD(mismatchMessage, ctx.controller ? ctx.controller.view : this.window, 3);
+      } catch (mismatchHudErr) {}
+      this.postEvent('createMindmapFailed', {
+        reason: 'selected-node-target-mismatch',
+        expectedNoteId: targetSelectedNoteId,
+        actualNoteId: noteIdentifier(selected),
+        title: rootTitle,
+        topicid: ctx.topicId,
+        requestedMode: 'mergeIntoSelected'
+      });
+      return;
+    }
     if (wantsMergeIntoSelected && !selected) {
       var missingSelected = '请先在脑图中选中一个节点，再执行合并/补到当前脑图。';
       if (this.panel) this.panel.setStatus(missingSelected);
@@ -2719,23 +2739,6 @@ JSB.newAddon = function(mainPath) {
     var createdNodes = [];
     var rootDedupeStats = {scanned: 0, markerMatches: 0, titleMatches: 0};
     var existingRoot = rootCodexId ? findExistingCodexNote(ctx.notebook, rootCodexId, rootTitle, rootDedupeStats) : null;
-    if (existingRoot) {
-      this.postEvent('createMindmapSkipped', {
-        reason: 'duplicate-codex-id-or-title',
-        codexId: rootCodexId,
-        title: rootTitle,
-        topicid: ctx.topicId,
-        dedupeScanned: rootDedupeStats.scanned,
-        markerMatches: rootDedupeStats.markerMatches,
-        titleMatches: rootDedupeStats.titleMatches
-      });
-      if (ctx.controller.focusNoteInMindMapById && existingRoot.noteId) {
-        NSTimer.scheduledTimerWithTimeInterval(0.3, false, function() {
-          ctx.controller.focusNoteInMindMapById(existingRoot.noteId);
-        });
-      }
-      return;
-    }
 
     function makeNode(node, parent) {
       if (!node) return null;
@@ -2768,8 +2771,20 @@ JSB.newAddon = function(mainPath) {
       }
     }
 
+    function appendChildrenToDocumentRoot(documentRoot) {
+      var children = toArray(valueOf(tree, 'children'));
+      for (var i = 0; i < children.length; i++) {
+        var child = makeNode(children[i], documentRoot);
+        if (!rootNote && child) rootNote = child;
+      }
+      if (!rootNote) rootNote = documentRoot;
+    }
+
+    var mergeIntoDocumentRoot = wantsDocumentRoot && !!existingRoot;
     UndoManager.sharedInstance().undoGrouping('Codex Create Mindmap', ctx.topicId, function() {
       if (mergeIntoSelected) mergeChildrenIntoSelected();
+      else if (mergeIntoDocumentRoot) appendChildrenToDocumentRoot(existingRoot);
+      else if (wantsDocumentRoot) rootNote = makeNode(tree, null);
       else rootNote = makeNode(tree, selected);
     });
     Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
@@ -2777,7 +2792,7 @@ JSB.newAddon = function(mainPath) {
       created: rootNote ? true : false,
       createdCount: createdNodes.length,
       topicid: ctx.topicId,
-      mode: mergeIntoSelected ? 'mergeIntoSelected' : 'createRoot'
+      mode: mergeIntoSelected ? 'mergeIntoSelected' : (mergeIntoDocumentRoot ? 'mergeIntoDocumentRoot' : 'createRoot')
     });
     if (rootNote && ctx.controller.focusNoteInMindMapById) {
       NSTimer.scheduledTimerWithTimeInterval(0.3, false, function() {

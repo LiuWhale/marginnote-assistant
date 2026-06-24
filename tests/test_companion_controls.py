@@ -1660,6 +1660,112 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertGreaterEqual(result["mindmapStats"]["maxDepth"], 3)
             self.assertIn("节点", result["message"])
 
+    def test_mindmap_target_status_suggests_document_root_for_current_document(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.handle_action(
+                {
+                    "action": "mindmap_target_status",
+                    "topicid": "topic-1",
+                    "bookmd5": "book-abc",
+                    "documentTitle": "Ding 等 2025. Fast and Robust Visuomotor Riemannian Flow Matching Policy.pdf",
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["mindmapTarget"]["state"], "suggested")
+            self.assertEqual(result["mindmapTarget"]["target"]["mode"], "document_root")
+            self.assertEqual(
+                result["mindmapTarget"]["target"]["rootTitle"],
+                "Ding 等 2025. Fast and Robust Visuomotor Riemannian Flow Matching Policy · Codex 脑图",
+            )
+            self.assertRegex(result["mindmapTarget"]["target"]["codexId"], r"^mindmap-target:[a-f0-9]{16}$")
+            self.assertIn("document_root", [item["value"] for item in result["mindmapTarget"]["options"]])
+
+    def test_mindmap_target_update_persists_document_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {
+                "action": "mindmap_target_update",
+                "targetMode": "document_root",
+                "topicid": "topic-1",
+                "bookmd5": "book-abc",
+                "documentTitle": "Paper.pdf",
+            }
+
+            updated = companion.handle_action(payload)
+            status = companion.handle_action({**payload, "action": "mindmap_target_status"})
+
+            self.assertTrue(updated["ok"])
+            self.assertEqual(updated["mindmapTarget"]["state"], "confirmed")
+            self.assertEqual(status["mindmapTarget"]["state"], "confirmed")
+            self.assertEqual(status["mindmapTarget"]["target"]["rootTitle"], "Paper · Codex 脑图")
+
+    def test_generate_mindmap_uses_bound_document_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                return "## 方法\n解释方法。\n### 结构\n细节。", "codex-cli"
+
+            companion.generate_reply = fake_generate_reply
+            companion.handle_action(
+                {
+                    "action": "mindmap_target_update",
+                    "targetMode": "document_root",
+                    "topicid": "topic-1",
+                    "bookmd5": "book-abc",
+                    "documentTitle": "Paper.pdf",
+                }
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "生成脑图",
+                    "topicid": "topic-1",
+                    "bookmd5": "book-abc",
+                    "documentTitle": "Paper.pdf",
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["mindmap"]["title"], "Paper · Codex 脑图")
+            self.assertEqual(result["writeTarget"]["mode"], "document_root")
+            self.assertEqual(result["writeTarget"]["rootTitle"], "Paper · Codex 脑图")
+            self.assertEqual(result["mindmap"]["writeTarget"]["mode"], "document_root")
+            self.assertEqual(result["mindmap"]["codexId"], result["writeTarget"]["codexId"])
+
+    def test_generate_mindmap_uses_selected_target_from_top_selector_without_append_words(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                return "## 新分支\n补充回答里的结构。", "codex-cli"
+
+            companion.generate_reply = fake_generate_reply
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据上面的回答创建结构化脑图树",
+                    "bookmd5": "book-abc",
+                    "selectedNoteId": "note-7",
+                    "selectedNoteTitle": "已有脑图根",
+                    "mindmapTarget": {
+                        "mode": "merge_children_into_selected_node",
+                        "selectedNoteId": "note-7",
+                        "selectedNoteTitle": "已有脑图根",
+                        "label": "当前选中节点：已有脑图根",
+                    },
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["mindmap"]["mergeIntoSelected"])
+            self.assertEqual(result["writeTarget"]["mode"], "merge_children_into_selected_node")
+            self.assertEqual(result["writeTarget"]["selectedNoteId"], "note-7")
+            self.assertEqual(result["mindmap"]["writeTarget"]["selectedNoteTitle"], "已有脑图根")
+
     def test_park_append_mindmap_request_uses_model_not_knows_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

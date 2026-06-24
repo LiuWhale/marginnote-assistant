@@ -13,6 +13,7 @@
     files: [],
     queue: {pending: 0},
     pdfCache: {state: 'unknown'},
+    mindmapTarget: {state: 'unknown', target: {}, options: []},
     contextDocumentKey: '',
     autoPdfCacheRequestedKey: '',
     openaiConfigured: false,
@@ -79,6 +80,10 @@
     'pdfCacheFileBannerButton',
     'pdfCacheFileInput',
     'pdfCacheFileButton',
+    'mindmapTargetBar',
+    'mindmapTargetLight',
+    'mindmapTargetSelect',
+    'mindmapTargetRefreshButton',
     'contextLine',
     'readinessPanel',
     'conversationHistoryPage',
@@ -684,6 +689,9 @@
     payload.action = action;
     payload.source = payload.source || 'marginnote4-web-panel';
     payload.contextScope = currentContextScope();
+    if (!payload.mindmapTarget && state.mindmapTarget && state.mindmapTarget.target) {
+      payload.mindmapTarget = state.mindmapTarget.target;
+    }
     return payload;
   }
 
@@ -2670,6 +2678,10 @@
 
   function requestDraftAction(action, prompt, userText, queueId) {
     state.currentQueueId = queueId || '';
+    if (!ensureMindmapTargetReady(action)) {
+      ackQueueAndContinue(queueId);
+      return;
+    }
     addMessage('user', userText || '[' + action + ']');
     renderDraft(null);
     setWebRunLock(true);
@@ -2710,7 +2722,8 @@
       setProgressStage('正在保存草稿', '卡片/脑图内容已生成，正在保存到本地草稿确认区。');
       postCompanionPath('/marginnote/draft', 'draft_save', {
         originalAction: action,
-        draft: result
+        draft: result,
+        writeTarget: result.writeTarget || (result.mindmap && result.mindmap.writeTarget) || (state.mindmapTarget && state.mindmapTarget.target) || {}
       }, function(saved) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
@@ -2915,6 +2928,79 @@
     text.textContent = detail ? label + '：' + detail : label;
   }
 
+  function normalizeMindmapTargetState(targetState) {
+    targetState = targetState || {};
+    return String(targetState.state || targetState.status || 'unknown').toLowerCase();
+  }
+
+  function selectedMindmapTargetValue(target) {
+    target = target || {};
+    var mode = String(target.mode || '');
+    return mode === 'merge_children_into_selected_node' ? 'selected_node' : (mode || 'document_root');
+  }
+
+  function renderMindmapTargetBar(targetState) {
+    if (targetState) state.mindmapTarget = targetState;
+    targetState = state.mindmapTarget || {};
+    var bar = byId('mindmapTargetBar');
+    var select = byId('mindmapTargetSelect');
+    if (!bar || !select) return;
+    var status = normalizeMindmapTargetState(targetState);
+    if (!status || status === 'unknown') status = 'suggested';
+    var options = targetState.options || [];
+    var target = targetState.target || {};
+    var selectedValue = selectedMindmapTargetValue(target);
+    select.innerHTML = '';
+    if (!options.length) {
+      var empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = targetState.label || '目标脑图：未识别文档';
+      select.appendChild(empty);
+      select.disabled = true;
+    } else {
+      select.disabled = false;
+      for (var i = 0; i < options.length; i++) {
+        var item = options[i] || {};
+        var option = document.createElement('option');
+        option.value = String(item.value || '');
+        option.textContent = item.label || item.value || '目标脑图';
+        if (option.value === selectedValue) option.selected = true;
+        select.appendChild(option);
+      }
+    }
+    var label = targetState.label || (target.rootTitle ? ('文档脑图：' + target.rootTitle) : '目标脑图');
+    select.title = (targetState.detail ? targetState.detail + '\n' : '') + label;
+    bar.className = 'mindmap-target-bar ' + status;
+  }
+
+  function refreshMindmapTarget() {
+    postCompanion('mindmap_target_status', {}, function(result) {
+      if (result && result.mindmapTarget) renderMindmapTargetBar(result.mindmapTarget);
+      else renderMindmapTargetBar({state: 'error', label: result && result.message ? result.message : '目标脑图：刷新失败', target: {}, options: []});
+    }, {showReply: false});
+  }
+
+  function updateMindmapTargetFromSelect(value) {
+    if (!value) return;
+    postCompanion('mindmap_target_update', {targetMode: value}, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) addFailureMessage('设置目标脑图失败', result);
+    }, {showReply: false});
+  }
+
+  function ensureMindmapTargetReady(action) {
+    if (action !== 'generate_mindmap' && action !== 'generate_full_reading') return true;
+    var targetState = state.mindmapTarget || {};
+    var status = normalizeMindmapTargetState(targetState);
+    if (status === 'blocked' || status === 'error') {
+      var message = targetState.label || '目标脑图不可用：请先刷新 MarginNote 上下文或在顶部选择目标脑图。';
+      addMessage('assistant', message);
+      refreshMindmapTarget();
+      return false;
+    }
+    return true;
+  }
+
   function renderControls(result) {
     result = result || {};
     state.settings = result.settings || state.settings || {};
@@ -2924,6 +3010,7 @@
     state.files = result.files || state.files || [];
     state.queue = result.queue || state.queue || {pending: 0};
     renderPdfCacheBanner(result.pdfCache || (state.queue && state.queue.pdfCache));
+    if (result.mindmapTarget) renderMindmapTargetBar(result.mindmapTarget);
     updateReadiness(result);
     setValue('aiBackendSelect', state.settings.aiBackend || state.aiBackend || 'auto');
     setValue('permissionSelect', state.settings.permission || 'notes');
@@ -3628,6 +3715,7 @@
 
     renderContextPreview();
     autoRequestPdfCacheForCurrentContext();
+    refreshMindmapTarget();
     updateActionAvailability();
   }
 
@@ -3831,6 +3919,7 @@
     bindButton('cacheCurrentPdfButton', cacheCurrentPdf);
     bindButton('pdfCacheFileButton', choosePdfCacheFile);
     bindButton('pdfCacheFileBannerButton', choosePdfCacheFile);
+    bindButton('mindmapTargetRefreshButton', refreshMindmapTarget);
     bindButton('runtimeEvidenceButton', collectRuntimeEvidence);
     bindButton('nativeCapabilitiesRefreshButton', refreshNativeCapabilities);
     bindButton('updateCheckButton', function() {
@@ -3871,6 +3960,12 @@
     if (pdfCacheFileInput) {
       pdfCacheFileInput.addEventListener('change', uploadSelectedPdfCacheFile);
     }
+    var mindmapTargetSelect = byId('mindmapTargetSelect');
+    if (mindmapTargetSelect) {
+      mindmapTargetSelect.addEventListener('change', function(ev) {
+        updateMindmapTargetFromSelect(ev.currentTarget.value);
+      });
+    }
     byId('promptInput').addEventListener('keydown', function(ev) {
       if (ev.isComposing || ev.keyCode === 229) return;
       if (ev.keyCode === 13 && !ev.shiftKey) {
@@ -3887,6 +3982,7 @@
     renderContextScopeButtons();
     renderContextSourceLine(state.context);
     renderContextPreview();
+    renderMindmapTargetBar(state.mindmapTarget);
     renderSettingsContextMeta(state.context);
     renderPresetButtons();
     renderMainPinnedButtons();

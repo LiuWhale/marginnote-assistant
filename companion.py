@@ -70,9 +70,10 @@ CONTROL_DIR = ROOT / "control"
 STOP_PATH = CONTROL_DIR / "stop.json"
 WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
+MINDMAP_TARGETS_PATH = CONTROL_DIR / "mindmap-targets.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.22"
+CURRENT_PLUGIN_VERSION = "0.4.23"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -199,6 +200,8 @@ READ_ONLY_ACTIONS = {
     "update_install",
     "update_status",
     "open_url",
+    "mindmap_target_status",
+    "mindmap_target_update",
     "draft_save",
     "draft_get",
     "draft_delete",
@@ -541,6 +544,8 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(draft_payload.get("writeTarget"), dict)
         else payload.get("writeTarget") if isinstance(payload.get("writeTarget"), dict) else {}
     )
+    if not write_target and isinstance(mindmap, dict) and isinstance(mindmap.get("writeTarget"), dict):
+        write_target = mindmap["writeTarget"]
     if not cards and not mindmap:
         return {"ok": False, "message": "草稿没有卡片或脑图，不能写入。"}
     draft_id = hashlib.sha256(f"{time.time()}|{uuid.uuid4()}".encode("utf-8")).hexdigest()[:20]
@@ -2414,7 +2419,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.22-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.23-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -6050,6 +6055,195 @@ def selected_node_write_target(payload: dict[str, Any], operation: str) -> dict[
     }
 
 
+def mindmap_document_key(payload: dict[str, Any]) -> str:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id or not book_md5:
+        return ""
+    return f"{topic_id}:{book_md5}"
+
+
+def mindmap_document_title(payload: dict[str, Any]) -> str:
+    for key in ("documentTitle", "bookTitle", "title", "sourceFileName", "fileName", "pdfName"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            break
+    else:
+        value = normalize_book_md5(payload) or "当前文档"
+    value = value.replace("\x00", "").replace("/", "／").strip()
+    if value.lower().endswith(".pdf"):
+        value = value[:-4].strip()
+    return value or "当前文档"
+
+
+def stable_mindmap_codex_id(document_key: str) -> str:
+    digest = hashlib.sha256(str(document_key or "").encode("utf-8")).hexdigest()[:16]
+    return f"mindmap-target:{digest}"
+
+
+def default_document_mindmap_title(payload: dict[str, Any]) -> str:
+    return f"{mindmap_document_title(payload)} · Codex 脑图"
+
+
+def document_root_mindmap_target(payload: dict[str, Any]) -> dict[str, Any]:
+    document_key = mindmap_document_key(payload)
+    root_title = default_document_mindmap_title(payload)
+    return {
+        "mode": "document_root",
+        "operation": "append_to_document_mindmap_root",
+        "label": f"文档脑图：{root_title}",
+        "rootTitle": root_title,
+        "codexId": stable_mindmap_codex_id(document_key),
+        "documentKey": document_key,
+        "topicid": normalize_topic_id(payload),
+        "bookmd5": normalize_book_md5(payload),
+    }
+
+
+def read_mindmap_targets() -> dict[str, Any]:
+    data = read_json_file(MINDMAP_TARGETS_PATH, {})
+    if not isinstance(data, dict):
+        data = {}
+    bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
+    return {"bindings": bindings}
+
+
+def write_mindmap_targets(data: dict[str, Any]) -> None:
+    bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
+    write_json_file(MINDMAP_TARGETS_PATH, {"bindings": bindings})
+
+
+def normalize_mindmap_target(payload: dict[str, Any], target: Any) -> dict[str, Any]:
+    if not isinstance(target, dict):
+        return {}
+    mode = str(target.get("mode") or target.get("targetMode") or "").strip()
+    if mode in {"selected_node", "merge_selected", "merge_children_into_selected_node"}:
+        note_payload = dict(payload)
+        for key in ("selectedNoteId", "selectedNoteTitle", "selectedNoteText"):
+            if target.get(key):
+                note_payload[key] = target.get(key)
+        note_target = selected_node_write_target(note_payload, str(target.get("operation") or "append_to_current_mindmap"))
+        label = str(target.get("label") or "").strip()
+        if label:
+            note_target["label"] = label
+        return note_target
+    if mode == "document_root":
+        root_target = document_root_mindmap_target(payload)
+        for key in ("rootTitle", "label", "codexId", "documentKey", "topicid", "bookmd5"):
+            value = target.get(key)
+            if value:
+                root_target[key] = str(value)
+        root_target["mode"] = "document_root"
+        root_target["operation"] = str(target.get("operation") or root_target.get("operation") or "append_to_document_mindmap_root")
+        return root_target
+    return {}
+
+
+def mindmap_target_options(payload: dict[str, Any], current_target: dict[str, Any] | None = None) -> list[dict[str, str]]:
+    options = [
+        {
+            "value": "document_root",
+            "label": default_document_mindmap_title(payload),
+            "detail": "为当前文档固定一棵 Codex 脑图；已有根节点时追加到该根下。",
+        }
+    ]
+    current_target = current_target if isinstance(current_target, dict) else {}
+    selected_saved = current_target if current_target.get("mode") == "merge_children_into_selected_node" else {}
+    if selected_saved or has_selected_node_context(payload):
+        target = selected_saved or selected_node_write_target(payload, "append_to_current_mindmap")
+        options.append(
+            {
+                "value": "selected_node",
+                "label": target["label"],
+                "detail": "把新节点追加到当前选中的脑图节点下；写入前会校验仍选中同一节点。",
+            }
+        )
+    return options
+
+
+def mindmap_target_status(payload: dict[str, Any]) -> dict[str, Any]:
+    document_key = mindmap_document_key(payload)
+    if not document_key:
+        return {
+            "ok": True,
+            "message": "目标脑图：未识别当前文档，暂不允许自动写入脑图。",
+            "mindmapTarget": {
+                "state": "blocked",
+                "label": "目标脑图：未识别文档",
+                "detail": "需要 MarginNote 当前文档的 notebook/topic 与 book/doc md5。",
+                "target": {},
+                "options": [],
+            },
+        }
+    data = read_mindmap_targets()
+    saved = data["bindings"].get(document_key)
+    if isinstance(saved, dict):
+        target = normalize_mindmap_target(payload, saved)
+        state = "confirmed"
+    else:
+        target = document_root_mindmap_target(payload)
+        state = "suggested"
+    label = str(target.get("label") or target.get("rootTitle") or "目标脑图").strip()
+    return {
+        "ok": True,
+        "message": f"目标脑图：{label}",
+        "mindmapTarget": {
+            "state": state,
+            "label": label,
+            "detail": "生成脑图会写入这个目标；可在顶部选择器切换。",
+            "target": target,
+            "options": mindmap_target_options(payload, target),
+        },
+    }
+
+
+def update_mindmap_target(payload: dict[str, Any]) -> dict[str, Any]:
+    document_key = mindmap_document_key(payload)
+    if not document_key:
+        return {
+            "ok": False,
+            "message": "无法设置目标脑图：未识别当前文档。",
+            "mindmapTarget": mindmap_target_status(payload)["mindmapTarget"],
+        }
+    mode = str(payload.get("targetMode") or payload.get("mode") or "").strip()
+    incoming = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    if not mode and incoming:
+        mode = str(incoming.get("mode") or incoming.get("targetMode") or "").strip()
+    if mode == "clear":
+        data = read_mindmap_targets()
+        data["bindings"].pop(document_key, None)
+        write_mindmap_targets(data)
+        return mindmap_target_status(payload)
+    if mode in {"selected_node", "merge_children_into_selected_node"}:
+        if not has_selected_node_context(payload):
+            return {
+                "ok": False,
+                "message": "无法设置目标脑图：请先在 MarginNote 脑图中选中一个节点。",
+                "mindmapTarget": mindmap_target_status(payload)["mindmapTarget"],
+            }
+        target = selected_node_write_target(payload, "append_to_current_mindmap")
+    else:
+        target = document_root_mindmap_target(payload)
+    data = read_mindmap_targets()
+    data["bindings"][document_key] = target
+    write_mindmap_targets(data)
+    status = mindmap_target_status(payload)
+    status["message"] = f"已设置目标脑图：{status['mindmapTarget']['label']}"
+    status["mindmapTarget"]["state"] = "confirmed"
+    return status
+
+
+def resolve_mindmap_write_target(payload: dict[str, Any]) -> dict[str, Any]:
+    explicit = normalize_mindmap_target(payload, payload.get("mindmapTarget"))
+    if explicit:
+        return explicit
+    if is_mindmap_append_request(payload):
+        return selected_node_write_target(payload, "append_to_current_mindmap")
+    status = mindmap_target_status(payload).get("mindmapTarget", {})
+    target = status.get("target") if isinstance(status, dict) else {}
+    return normalize_mindmap_target(payload, target)
+
+
 def node_action_root_title(payload: dict[str, Any], prefix: str) -> str:
     title = selected_node_title(payload)
     return f"{prefix}：{title}" if title else prefix
@@ -6058,6 +6252,12 @@ def node_action_root_title(payload: dict[str, Any], prefix: str) -> str:
 def mindmap_root_title(payload: dict[str, Any]) -> str:
     if is_mindmap_append_request(payload):
         selected = selected_node_title(payload)
+        return f"补充到当前脑图：{selected}" if selected else "补充到当前脑图"
+    target = resolve_mindmap_write_target(payload)
+    if target.get("mode") == "document_root" and target.get("rootTitle"):
+        return str(target.get("rootTitle"))
+    if target.get("mode") == "merge_children_into_selected_node":
+        selected = str(target.get("selectedNoteTitle") or selected_node_title(payload) or "").strip()
         return f"补充到当前脑图：{selected}" if selected else "补充到当前脑图"
     prompt = clean_mindmap_node_title(str(payload.get("prompt") or ""), 36)
     return f"Codex 脑图：{prompt}" if prompt and prompt != "模型生成节点" else "Codex 脑图"
@@ -6201,15 +6401,22 @@ def model_reply_mindmap_tree(payload: dict[str, Any], reply: str) -> dict[str, A
             [{"title": section["title"], "body": section.get("body") or str(reply or "").strip()[:600]} for section in sections]
         )
     stats = mindmap_tree_stats(children)
+    write_target = resolve_mindmap_write_target(payload)
+    merge_into_selected = bool(
+        is_mindmap_append_request(payload)
+        or write_target.get("mode") == "merge_children_into_selected_node"
+    )
     tree = {
         "title": mindmap_root_title(payload),
         "body": f"根据本次真实模型输出生成；未使用内置模板。节点 {stats['nodeCount']} 个，最大层级 {stats['maxDepth']}。",
-        "mergeIntoSelected": bool(is_mindmap_append_request(payload)),
+        "mergeIntoSelected": merge_into_selected,
         "children": children,
         "stats": stats,
     }
-    if is_mindmap_append_request(payload):
-        tree["writeTarget"] = selected_node_write_target(payload, "append_to_current_mindmap")
+    if write_target:
+        tree["writeTarget"] = write_target
+        if write_target.get("mode") == "document_root" and write_target.get("codexId"):
+            tree["codexId"] = str(write_target.get("codexId"))
     return tree
 
 
@@ -6375,9 +6582,16 @@ def generate_full_reading(payload: dict[str, Any]) -> dict[str, Any]:
             "backend": backend,
         }
     cards = attach_card_ids(build_short_cards(text or "完整精读", reply, backend, payload), "full-reading")
-    tree = attach_tree_ids(model_reply_mindmap_tree(payload, reply), "full-reading")
+    target_tree = model_reply_mindmap_tree(payload, reply)
+    root_codex_id = str(target_tree.get("codexId") or "")
+    write_target = target_tree.get("writeTarget") if isinstance(target_tree.get("writeTarget"), dict) else {}
+    tree = attach_tree_ids(target_tree, "full-reading")
+    if root_codex_id.startswith("mindmap-target:"):
+        tree["codexId"] = root_codex_id
+    if write_target:
+        tree["writeTarget"] = write_target
     append_history(payload, text or "完整精读", reply)
-    return {
+    result = {
         "ok": True,
         "message": f"已返回完整精读草稿：{len(cards)} 张短卡片 + 1 个脑图分支（{backend}）。",
         "reply": reply,
@@ -6385,6 +6599,9 @@ def generate_full_reading(payload: dict[str, Any]) -> dict[str, Any]:
         "cards": cards,
         "mindmap": tree,
     }
+    if write_target:
+        result["writeTarget"] = write_target
+    return result
 
 
 def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
@@ -6579,6 +6796,10 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return load_conversation(payload)
     if action == "conversation_delete":
         return delete_conversation(payload)
+    if action == "mindmap_target_status":
+        return mindmap_target_status(payload)
+    if action == "mindmap_target_update":
+        return update_mindmap_target(payload)
     if action == "draft_save":
         return save_draft(payload)
     if action == "draft_get":

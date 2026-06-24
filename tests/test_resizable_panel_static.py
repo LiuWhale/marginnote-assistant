@@ -181,7 +181,6 @@ class ResizablePanelContractTest(unittest.TestCase):
             'mainPinnedButtonsPanel',
             'draftPanel',
             '制卡',
-            '脑图',
             '高亮',
             '导出',
             '按钮中心',
@@ -217,6 +216,22 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("missing-selected-node-for-merge", guard_body)
         self.assertIn("return;", guard_body)
         self.assertNotIn("makeNode(tree, selected)", guard_body)
+
+    def test_create_mindmap_validates_write_target_and_reuses_document_root(self) -> None:
+        create_mindmap_body = self.main.split("CodexAssistantAddon.prototype.createMindmap", 1)[1].split(
+            "\n\n  return CodexAssistantAddon;", 1
+        )[0]
+        for marker in [
+            "writeTarget",
+            "selected-node-target-mismatch",
+            "mergeIntoDocumentRoot",
+            "appendChildrenToDocumentRoot",
+            "'mergeIntoDocumentRoot'",
+            "makeNode(tree, null)",
+            "makeNode(children[i], documentRoot)",
+        ]:
+            self.assertIn(marker, create_mindmap_body)
+        self.assertNotIn("reason: 'duplicate-codex-id-or-title'", create_mindmap_body)
 
     def test_companion_action_errors_distinguish_timeout_from_service_down(self) -> None:
         self.assertIn("CompanionActionTimeout = 900", self.main)

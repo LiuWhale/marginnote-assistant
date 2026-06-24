@@ -56,13 +56,36 @@ class WebControlsStaticTests(unittest.TestCase):
             "queueBadge",
             "fileInput",
             "制卡",
-            "脑图",
             "高亮",
             "导出",
             "一次性目标",
             "按钮中心",
         ]:
             self.assertNotIn(removed, main_html)
+
+    def test_top_mindmap_target_selector_controls_generation_destination(self) -> None:
+        main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+        for marker in [
+            'id="mindmapTargetBar"',
+            'id="mindmapTargetLight"',
+            'id="mindmapTargetSelect"',
+            'id="mindmapTargetRefreshButton"',
+            "目标脑图",
+        ]:
+            self.assertIn(marker, main_html)
+        self.assertLess(main_html.index('id="mindmapTargetBar"'), main_html.index('id="liveHistory"'))
+
+        for marker in [
+            "state.mindmapTarget",
+            "function refreshMindmapTarget",
+            "function renderMindmapTargetBar",
+            "function ensureMindmapTargetReady",
+            "mindmap_target_status",
+            "mindmap_target_update",
+            "payload.mindmapTarget = state.mindmapTarget.target",
+            "writeTarget: result.writeTarget ||",
+        ]:
+            self.assertIn(marker, self.js)
 
     def test_formal_config_page_owns_runtime_context_and_ai_status(self) -> None:
         for marker in [
@@ -432,7 +455,7 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertLess(composer.index('id="promptInput"'), composer.index('id="sendButton"'))
 
     def test_send_action_always_uses_chat(self) -> None:
-        send_body = self.js.split("function sendAction", 1)[1].split("\n  function renderControls", 1)[0]
+        send_body = self.js.split("function sendAction", 1)[1].split("\n  function normalizePdfCacheState", 1)[0]
         self.assertIn("executeAction('chat'", send_body)
         self.assertIn("currentContextScope() !== 'document'", send_body)
         self.assertNotIn("routeNaturalLanguageAction", send_body)
