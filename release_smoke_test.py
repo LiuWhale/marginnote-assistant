@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.22-latest-dist.zip"
+DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.25-latest-dist.zip"
 
 REQUIRED_SUFFIXES = [
     "README.md",
@@ -72,7 +72,7 @@ PRIVATE_PARTS = (
 MARKERS = {
     "README.md": "Codex Companion for MarginNote 4",
     "README.zh-CN.md": "语言: [English](README.md) | **简体中文**",
-    "CHANGELOG.md": "## 0.4.22 - 2026-06-24",
+    "CHANGELOG.md": "## 0.4.25 - 2026-06-24",
     "LICENSE": "MIT License",
     "README-FIRST.txt": "Double-click: Install Codex Companion.command",
     "Install Codex Companion.command": "install.sh",

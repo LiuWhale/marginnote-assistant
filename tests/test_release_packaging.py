@@ -507,7 +507,7 @@ class ReleasePackagingTests(unittest.TestCase):
             entries = {
                 "CodexCompanion-test/README.md": "Codex Companion for MarginNote 4\n",
                 "CodexCompanion-test/README.zh-CN.md": "语言: [English](README.md) | **简体中文**\n",
-                "CodexCompanion-test/CHANGELOG.md": "## 0.4.22 - 2026-06-24\n",
+                "CodexCompanion-test/CHANGELOG.md": "## 0.4.25 - 2026-06-24\n",
                 "CodexCompanion-test/LICENSE": "MIT License\n",
                 "CodexCompanion-test/assets/cover.png": b"\x89PNG\r\n\x1a\n",
                 "CodexCompanion-test/README-FIRST.txt": "Double-click: Install Codex Companion.command\n",

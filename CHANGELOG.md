@@ -2,7 +2,7 @@
 
 All notable changes to Codex Companion are documented here.
 
-## Unreleased
+## 0.4.25 - 2026-06-24
 
 ### Changed
 
