@@ -155,6 +155,12 @@ h1 {
   display: none;
 }
 
+.pdf-cache-banner.idle {
+  border-color: var(--line);
+  background: #f7f9fb;
+  color: var(--muted);
+}
+
 .pdf-cache-light {
   width: 9px;
   height: 9px;

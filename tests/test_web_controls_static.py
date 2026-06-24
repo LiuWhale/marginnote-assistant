@@ -213,6 +213,18 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("PDF 缓存失败", self.js)
         self.assertIn("正在上传当前 PDF 缓存", self.js)
 
+    def test_pdf_cache_status_light_stays_visible_when_state_is_unknown(self) -> None:
+        composer = self.html.split('<section class="composer ai-chat-composer">', 1)[1].split("</section>", 1)[0]
+        render_body = self.js.split("function renderPdfCacheBanner", 1)[1].split(
+            "\n  function renderControls", 1
+        )[0]
+
+        self.assertIn('id="pdfCacheBanner" class="pdf-cache-banner idle"', composer)
+        self.assertIn("PDF缓存：等待当前文档", composer)
+        self.assertIn("pdfState === 'unknown' || pdfState === 'missing'", render_body)
+        self.assertIn("className = 'pdf-cache-banner idle'", render_body)
+        self.assertNotIn("pdf-cache-banner hidden", render_body)
+
     def test_update_button_opens_release_page_without_installing(self) -> None:
         install_body = self.js.split("function installUpdate()", 1)[1].split("\n  function trimText", 1)[0]
 

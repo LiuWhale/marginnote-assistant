@@ -2787,8 +2787,10 @@
     if (!banner || !text) return;
     var pdfState = normalizePdfCacheState(cache);
     if (!pdfState || pdfState === 'unknown' || pdfState === 'missing') {
-      banner.className = 'pdf-cache-banner hidden';
-      text.textContent = '';
+      banner.className = 'pdf-cache-banner idle';
+      var idleLabel = cache.label || (pdfState === 'missing' ? 'PDF缓存：尚未缓存' : 'PDF缓存：等待当前文档');
+      var idleDetail = cache.detail || (pdfState === 'missing' ? '当前文档还没有缓存副本。' : '打开或刷新当前文档后会自动更新状态。');
+      text.textContent = idleDetail ? idleLabel + '：' + idleDetail : idleLabel;
       return;
     }
     var label = cache.label || 'PDF缓存';

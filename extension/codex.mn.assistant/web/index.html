@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-bottom-light-v1">
+  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-always-visible-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -43,9 +43,9 @@
         <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
         <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">发送</button>
       </div>
-      <div id="pdfCacheBanner" class="pdf-cache-banner hidden" role="status" aria-live="polite">
+      <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
         <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
-        <div id="pdfCacheBannerText" class="pdf-cache-banner-text"></div>
+        <div id="pdfCacheBannerText" class="pdf-cache-banner-text">PDF缓存：等待当前文档</div>
       </div>
     </section>
   </main>
@@ -199,6 +199,6 @@
       </section>
     </div>
   </section>
-  <script src="app.js?v=20260624-pdf-cache-bottom-light-v1"></script>
+  <script src="app.js?v=20260624-pdf-cache-always-visible-v1"></script>
 </body>
 </html>

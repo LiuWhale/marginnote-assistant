@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.20 - 2026-06-24
+
+### Fixed
+
+- Kept the bottom PDF cache status light visible even before the current document is recognized or cached, using a grey idle state instead of hiding the indicator.
+- Updated the WebView resource cache key so MarginNote reloads the always-visible cache light UI.
+
 ## 0.4.19 - 2026-06-24
 
 ### Changed
