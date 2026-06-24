@@ -136,20 +136,20 @@ curl http://127.0.0.1:48761/status
 Build a clean release zip:
 
 ```bash
-python3 package_release.py 0.4.18
+python3 package_release.py 0.4.19
 ```
 
 Smoke-test the zip:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.18-latest-dist.zip
-python3 release_smoke_test.py release/CodexCompanion-0.4.18-latest-dist.zip --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.19-latest-dist.zip
+python3 release_smoke_test.py release/CodexCompanion-0.4.19-latest-dist.zip --install-dry-run
 ```
 
 Run the release acceptance report:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.18-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.19-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked until you provide machine-specific evidence such as native highlight proof, signed/notarized package proof, or cross-machine install proof. Those gates are evidence checks, not source packaging failures.

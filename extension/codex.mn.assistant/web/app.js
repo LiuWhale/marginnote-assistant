@@ -73,6 +73,7 @@
     'updateNoticeText',
     'statusPill',
     'pdfCacheBanner',
+    'pdfCacheBannerLight',
     'pdfCacheBannerText',
     'contextLine',
     'readinessPanel',
@@ -2746,6 +2747,38 @@
     return raw || 'unknown';
   }
 
+  function renderPdfCacheStatusFromText(text) {
+    var value = String(text || '').replace(/^\s+|\s+$/g, '');
+    if (!value) return;
+    if (!/(PDF\s*缓存|PDF缓存|当前 PDF|可缓存的 PDF|读取当前 PDF|上传当前 PDF)/i.test(value)) return;
+    if (/PDF 缓存失败|失败|错误|无法|不能|没有可缓存|读取失败|文件为空|超过|转码失败|未返回有效|not found|error|permission|denied/i.test(value)) {
+      renderPdfCacheBanner({
+        state: 'error',
+        label: 'PDF 缓存失败',
+        detail: value,
+        pending: false
+      });
+      return;
+    }
+    if (/PDF 缓存完成|完成|已缓存|缓存到 Companion|已提交|已由 MarginNote|已就绪/i.test(value)) {
+      renderPdfCacheBanner({
+        state: 'cached',
+        label: 'PDF 缓存完成',
+        detail: value,
+        pending: false
+      });
+      return;
+    }
+    if (/正在读取当前 PDF|正在上传当前 PDF 缓存|等待|缓存当前 PDF|保持.*PDF.*缓存|上传缓存/i.test(value)) {
+      renderPdfCacheBanner({
+        state: 'waiting_native',
+        label: 'PDF缓存：缓存中',
+        detail: value,
+        pending: true
+      });
+    }
+  }
+
   function renderPdfCacheBanner(cache) {
     if (cache) state.pdfCache = cache;
     cache = state.pdfCache || {};
@@ -2763,9 +2796,14 @@
     if (pdfState === 'waiting_native' && !detail) {
       detail = '保持当前 PDF 打开，MN4 插件正在上传缓存。';
     } else if (pdfState === 'cached' && !detail) {
-      detail = '全文读取已就绪。';
+      detail = '缓存完成，全文读取已就绪。';
     } else if (pdfState === 'permission' && !detail) {
       detail = '后台读取受限，等待 MN4 插件上传缓存。';
+    }
+    if (pdfState === 'waiting_native' && /等待 MN4 缓存/.test(label)) label = 'PDF缓存：缓存中';
+    if (pdfState === 'cached' && /已就绪/.test(label)) label = 'PDF缓存：缓存完成';
+    if ((pdfState === 'permission' || pdfState === 'error') && !/缓存失败|权限受限|读取异常/.test(label)) {
+      label = 'PDF缓存：缓存失败';
     }
     var className = 'pdf-cache-banner ';
     if (pdfState === 'waiting_native' || pdfState === 'warning') {
@@ -3545,6 +3583,7 @@
       var text = payload && payload.text ? String(payload.text) : '';
       var pill = byId('statusPill');
       if (!pill) return;
+      renderPdfCacheStatusFromText(text);
       pill.textContent = text || 'Companion: 127.0.0.1:48761';
       pill.className = 'status-pill ' + (state.busy ? 'busy' : 'idle');
       if (/失败|错误|未运行|不可用|not found|error/i.test(text)) {

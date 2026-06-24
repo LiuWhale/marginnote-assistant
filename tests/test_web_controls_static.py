@@ -182,15 +182,36 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertNotIn('id="updateInstallButton"', main_html)
         self.assertNotIn('id="githubRepoInput"', main_html)
 
-    def test_main_surface_exposes_pdf_cache_progress_banner(self) -> None:
+    def test_main_surface_exposes_bottom_pdf_cache_status_light(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+        composer = main_html.split('<section class="composer ai-chat-composer">', 1)[1].split("</section>", 1)[0]
 
-        self.assertIn('id="pdfCacheBanner"', main_html)
-        self.assertIn('id="pdfCacheBannerText"', main_html)
+        self.assertIn('id="pdfCacheBanner"', composer)
+        self.assertIn('id="pdfCacheBannerLight"', composer)
+        self.assertIn('id="pdfCacheBannerText"', composer)
+        self.assertLess(composer.index('id="promptInput"'), composer.index('id="pdfCacheBanner"'))
         self.assertIn("renderPdfCacheBanner", self.js)
         self.assertIn("waiting_native", self.js)
+        self.assertIn("pdfState === 'cached'", self.js)
+        self.assertIn("pdfState === 'permission'", self.js)
+        self.assertIn("pdfState === 'error'", self.js)
         self.assertIn("PDF缓存", self.js)
         self.assertIn(".pdf-cache-banner", self.css)
+        self.assertIn(".pdf-cache-light", self.css)
+        self.assertIn(".pdf-cache-banner.cached .pdf-cache-light", self.css)
+        self.assertIn(".pdf-cache-banner.waiting .pdf-cache-light", self.css)
+        self.assertIn(".pdf-cache-banner.error .pdf-cache-light", self.css)
+
+    def test_pdf_cache_status_light_follows_native_status_text(self) -> None:
+        set_status_body = self.js.split("setStatus: function(payload)", 1)[1].split(
+            "\n    setReply:", 1
+        )[0]
+
+        self.assertIn("renderPdfCacheStatusFromText", self.js)
+        self.assertIn("renderPdfCacheStatusFromText(text)", set_status_body)
+        self.assertIn("PDF 缓存完成", self.js)
+        self.assertIn("PDF 缓存失败", self.js)
+        self.assertIn("正在上传当前 PDF 缓存", self.js)
 
     def test_update_button_opens_release_page_without_installing(self) -> None:
         install_body = self.js.split("function installUpdate()", 1)[1].split("\n  function trimText", 1)[0]

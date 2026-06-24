@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-progress-v1">
+  <link rel="stylesheet" href="app.css?v=20260624-pdf-cache-bottom-light-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell">
@@ -26,10 +26,6 @@
       <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
     </section>
 
-    <section id="pdfCacheBanner" class="pdf-cache-banner hidden" aria-live="polite">
-      <div id="pdfCacheBannerText" class="pdf-cache-banner-text"></div>
-    </section>
-
     <section id="updateNotice" class="update-notice hidden">
       <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
       <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
@@ -46,6 +42,10 @@
       <div class="composer-input-row">
         <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
         <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">发送</button>
+      </div>
+      <div id="pdfCacheBanner" class="pdf-cache-banner hidden" role="status" aria-live="polite">
+        <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
+        <div id="pdfCacheBannerText" class="pdf-cache-banner-text"></div>
       </div>
     </section>
   </main>
@@ -199,6 +199,6 @@
       </section>
     </div>
   </section>
-  <script src="app.js?v=20260624-pdf-cache-progress-v1"></script>
+  <script src="app.js?v=20260624-pdf-cache-bottom-light-v1"></script>
 </body>
 </html>

@@ -2,6 +2,14 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.19 - 2026-06-24
+
+### Changed
+
+- Moved the current-document PDF cache status indicator to the bottom composer area so it stays visible while chatting.
+- Added persistent cache status lights: yellow while MN4 is caching the PDF, green after the cache is ready, and red when caching or PDF access fails.
+- The bottom cache light now also follows MarginNote native status messages such as PDF upload started, completed, or failed.
+
 ## 0.4.18 - 2026-06-24
 
 ### Fixed

@@ -139,7 +139,11 @@ h1 {
 }
 
 .pdf-cache-banner {
-  margin: 0 14px 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  margin-top: 8px;
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -151,16 +155,35 @@ h1 {
   display: none;
 }
 
+.pdf-cache-light {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.16);
+}
+
 .pdf-cache-banner.waiting {
   border-color: #f0d896;
   background: var(--warn-bg);
   color: var(--warn);
 }
 
+.pdf-cache-banner.waiting .pdf-cache-light {
+  background: #d99a00;
+  box-shadow: 0 0 0 2px rgba(217, 154, 0, 0.18);
+}
+
 .pdf-cache-banner.cached {
   border-color: #bfdcd2;
   background: #f2fbf7;
   color: var(--accent-strong);
+}
+
+.pdf-cache-banner.cached .pdf-cache-light {
+  background: #16a05d;
+  box-shadow: 0 0 0 2px rgba(22, 160, 93, 0.18);
 }
 
 .pdf-cache-banner.permission,
@@ -170,7 +193,14 @@ h1 {
   color: var(--error);
 }
 
+.pdf-cache-banner.permission .pdf-cache-light,
+.pdf-cache-banner.error .pdf-cache-light {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+}
+
 .pdf-cache-banner-text {
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
   overflow-wrap: anywhere;
