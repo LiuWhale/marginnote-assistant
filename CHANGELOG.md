@@ -2,6 +2,13 @@
 
 All notable changes to Codex Companion are documented here.
 
+## Unreleased
+
+### Changed
+
+- Split the GitHub README into an English default `README.md` and a full Chinese `README.zh-CN.md`, with language links at the top of both files.
+- Added `README.zh-CN.md` to release packaging and release smoke checks so distributed zips include both languages.
+
 ## 0.4.24 - 2026-06-24
 
 ### Fixed

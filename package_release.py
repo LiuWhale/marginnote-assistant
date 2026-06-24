@@ -19,6 +19,7 @@ ONEDRIVE_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 RELEASE_DIR = ROOT / "release"
 ROOT_FILES = [
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
     "LICENSE",
     "README-FIRST.txt",
@@ -165,6 +166,7 @@ def main() -> int:
             ONEDRIVE_DIR / "SHA256SUMS.txt",
         )
         shutil.copy2(ROOT / "README.md", ONEDRIVE_DIR / "README.md")
+        shutil.copy2(ROOT / "README.zh-CN.md", ONEDRIVE_DIR / "README.zh-CN.md")
         shutil.copy2(ROOT / "CHANGELOG.md", ONEDRIVE_DIR / "CHANGELOG.md")
         shutil.copy2(ROOT / "LICENSE", ONEDRIVE_DIR / "LICENSE")
         assets_target = ONEDRIVE_DIR / "assets"

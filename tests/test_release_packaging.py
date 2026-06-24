@@ -66,6 +66,7 @@ class ReleasePackagingTests(unittest.TestCase):
             package_root.mkdir()
             for name in (
                 "README.md",
+                "README.zh-CN.md",
                 "CHANGELOG.md",
                 "LICENSE",
                 "README-FIRST.txt",
@@ -95,6 +96,7 @@ class ReleasePackagingTests(unittest.TestCase):
 
             for name in (
                 "README.md",
+                "README.zh-CN.md",
                 "CHANGELOG.md",
                 "LICENSE",
                 "README-FIRST.txt",
@@ -153,6 +155,7 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("Notarize Package.command", module.REQUIRED_SUFFIXES)
         self.assertIn("Prepare Release Handoff.command", module.REQUIRED_SUFFIXES)
         self.assertIn("README.md", module.REQUIRED_SUFFIXES)
+        self.assertIn("README.zh-CN.md", module.REQUIRED_SUFFIXES)
         self.assertIn("CHANGELOG.md", module.REQUIRED_SUFFIXES)
         self.assertIn("LICENSE", module.REQUIRED_SUFFIXES)
         self.assertIn("assets/cover.png", module.REQUIRED_SUFFIXES)
@@ -503,6 +506,7 @@ class ReleasePackagingTests(unittest.TestCase):
             package = Path(tmp) / "CodexCompanion-test.zip"
             entries = {
                 "CodexCompanion-test/README.md": "Codex Companion for MarginNote 4\n",
+                "CodexCompanion-test/README.zh-CN.md": "语言: [English](README.md) | **简体中文**\n",
                 "CodexCompanion-test/CHANGELOG.md": "## 0.4.22 - 2026-06-24\n",
                 "CodexCompanion-test/LICENSE": "MIT License\n",
                 "CodexCompanion-test/assets/cover.png": b"\x89PNG\r\n\x1a\n",

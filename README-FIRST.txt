@@ -1,5 +1,7 @@
 Codex Companion
 
+Full README: README.md (English) / README.zh-CN.md (中文)
+
 1. Unzip the package.
 2. Double-click: Install Codex Companion.command
    Or from Terminal, Run: ./install.sh

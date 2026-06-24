@@ -18,6 +18,7 @@ DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.22-latest-dist.zip"
 
 REQUIRED_SUFFIXES = [
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
     "LICENSE",
     "assets/cover.png",
@@ -69,6 +70,7 @@ PRIVATE_PARTS = (
 
 MARKERS = {
     "README.md": "Codex Companion for MarginNote 4",
+    "README.zh-CN.md": "语言: [English](README.md) | **简体中文**",
     "CHANGELOG.md": "## 0.4.22 - 2026-06-24",
     "LICENSE": "MIT License",
     "README-FIRST.txt": "Double-click: Install Codex Companion.command",
