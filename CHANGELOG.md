@@ -2,6 +2,14 @@
 
 All notable changes to Codex Companion are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Retried transient Codex CLI startup failures when the CLI reports `timed out waiting for cloud config bundle after 15s`, and replaced the raw error with an actionable proxy/login/network message.
+- Clarified the settings readiness wording: finding a Codex CLI or OpenAI key is now shown as "AI backend discovered" rather than proof that generation has already succeeded.
+- Fixed the bottom send button so its built-in `发送 / 可排队` two-line label is not duplicated by the global busy-state `可排队` pseudo-label.
+
 ## 0.4.25 - 2026-06-24
 
 ### Changed

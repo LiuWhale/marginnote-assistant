@@ -72,6 +72,17 @@ python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip --in
 curl -fsS http://127.0.0.1:48761/status
 ```
 
+检查 0.4.25 后 main 的 UI/CLI 回归：
+
+```bash
+python3 -m unittest \
+  tests.test_companion_controls.CompanionControlsTests.test_codex_cli_retries_transient_cloud_config_timeout \
+  tests.test_companion_controls.CompanionControlsTests.test_codex_cli_cloud_config_timeout_message_is_actionable_after_retry \
+  tests.test_web_controls_static.WebControlsStaticTests.test_send_button_is_excluded_from_busy_queue_pseudo_label
+```
+
+这些测试分别证明：Codex CLI `cloud config bundle` 启动超时会自动重试并给出可操作提示；发送按钮不会被运行中全局 `可排队` 伪元素追加第三行。
+
 0.4.25 本机验收中，`runtime_web_controls` 和 `native_api_matrix` 已 PASS；最终 `release_acceptance.py` 仍会因为原生可见高亮、缺 signed/notarized pkg、缺跨机器证据和缺单文档完整 PASS evidence 返回非零。
 
 ## 验收判断

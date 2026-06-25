@@ -63,9 +63,11 @@
 - 已完成：`v0.4.25` 已发布到 GitHub Releases，release zip 已通过 smoke test 和 install dry-run；本机已替换到 0.4.25，Companion `/status.pluginVersion=0.4.25`，MN4 运行态 `mnRuntime.ready=true`、`webControlsReady=true`、`nativeApiReady=true`，运行态 handler features 无缺失。
 - 已完成：GitHub 默认 `README.md` 改为英文首页，并提供完整中文 `README.zh-CN.md`；两个 README 顶部互相链接，发布包和 release smoke 都要求同时包含双语 README。
 - 已完成：诊断日志脱敏、裁剪、读取和清空逻辑已从 `companion.py` 拆到 `diagnostic_log.py`，保留原 Companion API 名称，减少主服务文件负担。
+- 已完成（0.4.25 后 main）：Codex CLI 若返回 `timed out waiting for cloud config bundle after 15s`，Companion 会自动重试一次；重试后仍失败时显示可操作的代理/登录/网络提示，而不是把原始英文错误直接丢给用户。
 - 已完成：对话页按钮按任务分区重排。输入行固定放发送；`stagedActionLine` 显示按钮中心填入后的待发送动作，并允许修改 prompt 后仍按该动作执行；`mainActionStack` 按一次性目标、常用任务、工具区顺序排列；`goalRunPanel` 独立放“设目标”按钮和状态；`primaryActionGrid` 是 2x2 常用区，只包含解释选中、生成卡片、新建脑图和完整精读；`workflowActionPanel` 常驻显示 `mindmapToolPanel` / `mindmapActionGrid` 的补到当前、重组当前，以及 `sourceToolPanel` / `toolActionGrid` 的高亮、导出和状态；缺上下文按钮会显示“需选区/需节点/需文档/需能力”，运行中的可用按钮用“可排队”状态提示，不再像整体置灰；主对话页运行态提示只保留刷新和去设置，设置页诊断入口按 AI 与连接、权限与文件、MN 运行态、验收四组分区，检查连接、本文档验收和发布验收走各自独立按钮。
+- 已完成（0.4.25 后 main）：发送按钮保留内置两行 `发送 / 可排队`，但全局运行中 `data-busy=queue-available` 的 `::after` 提示已排除 `#sendButton`，避免按钮显示第三行重复 `可排队`。
 - 已完成：按钮页提供预设模板、自定义 prompt、动作类型和“主界面”开关；预设模板可填入输入框或添加成自定义按钮，不再一键试用即执行；后端会保存自定义按钮并把主界面置顶按钮限制为最多 4 个；自定义按钮动作支持 `request_native_highlight_selection`。
-- 已完成：顶部 AI readiness 状态卡，明确显示当前 AI 后端、本机 Codex CLI 是否发现、OpenAI 是否已配置；设置页可选择 `auto`、`codex_cli`、`openai_api`、`local`，也可录入或清除 OpenAI Key，并提供无 token 的“试连AI”快速探测。Key 只写入本地 `.env`，不回显到 Web UI 或 settings JSON；清除 Key 只发送 `clearOpenAIKey=true`，不会把输入框里的临时 key 回传。
+- 已完成：顶部 AI readiness 状态卡，明确显示当前 AI 后端、本机 Codex CLI 是否发现、OpenAI 是否已配置；状态文案使用“后端已发现”而不是“已完成真实生成”，避免把 CLI 路径发现误认为模型调用已成功；设置页可选择 `auto`、`codex_cli`、`openai_api`、`local`，也可录入或清除 OpenAI Key，并提供无 token 的“试连AI”快速探测。Key 只写入本地 `.env`，不回显到 Web UI 或 settings JSON；清除 Key 只发送 `clearOpenAIKey=true`，不会把输入框里的临时 key 回传。
 - 已完成：写入类动作改为草稿可编辑确认模式。生成卡片、生成脑图、完整精读先保存待写入草稿；用户可在草稿框中修改卡片内容，用 `## 标题` 分隔多张卡片；点击“写入 MN”后才调用 MN4 原生 API 创建卡片/脑图，点击“丢弃”会放弃草稿。程序化验收也可通过 `request_draft_write` 入队 `nativeAction=write_draft`，由 MN4 native poll 读取同一个草稿并写入，不依赖鼠标点击 WebView 按钮。
 - 已完成：按钮点击后主动释放焦点，避免连续点击时焦点卡在按钮上。
 - 已完成：WebView 面板标题栏可拖动移动，右下角可拖拽缩放，标题栏 `-` / `+` 按钮可缩小放大，最小尺寸 390x520，并持久化用户调节后的尺寸和位置。

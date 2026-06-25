@@ -80,11 +80,13 @@ Uninstall Codex Companion.command
 
 没有可用 Codex CLI，也没有 OpenAI Key 时，问答、制卡、脑图和完整精读会失败并显示原因；插件不会用内置模板假装生成了 AI 内容。
 
+发现本机 Codex CLI 只表示“可以尝试这个后端”，不等于已经完成真实生成。真实生成还取决于用户自己的 Codex 登录、账号/模型权限、代理和网络。若 Codex CLI 获取 cloud config bundle 超时，Companion 会自动重试一次；仍失败时会显示可操作的代理/登录/网络提示。
+
 ## 日常使用
 
 ### 直接问
 
-在主界面输入问题，按 Enter 或点击 `发送 / 可排队`。发送后输入框会清空；如果当前已有任务在跑，新问题会自动进入队列。
+在主界面输入问题，按 Enter 或点击两行显示的 `发送 / 可排队` 按钮。发送后输入框会清空；如果当前已有任务在跑，新问题会自动进入队列。
 
 ### 解释选区
 
@@ -183,6 +185,8 @@ curl http://127.0.0.1:48761/status
 - OpenAI Key 是否已保存。
 - 代理地址是否只使用支持的 `http://` 或 `https://`。
 - 结构化日志里最近一次失败的 `error` 字段。
+
+如果错误里出现 `timed out waiting for cloud config bundle after 15s`，说明 Codex CLI 自己没有及时拿到云端启动配置。先重试一次，再检查代理、Codex 登录和模型/账号权限；配置 OpenAI Key 后，`auto` 模式还能多一个备用后端。
 
 ### 为什么有时读不到全文
 

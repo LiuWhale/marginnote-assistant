@@ -1,6 +1,6 @@
 # Current Release Audit
 
-审计时间：2026-06-24 15:11 CST
+审计时间：2026-06-25 15:17 CST
 
 本文档记录当前 Codex Companion 公开预览版的可验证状态。它不是最终 v1.0 发布承诺，而是当前证据基线。历史条目保留当时版本号和当时判断。
 
@@ -18,13 +18,39 @@
 
 ## 当前证据
 
+### 2026-06-25 15:17 v0.4.25 后 main 修复：Codex CLI 启动超时与发送按钮重复提示
+
+本轮没有重新打 GitHub Release，当前公开下载包仍是 `v0.4.25`。main 分支和本机已补两个用户可见问题：
+
+- Codex CLI 若返回 `Error: timed out waiting for cloud config bundle after 15s`，Companion 会把它识别为启动期网络/代理/登录配置问题，自动重试一次；仍失败时显示中文可操作提示，说明这不是当前 PDF、脑图或 MarginNote 上下文错误。
+- 设置页 readiness 文案从“真实 AI 已配置”改成“真实 AI 后端已发现”，避免把“找到 CLI 路径”误解成“已经真实生成成功”。
+- 底部发送按钮保持两行 `发送 / 可排队`；全局运行中按钮 `data-busy=queue-available` 的 `::after` 提示已排除 `#sendButton`，避免出现第三行重复 `可排队`。
+
+验证结果：
+
+```text
+python3 -m unittest discover -s tests
+371 tests passed
+
+python3 -m py_compile companion.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py build_pkg.py notarize_pkg.py
+PASS
+
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 send_action.py chat --direct --prompt '只回答：ok'
+backend=codex-cli, reply=ok
+```
+
+结论：main 分支和本机插件已修复这两个问题；如果需要让公开下载包也包含它们，需要另发 `v0.4.26` 或后续 release。
+
 ### 2026-06-24 15:11 v0.4.25 双语文档与诊断日志重构发布
 
 本轮把 GitHub 默认 README 改为英文首页，并新增完整中文 `README.zh-CN.md`。两个 README 顶部互相链接，release zip 和 `release_smoke_test.py` 都要求包含双语 README。`README-FIRST.txt` 也提示解压包用户查看英文/中文 README。
 
 代码侧把诊断日志脱敏、裁剪、读取和清空逻辑从 `companion.py` 抽到 `diagnostic_log.py`，保留 `companion.append_diagnostic_log/read_recent_diagnostic_logs/clear_diagnostic_logs` 等原有 API。发布包 smoke 也新增 `companion/diagnostic_log.py` 必需文件检查，避免打包时漏掉新模块。
 
-版本已提升到 `0.4.25`，涉及 Companion、doctor、release acceptance、single-document acceptance、release handoff、MN4 manifest、MN4 `PluginVersion`、README、release checklist、package/smoke/pkg builder 默认版本。`CHANGELOG.md` 已把原 `Unreleased` 内容归档为 `0.4.25 - 2026-06-24`。
+版本已提升到 `0.4.25`，涉及 Companion、doctor、release acceptance、single-document acceptance、release handoff、MN4 manifest、MN4 `PluginVersion`、README、release checklist、package/smoke/pkg builder 默认版本。当时 `CHANGELOG.md` 已把原 `Unreleased` 内容归档为 `0.4.25 - 2026-06-24`。
 
 验证结果：
 

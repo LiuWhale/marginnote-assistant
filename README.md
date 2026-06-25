@@ -80,11 +80,13 @@ Backend modes:
 
 If neither Codex CLI nor an OpenAI key is available, chat, card creation, mind-map generation, and full reading actions fail with a clear reason. The plugin does not use local templates to fake AI-generated content.
 
+Finding a local Codex CLI only means the backend can be tried. Actual generation still depends on the user's Codex login, account/model access, proxy, and network. If Codex CLI times out while fetching its cloud config bundle, Companion retries once and then shows an actionable proxy/login/network message.
+
 ## Daily Use
 
 ### Ask Directly
 
-Type a question in the main chat, press Enter, or click `发送 / 可排队`. The input clears after sending. If another task is already running, the new request enters the queue.
+Type a question in the main chat, press Enter, or click the two-line `发送 / 可排队` button. The input clears after sending. If another task is already running, the new request enters the queue.
 
 ### Explain A Selection
 
@@ -183,6 +185,8 @@ Open settings and check:
 - Whether the OpenAI key has been saved.
 - Whether the proxy URL uses a supported `http://` or `https://` scheme.
 - The most recent `error` field in structured logs.
+
+If the error mentions `timed out waiting for cloud config bundle after 15s`, the Codex CLI itself could not fetch its cloud-side startup configuration quickly enough. Retry once, then check the proxy, Codex login, and model/account access. Configuring an OpenAI key gives `auto` mode a fallback path.
 
 ### Why can it sometimes not read the full document?
 

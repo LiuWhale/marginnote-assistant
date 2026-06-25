@@ -1,7 +1,7 @@
 # Codex Companion 产品手册
 
 适用版本：`0.4.25`
-更新时间：2026-06-24
+更新时间：2026-06-25
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
 
@@ -106,7 +106,7 @@ Uninstall Codex Companion.command
 
 - `连接`：表示 Web 面板能访问本地 Companion 服务。
 - `AI 后端`：显示当前使用 `auto`、`codex_cli`、`openai_api` 还是 `local`。
-- `Codex CLI`：显示本机是否找到 Codex CLI。
+- `Codex CLI`：显示本机是否找到 Codex CLI；这只代表可以尝试该后端，不等于已经完成真实模型生成。
 - `OpenAI`：显示是否配置 OpenAI API Key。
 - `运行状态`：显示当前或最近一次动作的阶段、详情和耗时。
 - `队列`：显示待执行任务数量。
@@ -155,6 +155,8 @@ speed = fast
 如果没有可用 Codex CLI，也没有 OpenAI Key，生成型动作会明确失败，不会用本地模板冒充 AI 输出。此时仍可使用权限检查、运行态采证、PDF 缓存、导出标注副本等本地工具。
 
 OpenAI Key 可在设置页填写，也可点 `清除Key` 删除本地保存的 key。Key 写入本地 `.env`，不会回显到面板；清除时只发送清除指令，不会把输入框里的临时 key 再发给后端。
+
+设置页的 readiness 卡片现在使用“真实 AI 后端已发现”这类措辞：它表示发现了 Codex CLI 或 OpenAI Key，但真实生成仍取决于 Codex 登录、账号/模型权限、代理和网络。不要把“已发现 CLI”理解成“已经成功调用模型”。
 
 设置页的 `试连AI` 是快速就绪探测：它检查当前所选后端、Codex CLI 路径/登录态、OpenAI Key 是否存在和代理 scheme。它不会发送测试 prompt，也不会产生模型 token 消耗。
 
@@ -405,6 +407,28 @@ python3 ~/.codex/marginnote-assistant/doctor.py
 - 设置页选择 `auto` 或 `codex_cli`，确认 Codex CLI 可用。
 - 或设置页填写 OpenAI Key 并选择 `openai_api`。
 
+### Codex CLI 提示 cloud config bundle 超时
+
+如果消息里出现：
+
+```text
+Error: timed out waiting for cloud config bundle after 15s
+```
+
+含义：插件已经启动了 Codex CLI，但 CLI 自己在 15 秒内没有拿到云端启动配置。这通常是代理链路、网络抖动、Codex 登录状态或账号/模型权限问题，不是当前 PDF、脑图或 MarginNote 上下文问题。
+
+当前 main 分支已对这个错误做了两件事：
+
+- 自动重试一次。
+- 重试后仍失败时，把原始错误改成可操作的代理/登录/网络提示。
+
+处理：
+
+1. 重试一次同样的问题。
+2. 确认设置页代理地址和本机代理端口一致。
+3. 在终端里确认 Codex CLI 已登录并能执行一个最短 prompt。
+4. 如果希望 `auto` 模式有备用路线，设置 OpenAI Key。
+
 ### 状态显示连接，但请求失败
 
 常见原因：
@@ -430,6 +454,8 @@ python3 ~/.codex/marginnote-assistant/doctor.py
 当前设计不应整体禁用所有按钮。运行中点击按钮应该出现消息级引导。
 
 如果连续点击没反应，可能是 MN4 WebView 焦点或运行态没有刷新。先点空白处再点按钮，随后运行 `运行态采证`。若证据显示 stale runtime，重新打开面板或重启 MN4。
+
+发送按钮本身应只显示两行：`发送` 和 `可排队`。如果看到两行以上的重复 `可排队`，说明 WebView 仍加载了旧 CSS；重新打开插件面板，必要时重新安装或同步最新扩展文件。
 
 ### 生成脑图很慢
 
