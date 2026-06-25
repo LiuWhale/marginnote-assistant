@@ -4,31 +4,31 @@
 
 ## 版本快照
 
-- 当前发布候选：0.4.25 公开预览版
-- MN4 插件 manifest：0.4.25
-- Companion：0.4.25
-- 最新 GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.25`
-- 最新本地发布包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.25-latest-dist.zip`
+- 当前发布候选：0.4.26 公开预览版
+- MN4 插件 manifest：0.4.26
+- Companion：0.4.26
+- 最新 GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.26`
+- 最新本地发布包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.26-latest-dist.zip`
 - OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion`
-- 当前 zip sha256：`e76fc13c4878df9e67d60d2e134eae485bad8c0576604122c844d3d9e3dac8a9`
-- 当前 zip/pkg sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前最终 gate 仍会因缺 `.pkg` entry 阻塞 `release_sha256_manifest`
+- 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
+- 当前 zip/pkg sha256：以外部 `SHA256SUMS.txt` 为准；当前最终 gate 仍会因缺 `.pkg` entry 阻塞 `release_sha256_manifest`
 - 当前证据审计：`CURRENT_RELEASE_AUDIT.md`
 
 ## 完成度矩阵
 
 | 需求 | 当前证据 | 状态 | 下一步 |
 | --- | --- | --- | --- |
-| MN4 中可打开插件面板 | 本机已重启 MN4 并加载 `pluginVersion=0.4.25`；`/status.mnRuntime.ready=true`、`webControlsReady=true`、`nativeApiReady=true`、`runtimeHandlerStale=false`，handler features 无缺失 | 已完成基础版 | 做跨机器验证 |
+| MN4 中可打开插件面板 | 本机 MN4 扩展 manifest 和 Companion `/status.pluginVersion` 已替换为 `0.4.26`；若 `/status.mnRuntime` 还没有 `pluginVersion=0.4.26` 的 WebView/native 事件，需要重新打开 Codex 面板或重启 MN4 | 安装替换完成，运行态待刷新 | 打开 MN4 notebook 和 Codex 面板后复跑 release acceptance |
 | 多个子界面 | Web 面板含对话、按钮、设置、文件、历史五个 tab；运行时自检包含 tab 按钮和 tab 面板 | 已完成基础版 | 增加 tab 状态持久化 |
 | 自定义按钮 | 按钮页提供预设模板、自定义 prompt、动作类型和主界面置顶；预设模板默认填入输入框或添加成自定义按钮，不再一键试用即执行；自定义列表可直接置顶/移出；`settings_update` 持久化 `customButtons` 并限制最多 4 个主界面常用按钮；动作类型已包含 `request_native_highlight_selection` | 已完成基础版 | 增加导入/导出按钮配置 |
-| 主界面按钮分区 | 对话页底部输入行固定放 `promptInput` 和 `sendButton`；发送按钮固定两行 `发送 / 可排队`，0.4.25 后 main 已排除全局 busy-state `::after` 对 `#sendButton` 的影响，避免出现第三行重复 `可排队`；按钮中心填入 prompt 后显示 `stagedActionLine`，用户修改输入框后点发送仍按原按钮动作执行，也可点 `clearStagedActionButton` 改回普通问 Codex；`mainActionStack` 按一次性目标、常用任务、工具区顺序排列；常用网格是 2x2，只放解释、制卡、新建脑图、精读，所有主按钮在 390px 面板下等宽等高且无文字溢出；`goalRunPanel` 是独立的一次性目标区，里面的 `goalActionStrip` 同时显示 `goalToggleButton` 和一次性目标状态；`workflowActionPanel` 常驻显示 `mindmapToolPanel` / `mindmapActionGrid` 的补到当前、重组当前，以及 `sourceToolPanel` / `toolActionGrid` 的高亮、导出和状态；按钮不可用时保留原 title，并追加不可用原因，按钮短提示显示 `需选区`、`需节点`、`需文档` 或 `需能力`；运行中可用按钮显示 `可排队`，不会整体置灰；刷新上下文放在当前内容区；主对话页运行态提示只保留刷新和去设置；设置页低频诊断入口按 AI 与连接、权限与文件、MN 运行态、验收四组分区，`healthCheckButton` 走独立连接诊断，`singleDocumentAcceptanceButton` 走当前文档功能验收，`releaseAcceptanceButton` 走发布 gate，不混入任务按钮网格 | 已完成基础版 | 已完成非重启 Web 面板刷新，native handler 仍需重新打开 MN4 插件宿主或重启 MN4 |
+| 主界面按钮分区 | 对话页底部输入行固定放 `promptInput` 和 `sendButton`；发送按钮固定两行 `发送 / 可排队`，0.4.26 后 main 已排除全局 busy-state `::after` 对 `#sendButton` 的影响，避免出现第三行重复 `可排队`；按钮中心填入 prompt 后显示 `stagedActionLine`，用户修改输入框后点发送仍按原按钮动作执行，也可点 `clearStagedActionButton` 改回普通问 Codex；`mainActionStack` 按一次性目标、常用任务、工具区顺序排列；常用网格是 2x2，只放解释、制卡、新建脑图、精读，所有主按钮在 390px 面板下等宽等高且无文字溢出；`goalRunPanel` 是独立的一次性目标区，里面的 `goalActionStrip` 同时显示 `goalToggleButton` 和一次性目标状态；`workflowActionPanel` 常驻显示 `mindmapToolPanel` / `mindmapActionGrid` 的补到当前、重组当前，以及 `sourceToolPanel` / `toolActionGrid` 的高亮、导出和状态；按钮不可用时保留原 title，并追加不可用原因，按钮短提示显示 `需选区`、`需节点`、`需文档` 或 `需能力`；运行中可用按钮显示 `可排队`，不会整体置灰；刷新上下文放在当前内容区；主对话页运行态提示只保留刷新和去设置；设置页低频诊断入口按 AI 与连接、权限与文件、MN 运行态、验收四组分区，`healthCheckButton` 走独立连接诊断，`singleDocumentAcceptanceButton` 走当前文档功能验收，`releaseAcceptanceButton` 走发布 gate，不混入任务按钮网格 | 已完成基础版 | 已完成非重启 Web 面板刷新，native handler 仍需重新打开 MN4 插件宿主或重启 MN4 |
 | 按钮连续点击 | Web JS 统一 `releaseButtonFocus`，普通按钮和动作按钮点击后主动 `blur()` | 已完成基础版 | 做更长时间真实交互 QA |
 | 动态进度 | Web 对话页执行时显示进度消息和已用秒数；Companion 记录 `control/current-run.json`，`/status` 和 `queue_status` 返回当前/最近动作、阶段、详情和耗时；运行期间 WebView 每 1.5 秒读取 `/status`，把后端 `run.action/stage/detail` 同步到对话进度消息和状态栏 `runStateLine` | 已完成基础版 | 后续接入真正 token 级 streaming |
 | 面板可直接输入聊天 | WebView 页面含 `textarea#promptInput`、固定 `sendButton` 和 action bridge | 已完成基础版 | 加清空会话/快捷键提示/错误重试 |
 | 面板可鼠标移动和调节大小 | `CodexWebPanelController.js` 支持标题栏拖动、右下角拖拽缩放、`-` / `+` 缩放按钮，最小 390x520，并保存位置和尺寸 | 已完成基础版 | 做跨屏幕尺寸视觉 QA |
 | 可设置 Codex 权限 | HTTP 验证 `read_only` 会拦截 `generate_card`；`notes` 已恢复为默认可写笔记权限 | 已完成基础版 | 增加 UI 端可见权限说明 |
 | 可设置模型和速度 | `/status` 返回 `model/speed`；默认 profile 为 `model=gpt-5.5`、`speed=fast`；Codex CLI fast 档使用 `model_reasoning_effort=medium`；`settings_update` 可保存 `speed=fast/balanced/deep` | 已完成基础版 | 根据真实模型能力扩展更多参数 |
-| 可设置 AI 后端 | 面板提供 `aiBackendSelect` 和 `aiBackendProbeButton`；`settings_update` 可保存 `auto/codex_cli/openai_api/local`；`/status` 返回 `ai_backend/codex_cli_available/codex_cli_path`；`ai_backend_probe` 会做无 token 的 CLI 路径/登录态、OpenAI Key 和代理 scheme 快速探测；readiness 文案使用“真实 AI 后端已发现”，明确 CLI 路径发现不等于真实生成已成功；0.4.25 后 main 会对 Codex CLI `cloud config bundle` 启动超时自动重试一次并给出代理/登录/网络提示 | 已完成基础版 | 后续可增加用户主动确认的小 prompt 在线试连 |
+| 可设置 AI 后端 | 面板提供 `aiBackendSelect` 和 `aiBackendProbeButton`；`settings_update` 可保存 `auto/codex_cli/openai_api/local`；`/status` 返回 `ai_backend/codex_cli_available/codex_cli_path`；`ai_backend_probe` 会做无 token 的 CLI 路径/登录态、OpenAI Key 和代理 scheme 快速探测；readiness 文案使用“真实 AI 后端已发现”，明确 CLI 路径发现不等于真实生成已成功；0.4.26 后 main 会对 Codex CLI `cloud config bundle` 启动超时自动重试一次并给出代理/登录/网络提示 | 已完成基础版 | 后续可增加用户主动确认的小 prompt 在线试连 |
 | 可设置代理 | 面板提供 `proxyUrlInput`；`settings_update` 保存 HTTP/HTTPS 代理；`health`/`doctor.py` 显示代理状态 | 已完成基础版 | 如需 SOCKS5，增加 PySocks 依赖和安装检查 |
 | 可设置 OpenAI Key | 面板提供 `openaiApiKeyInput`、`clearOpenAIKeyButton` 和 `aiBackendProbeButton`；`settings_update` 写入本地 `.env`，不回显 key；清除时只发送 `clearOpenAIKey=true`，不会把输入框里的临时 key 回传后端；readiness 卡显示 OpenAI 和 Codex CLI 可用状态；试连只报告 Key 是否存在，不回显 secret | 已完成基础版 | 后续可增加用户主动确认的小 prompt 在线试连 |
 | 文件访问权限诊断 | 设置页提供 `permissionDiagnoseButton`、`cacheCurrentPdfButton`、`nativeCapabilitiesRefreshButton`、`runtimeEvidenceButton`、`singleDocumentAcceptanceButton`、`releaseAcceptanceButton`、`openPermissionSettingsButton`、`fileAccessLine`、`mnRuntimeLine`、`nativeCapabilitiesLine` 和 `singleDocumentAcceptanceLine`；主对话页提供 `mnRuntimeNotice`、刷新能力和去设置入口，采证、本文档验收、发布验收和重启恢复动作留在设置页/验收结果中；`diagnose_permissions` 检查当前 PDF、MN4 数据库、导出目录和 PyMuPDF；`single_document_acceptance_summary` 读取当前 topic/book 的 `events.jsonl`、action result 和 native highlight evidence，在面板内显示同一文档按钮/工作流 PASS/BLOCK；`/status.mnRuntime` 会显示 MN4 WebView/原生能力是否上报、运行态是否 stale、handler 是否过旧，并给出重新打开面板或重启 MN4 的下一步；`request_pdf_cache` 可通过 Companion 队列要求 MN4 插件执行 `cache_pdf_from_current_document`；`request_native_capability_probe` 可通过队列要求插件刷新 `nativeApiCapabilities`；设置页 `collect_mn_runtime_evidence` 和发布包根目录 `Refresh MN Runtime.command` 都能采集 `/status.mnRuntime`、`nativeApiCapabilities` 和 doctor 输出到 JSON，且不强制退出 MN4；发布包命令还会尝试非破坏 addon URL reload，并把 `addonReloadAttempts` 写入 evidence；`cache_pdf_from_marginnote` 已由 MN4 插件进程在当前验证样本上上传 PDF 缓存；`open_full_disk_access_settings` 尝试打开 macOS Full Disk Access 页面；doctor 显示 `Companion file access sourcePdf=OK pdfCache=OK exportDir=OK` | 已完成基础版 | 验证不同 macOS 版本的设置 URL 是否一致 |
@@ -43,7 +43,7 @@
 | 生成 MN 原生脑图 | `createMindmap()` 递归创建节点；模型驱动脑图写入链路已在当前验证样本上验证；重复 root 已跳过；“补到当前脑图/合并脑图”会要求当前选中 MN 节点上下文，缺少选中节点时后台返回 400 且不生成 `mindmap`，MN4 写入层也会阻断旧草稿的 `mergeIntoSelected` 无选中节点降级新建根节点 | 已完成基础版 | 增加节点回源体验 |
 | 写入前确认 | Web 面板生成 draft，用户可在草稿框编辑卡片内容并用 `## 标题` 分隔多张卡片；确认后通过 `codexpaper://write_draft` 触发 MN4 写入；自动化验收可用 `request_draft_write` 入队 `nativeAction=write_draft`，由 MN4 native poll 读取同一草稿并写入；可丢弃草稿 | 已完成基础版 | 增加差异预览 |
 | 原文回链 | 卡片/脑图正文包含 `marginnote4app://page/...` 页码链接 | 部分完成 | 验证 MN4 中点击跳转，争取选区级回链 |
-| MN 原生动作矩阵 | 插件运行时上报 `capabilityMatrix`，覆盖卡片、脑图、Undo 分组、写入后刷新、PDF 缓存、原生选区高亮、选区菜单高亮和标注 PDF 导出；Companion、doctor 和设置页会显示 ready/blocked 动作；`request_native_capability_probe` / `probe_native_api_capabilities` 可主动刷新探测事件；`Refresh MN Runtime.command` 可在无需截图的情况下触发刷新并保存证据；`nativeApiCapabilities` 通过共享 resolver 上报 `documentControllerCandidates` 和 `selectedDocumentControllerLabel`。0.4.25 本机运行态已 PASS `native_api_matrix`，handler features 包含全部 required 指纹 | 已完成基础版 | 带真实 PDF 选区补更多 MN4 API selector 和可见高亮样本 |
+| MN 原生动作矩阵 | 插件运行时上报 `capabilityMatrix`，覆盖卡片、脑图、Undo 分组、写入后刷新、PDF 缓存、原生选区高亮、选区菜单高亮和标注 PDF 导出；Companion、doctor 和设置页会显示 ready/blocked 动作；`request_native_capability_probe` / `probe_native_api_capabilities` 可主动刷新探测事件；`Refresh MN Runtime.command` 可在无需截图的情况下触发刷新并保存证据；`nativeApiCapabilities` 通过共享 resolver 上报 `documentControllerCandidates` 和 `selectedDocumentControllerLabel`。0.4.26 源码和安装目录已包含 required handler fingerprints；运行态 gate 需要 MN4 重新打开面板后上报 0.4.26 事件 | 安装替换完成，运行态待刷新 | 打开 MN4 面板，点击刷新 MN 能力，带真实 PDF 选区补更多 selector 和可见高亮样本 |
 | 原生可见高亮 | 官方 Addon API 头文件确认 `JSBDocumentController.highlightFromSelection()` 存在；插件现在保存最近一次 PDF 选区事件里的 `documentController`，并用共享 `resolveDocumentController()` 依次尝试 `lastDocumentController`、`selectionDocumentController`、`studyController` / `notebookController` 下的直接 `documentController/docController/currentDocumentController/readerController/readerViewController/reader/readerVC/pdfController/pdfViewController/pdfReader/pdfReaderController/pdfDocumentController/documentViewController/docViewController/pdfView`，以及 reader/pdf controller 下的 `documentController/docController/currentDocumentController` 嵌套路径；对话页原文工具区和自定义按钮都提供“高亮下一选区”；选中文本弹出菜单会尝试追加“Codex 高亮选区”；失败事件会带 `candidateLabels`、`candidateCount` 和 `selectedDocumentControllerLabel`。若 PDF 控制器存在但 selector 不可枚举，插件会尝试官方 `highlightFromSelection()` 并记录 `attemptedUnverifiedSelector`。Web/队列命令现在带 `preferNextSelection=true`：没有活跃选区时直接进入下一次 PDF 选区等待模式，减少 Web 面板抢焦点导致的失败；如果当前仍有有效选区，则立即尝试高亮。`Collect Native Highlight Evidence.command` 现在会先请求打开中的 MN4 插件执行一次 `request_native_highlight_selection`；若进入 armed 状态，采证脚本会在默认 90 秒窗口内继续等待用户重新选区后的 posted/failed 结果，再用最新 `nativeHighlightSelectionPosted` 的 topic/book 查询同一作用域的 `ZHIGHLIGHTS` 行，并拒绝缺 scope、scope 不匹配、blob 为 0、本次尝试失败或 armed 后超时的证据；当前刷新后的无选区实测显示 `selectedDocumentControllerLabel=studyController.readerController.currentDocumentController`，但当前 topic 仍为 0 行 blob | 部分完成 | 重新加载 MN4 面板后，点击“高亮下一选区”并在 PDF 中选中文本，实测 `selectionPopupHighlightMenuInstalled`、`nativeHighlightNextSelectionConsumed`、`nativeHighlightSelectionPosted`、`attemptedUnverifiedSelector/selectorVerified`、同 topic/book 的 `ZHIGHLIGHTS` blob 和页面可见高亮 |
 | 不污染原文 PDF | 卡片/脑图不改 PDF；高亮写库默认禁用；`export_annotated_pdf` 导出前后校验原 PDF sha256 | 已完成基础版 | 增加更多真实 PDF 回归样本 |
 | 导出带标注 PDF | `export_annotated_pdf` 可用 PyMuPDF 按选中文本搜索 PDF 文本层，并只在副本中写入 highlight annotation；插件 payload 已包含 best-effort `pdfPath`，Companion 也会只读查询 `ZBOOK` 并解析 MNDocs；当前 book 的 PDF 缓存优先路线已在当前验证样本上实测，`pdfCacheUploadPosted size=2675392` 后 direct 导出生成 OneDrive exports 副本，PyMuPDF 验证 page 1 有 `Highlight` annotation，原 PDF 哈希不变；缓存文件名导致的 macOS 255 字节文件名问题已用回归测试修复 | 已完成基础版 | 验证复杂选区、扫描 PDF 和更多文档样本 |
@@ -54,7 +54,7 @@
 | 安装脚本 | 发布包根目录提供 `Install Codex Companion.command` / `Uninstall Codex Companion.command` 双击入口，也提供 `install.sh` / `uninstall.sh`；内部复用 `install_extension.sh`、`install_companion.sh`、`uninstall_companion.sh`；安装后自动运行 doctor；`CODEX_MN_DRY_RUN=1` 下可完整演练安装/卸载入口，并跳过真实 `launchctl`、MN4 扩展写入和 doctor；`build_pkg.py` 可从 zip 生成 macOS pkg 外壳，postinstall 会以当前桌面用户运行 `install.sh`，避免装到 root 用户目录，并会清理 pkg scripts 资源中的 AppleDouble `._*` 元数据；`Build Signed Package.command` 可自动使用唯一 Developer ID Installer 证书生成签名 pkg；`notarize_pkg.py` 和 `Notarize Package.command` 可提交 Apple notarization、staple ticket，并用 Gatekeeper install assessment 验证；`notarize_pkg.py --dry-run --json` 无凭证时也会输出预览命令和 `credentialsWarning`；跨机器 evidence 会要求 `MN4 extension manifest`、`Companion service`、`LaunchAgent` 三个安装检查为 OK | 已完成基础版 | 跨新用户账号验证，补 Apple Developer 证书、notarytool 凭证、真实签名和公证 |
 | LaunchAgent 后台启动 | `install_companion.sh` 写入 preferred label `com.codex.paper-companion`，并在安装前迁移旧 label `com.liuwhale.codex-marginnote-assistant`；doctor 只在 preferred label loaded 时给 OK | 已完成基础版 | 跨机器验证，补签名/图形安装器 |
 | 用户文档与隐私/权限说明 | `README.md` 作为英文 GitHub 首页，`README.zh-CN.md` 提供完整中文版本；二者顶部互相链接；release zip 和 smoke gate 强制包含双语 README；`USER_MANUAL.md` 已覆盖普通用户安装、启动、AI 后端、对话、目标、自定义按钮、制卡、脑图、高亮、导出、队列、权限、隐私和常见问题；`PRIVACY_AND_PERMISSIONS.md` 说明本地数据、API Key 和权限边界；`diagnostic_log.py` 负责结构化日志脱敏 | 已完成基础版 | 发布前补用户同意说明 |
-| 可发布包 | 0.4.25 zip 已生成、同步 OneDrive 并发布到 GitHub Release；精确 hash 为 `e76fc13c4878df9e67d60d2e134eae485bad8c0576604122c844d3d9e3dac8a9`；`unit_tests`、`syntax_checks`、`release_zip_smoke`、`install_dry_run`、`runtime_web_controls`、`native_api_matrix` 已 PASS；`release_maintainer_prerequisites` 当前 WARN，指出本机缺 Developer ID Installer 证书和 notarytool 凭证；zip 内含 smoke、dry-run、acceptance gate、single-document acceptance、pkg builder、notarization 工具和 release handoff 工具；当前审计见 `CURRENT_RELEASE_AUDIT.md` | 部分完成 | 等单文档验收、native highlighter、跨机器安装、签名和 notarization 完成后再打 v1.0 |
+| 可发布包 | 0.4.26 zip 已生成、同步 OneDrive 并发布到 GitHub Release；精确 hash 以 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt` 为准；`unit_tests`、`syntax_checks`、`release_zip_smoke`、`install_dry_run` 已 PASS；若 MN4 尚未重新加载 0.4.26 面板，`runtime_web_controls` 和 `native_api_matrix` 会按预期 BLOCK 并提示重新打开面板；`release_maintainer_prerequisites` 当前 WARN，指出本机缺 Developer ID Installer 证书和 notarytool 凭证；zip 内含 smoke、dry-run、acceptance gate、single-document acceptance、pkg builder、notarization 工具和 release handoff 工具；当前审计见 `CURRENT_RELEASE_AUDIT.md` | 部分完成 | 等运行态刷新、单文档验收、native highlighter、跨机器安装、签名和 notarization 完成后再打 v1.0 |
 
 ## 当前阻塞项
 
@@ -62,7 +62,7 @@
 
 ## 发布判定
 
-当前 0.4.25 是可下载的公开预览版，但仍不能作为最终 v1.0 发布版，因为以下硬要求还未满足：
+当前 0.4.26 是可下载的公开预览版，但仍不能作为最终 v1.0 发布版，因为以下硬要求还未满足：
 
 - 原文处还没有完成带活跃选区的可靠可见 native highlighter 验证。
 - 同一 topic/book 的完整按钮与工作流验收证据尚未生成。

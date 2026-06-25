@@ -6,21 +6,21 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.25 公开预览版
-- MN4 插件 manifest：0.4.25
-- Companion：0.4.25
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.25`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.25-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.25-latest-dist.zip`
-- 当前 zip sha256：`e76fc13c4878df9e67d60d2e134eae485bad8c0576604122c844d3d9e3dac8a9`
-- 最新本地 pkg：尚未生成 0.4.25 signed/notarized pkg
+- 当前发布候选：0.4.26 公开预览版
+- MN4 插件 manifest：0.4.26
+- Companion：0.4.26
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.26`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.26-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.26-latest-dist.zip`
+- 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
+- 最新本地 pkg：尚未生成 0.4.26 signed/notarized pkg
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前最终 gate 因缺 `.pkg` entry 仍会阻塞 `release_sha256_manifest`。
 
 ## 当前证据
 
-### 2026-06-25 15:17 v0.4.25 后 main 修复：Codex CLI 启动超时与发送按钮重复提示
+### 2026-06-25 v0.4.26 发布：Codex CLI 启动超时与发送按钮重复提示
 
-本轮没有重新打 GitHub Release，当前公开下载包仍是 `v0.4.25`。main 分支和本机已补两个用户可见问题：
+本轮把 `v0.4.25` 之后 main 分支上的用户可见修复归档为 `v0.4.26`，并重新生成公开下载包：
 
 - Codex CLI 若返回 `Error: timed out waiting for cloud config bundle after 15s`，Companion 会把它识别为启动期网络/代理/登录配置问题，自动重试一次；仍失败时显示中文可操作提示，说明这不是当前 PDF、脑图或 MarginNote 上下文错误。
 - 设置页 readiness 文案从“真实 AI 已配置”改成“真实 AI 后端已发现”，避免把“找到 CLI 路径”误解成“已经真实生成成功”。
@@ -38,11 +38,14 @@ PASS
 node --check extension/codex.mn.assistant/web/app.js
 PASS
 
-python3 send_action.py chat --direct --prompt '只回答：ok'
-backend=codex-cli, reply=ok
+python3 release_smoke_test.py release/CodexCompanion-0.4.26-latest-dist.zip
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.26-latest-dist.zip --install-dry-run
+PASS
 ```
 
-结论：main 分支和本机插件已修复这两个问题；如果需要让公开下载包也包含它们，需要另发 `v0.4.26` 或后续 release。
+结论：`v0.4.26` 是包含 Codex CLI 超时重试、AI 后端文案澄清和发送按钮重复提示修复的公开预览版。它仍不是最终 v1.0，因为原生可见高亮、signed/notarized pkg、跨机器安装和单文档完整验收仍缺发布证据。
 
 ### 2026-06-24 15:11 v0.4.25 双语文档与诊断日志重构发布
 

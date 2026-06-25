@@ -263,20 +263,20 @@ curl http://127.0.0.1:48761/status
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.25
+python3 package_release.py 0.4.26
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip
-python3 release_smoke_test.py release/CodexCompanion-0.4.25-latest-dist.zip --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.26-latest-dist.zip
+python3 release_smoke_test.py release/CodexCompanion-0.4.26-latest-dist.zip --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.25-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.26-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.
