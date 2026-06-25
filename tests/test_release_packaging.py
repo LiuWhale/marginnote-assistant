@@ -136,6 +136,27 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertIn(hashlib.sha256(b"zip").hexdigest() + "  CodexCompanion-test-dist.zip", text)
             self.assertIn(hashlib.sha256(b"pkg").hexdigest() + "  CodexCompanion-test.pkg", text)
 
+    def test_release_writes_mnaddon_with_addon_files_at_archive_root(self) -> None:
+        module = self.load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "codex.mn.assistant"
+            (source / "web").mkdir(parents=True)
+            (source / "mnaddon.json").write_text('{"addonid":"codex.mn.assistant"}\n', encoding="utf-8")
+            (source / "main.js").write_text("var PluginVersion = 'test';\n", encoding="utf-8")
+            (source / "web/index.html").write_text("<div id=\"aiChatShell\"></div>\n", encoding="utf-8")
+            (source / ".DS_Store").write_bytes(b"private")
+            target = Path(tmp) / "CodexCompanion-test.mnaddon"
+
+            module.zip_dir_contents(source, target)
+
+            with zipfile.ZipFile(target) as archive:
+                names = set(archive.namelist())
+            self.assertIn("mnaddon.json", names)
+            self.assertIn("main.js", names)
+            self.assertIn("web/index.html", names)
+            self.assertNotIn("codex.mn.assistant/mnaddon.json", names)
+            self.assertNotIn(".DS_Store", names)
+
     def test_release_smoke_requires_evidence_commands(self) -> None:
         spec = importlib.util.spec_from_file_location(
             "codex_mn_release_smoke_require_evidence",
@@ -162,6 +183,9 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("single_document_acceptance.py", module.REQUIRED_SUFFIXES)
         self.assertIn("notarize_pkg.py", module.REQUIRED_SUFFIXES)
         self.assertIn("prepare_release_handoff.py", module.REQUIRED_SUFFIXES)
+        self.assertIn("mnaddon.json", module.MNADDON_REQUIRED_SUFFIXES)
+        self.assertIn("main.js", module.MNADDON_REQUIRED_SUFFIXES)
+        self.assertIn("web/app.js", module.MNADDON_REQUIRED_SUFFIXES)
         self.assertEqual(
             module.MARKERS["Collect Native Highlight Evidence.command"],
             "--collect-native-highlight-evidence",
@@ -214,6 +238,58 @@ class ReleasePackagingTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertIn("sha256 manifest mismatch", "\n".join(result.problems))
+
+    def test_release_smoke_accepts_mnaddon_with_manifest_at_archive_root(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_mnaddon",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "CodexCompanion-test.mnaddon"
+            entries = {
+                "main.js": "var PluginVersion = 'test';\n",
+                "mnaddon.json": '{"addonid":"codex.mn.assistant"}\n',
+                "CodexWebPanelController.js": "class UIWebView {}\n",
+                "CodexPanelController.js": "// ok\n",
+                "web/index.html": "<div id=\"aiChatShell\"></div>\n",
+                "web/app.js": "const sendButton = true;\n",
+                "web/app.css": ".queue-available {}\n",
+                "codex.png": b"\x89PNG\r\n\x1a\n",
+            }
+            with zipfile.ZipFile(package, "w") as archive:
+                for name, content in entries.items():
+                    archive.writestr(name, content)
+
+            result = module.inspect_mnaddon(package)
+
+            self.assertTrue(result.ok, result.problems)
+            self.assertEqual(result.bad_entries, [])
+
+    def test_release_smoke_rejects_mnaddon_with_nested_addon_root(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_mnaddon_nested",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "CodexCompanion-test.mnaddon"
+            with zipfile.ZipFile(package, "w") as archive:
+                for suffix in module.MNADDON_REQUIRED_SUFFIXES:
+                    archive.writestr(f"codex.mn.assistant/{suffix}", "bad\n")
+
+            result = module.inspect_mnaddon(package)
+
+            self.assertFalse(result.ok)
+            self.assertIn("mnaddon contains nested codex.mn.assistant root", "\n".join(result.problems))
 
     def test_pkg_builder_parses_developer_id_installer_identities(self) -> None:
         spec = importlib.util.spec_from_file_location("codex_mn_build_pkg_signing", PKG_BUILDER_PATH)
@@ -507,7 +583,7 @@ class ReleasePackagingTests(unittest.TestCase):
             entries = {
                 "CodexCompanion-test/README.md": "Codex Companion for MarginNote 4\n",
                 "CodexCompanion-test/README.zh-CN.md": "语言: [English](README.md) | **简体中文**\n",
-                "CodexCompanion-test/CHANGELOG.md": "## 0.4.26 - 2026-06-25\n",
+                "CodexCompanion-test/CHANGELOG.md": "## 0.4.27 - 2026-06-25\n",
                 "CodexCompanion-test/LICENSE": "MIT License\n",
                 "CodexCompanion-test/assets/cover.png": b"\x89PNG\r\n\x1a\n",
                 "CodexCompanion-test/README-FIRST.txt": "Double-click: Install Codex Companion.command\n",

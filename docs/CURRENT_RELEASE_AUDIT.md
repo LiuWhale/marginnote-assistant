@@ -6,17 +6,49 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.26 公开预览版
-- MN4 插件 manifest：0.4.26
-- Companion：0.4.26
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.26`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.26-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.26-latest-dist.zip`
+- 当前发布候选：0.4.27 公开预览版
+- MN4 插件 manifest：0.4.27
+- Companion：0.4.27
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.27`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.27-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.27-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.27-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.27-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：尚未生成 0.4.26 signed/notarized pkg
+- 最新本地 pkg：尚未生成 0.4.27 signed/notarized pkg
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前最终 gate 因缺 `.pkg` entry 仍会阻塞 `release_sha256_manifest`。
 
 ## 当前证据
+
+### 2026-06-25 v0.4.27 发布：补 MarginNote 原生 `.mnaddon` 发布包
+
+本轮确认 MarginNote 用户侧插件文件应提供 `.mnaddon`。示例 `.mnaddon` 是 zip archive，内部 `main.js`、`mnaddon.json`、`web/` 和图标位于压缩包根目录。0.4.27 因此把 release artifact 改为“双包”：
+
+- `CodexCompanion-0.4.27-latest-dist.zip`：完整安装包，包含本地 Companion 服务、MN4 扩展、安装/卸载脚本、诊断和发布验收工具。
+- `CodexCompanion-0.4.27-latest.mnaddon`：MarginNote 原生插件包，只包含 MN4 add-on 本体，适合手动导入或更新插件；它不安装本地 Companion 服务。
+- `release_smoke_test.py` 新增 `.mnaddon` 检查，要求 `main.js`、`mnaddon.json`、WebView 文件和图标在 archive root，并拒绝嵌套 `codex.mn.assistant/` 根目录。
+- `package_release.py` 会把 `.mnaddon` 同步到本地 release 目录和 OneDrive 镜像，并写入外部 `SHA256SUMS.txt`。
+
+验证结果：
+
+```text
+python3 -m unittest discover -s tests
+371 tests passed
+
+python3 -m py_compile companion.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py build_pkg.py notarize_pkg.py
+PASS
+
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.27-latest-dist.zip --mnaddon release/CodexCompanion-0.4.27-latest.mnaddon
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.27-latest-dist.zip --mnaddon release/CodexCompanion-0.4.27-latest.mnaddon --install-dry-run
+PASS
+```
+
+结论：`v0.4.27` 是补齐 `.mnaddon` 原生插件包格式的公开预览版。它仍不是最终 v1.0，因为原生可见高亮、signed/notarized pkg、跨机器安装和单文档完整验收仍缺发布证据。
 
 ### 2026-06-25 v0.4.26 发布：Codex CLI 启动超时与发送按钮重复提示
 

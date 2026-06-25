@@ -32,7 +32,7 @@ Goal-style runs are one-shot long tasks. They are not saved as a persistent glob
 ## Quick Install
 
 1. Open the [Latest Release](https://github.com/LiuWhale/marginnote-assistant/releases/latest).
-2. Download `CodexCompanion-<version>-latest-dist.zip`.
+2. Download `CodexCompanion-<version>-latest-dist.zip`. This is the recommended full installer because it installs both the MarginNote add-on and the local Companion service.
 3. Unzip it and double-click:
 
 ```text
@@ -47,6 +47,8 @@ Or run this from the unzipped folder:
 
 4. Restart MarginNote 4.
 5. Open a notebook or document, then open Codex Companion from the MarginNote add-on toolbar.
+
+Releases also include `CodexCompanion-<version>-latest.mnaddon`, which is the native MarginNote add-on bundle format. Use it only when you want to import or update the MN4 add-on itself; the local Companion service still needs to be installed and running from the full zip package.
 
 To uninstall, double-click:
 
@@ -263,20 +265,20 @@ curl http://127.0.0.1:48761/status
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.26
+python3 package_release.py 0.4.27
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.26-latest-dist.zip
-python3 release_smoke_test.py release/CodexCompanion-0.4.26-latest-dist.zip --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.27-latest-dist.zip --mnaddon release/CodexCompanion-0.4.27-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.27-latest-dist.zip --mnaddon release/CodexCompanion-0.4.27-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.26-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.27-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

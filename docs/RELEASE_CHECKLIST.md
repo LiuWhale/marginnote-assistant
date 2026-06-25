@@ -3,9 +3,9 @@
 ## 版本信息
 
 - 插件名：Codex Companion
-- 当前发布候选：0.4.26
-- MN4 插件 manifest 版本：0.4.26
-- Companion 版本：0.4.26
+- 当前发布候选：0.4.27
+- MN4 插件 manifest 版本：0.4.27
+- Companion 版本：0.4.27
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`
@@ -15,10 +15,11 @@
 0. 发布包一键安装入口
 
 ```bash
-unzip CodexCompanion-0.4.26-latest-dist.zip
-cd CodexCompanion-0.4.26
+unzip CodexCompanion-0.4.27-latest-dist.zip
+cd CodexCompanion-0.4.27
 python3 release_smoke_test.py
-python3 release_smoke_test.py --install-dry-run
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.27-latest.mnaddon
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.27-latest.mnaddon --install-dry-run
 python3 build_pkg.py --dry-run
 ./install.sh
 ```
@@ -26,7 +27,7 @@ python3 build_pkg.py --dry-run
 验收条件：
 
 - zip 根目录包含 `README.md`、`README.zh-CN.md`、`README-FIRST.txt`、`install.sh`、`uninstall.sh`、`Install Codex Companion.command`、`Uninstall Codex Companion.command`、`Refresh MN Runtime.command`、`Restart MarginNote 4.command`、`Collect Native Highlight Evidence.command`、`Collect Single Document Acceptance.command`、`Collect Cross-Machine Evidence.command`、`Build Signed Package.command`、`Notarize Package.command`、`release_smoke_test.py`、`release_acceptance.py`、`single_document_acceptance.py`、`build_pkg.py` 和 `notarize_pkg.py`。
-- `python3 release_smoke_test.py` 能离线检查根目录入口、插件文件、Companion 文件、旧 LaunchAgent 迁移 marker 和私有运行文件排除。
+- `python3 release_smoke_test.py` 能离线检查根目录入口、插件文件、Companion 文件、旧 LaunchAgent 迁移 marker 和私有运行文件排除；带 `--mnaddon` 时还会检查 `.mnaddon` 是否把 `main.js`、`mnaddon.json`、WebView 文件和图标放在 archive root。
 - `python3 release_smoke_test.py --install-dry-run` 会把 zip 解压到临时 `HOME`，设置 `CODEX_MN_DRY_RUN=1`，完整运行安装/卸载入口，并验证不会调用 `launchctl`、不会修改真实 MN4 扩展目录、不会运行真实 doctor。
 - `python3 prepare_release_handoff.py` 或双击 `Prepare Release Handoff.command` 会生成 `CodexCompanion-release-handoff-*` 文件夹/zip，内含最新 zip/pkg、`release_acceptance.json`、`SHA256SUMS.txt`、当前 blocking/warning gate 下一步和 MN runtime/native/single-document/cross-machine evidence 模板；该包会同步到 OneDrive 的 `Codex Companion/Release Handoff` 目录。交接包只把满足 release gate 的有效证据放进 `evidence/`；stale runtime、旧 handler、`ok=false`、不完整证据、native highlight 事件/数据库 scope 不匹配证据、single-document acceptance 未完成，或 package hash 不匹配当前 zip 的跨机器证据只放进 `diagnostics/evidence/`，不能作为发布通过证明。
 - `Refresh MN Runtime.command` 生成的 `CodexCompanion-MNRuntimeEvidence-*.json` 可用 `python3 release_acceptance.py --mn-runtime-evidence <json>` 作为运行态证据；验收只接受 `ready=true`、`webControlsReady=true`、`nativeApiReady=true`、`staleRuntime=false`、`runtimeHandlerStale=false` 且 capability matrix 存在的证据。
@@ -53,7 +54,7 @@ python3 build_pkg.py --sign-identity "Developer ID Installer: <Team Name> (<Team
 签名 pkg 还不是最终可分发包。公发前必须 notarize 并 staple：
 
 ```bash
-python3 notarize_pkg.py ./release/CodexCompanion-0.4.26-latest.pkg --keychain-profile "CodexNotary"
+python3 notarize_pkg.py ./release/CodexCompanion-0.4.27-latest.pkg --keychain-profile "CodexNotary"
 ```
 
 发布维护者也可以双击 `Notarize Package.command`。该入口需要 `NOTARYTOOL_KEYCHAIN_PROFILE`，或 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_SPECIFIC_PASSWORD`。`doctor.py` 会用 `xcrun stapler validate` 和 `spctl -a -vv -t install` 把 notarization 作为独立证据；`release_acceptance.py` 会把 `signed_pkg` 和 `notarized_pkg` 分开阻断。
@@ -101,7 +102,7 @@ tail -n 30 "$HOME/.codex/marginnote-assistant/events.jsonl"
 
 应看到：
 
-- `pluginVersion` 为 `0.4.26`
+- `pluginVersion` 为 `0.4.27`
 - `webPanelLoaded`
 - `panelShownState`
 - `panelKind=webview`

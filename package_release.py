@@ -101,6 +101,17 @@ def zip_dir(source: Path, target: Path) -> None:
             archive.write(path, path.relative_to(source.parent))
 
 
+def zip_dir_contents(source: Path, target: Path) -> None:
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(source.rglob("*")):
+            if path.is_dir() or path.name.startswith("._"):
+                continue
+            relative = path.relative_to(source)
+            if path.name.endswith(".pyc") or any(part in EXTENSION_EXCLUDES for part in relative.parts):
+                continue
+            archive.write(path, relative)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -132,12 +143,16 @@ def copy_public_assets(package_root: Path) -> None:
 
 
 def main() -> int:
-    version = sys.argv[1] if len(sys.argv) > 1 else "0.4.26"
+    version = sys.argv[1] if len(sys.argv) > 1 else "0.4.27"
     stamp = time.strftime("%Y%m%d-%H%M%S")
     package_name = f"CodexCompanion-{version}-{stamp}-dist.zip"
     latest_name = f"CodexCompanion-{version}-latest-dist.zip"
+    addon_name = f"CodexCompanion-{version}-{stamp}.mnaddon"
+    latest_addon_name = f"CodexCompanion-{version}-latest.mnaddon"
     package_path = RELEASE_DIR / package_name
     latest_path = RELEASE_DIR / latest_name
+    addon_path = RELEASE_DIR / addon_name
+    latest_addon_path = RELEASE_DIR / latest_addon_name
 
     if not EXT_DIR.is_dir():
         raise SystemExit(f"Missing MarginNote extension directory: {EXT_DIR}")
@@ -157,12 +172,24 @@ def main() -> int:
         copy_root_files(package_root)
         copy_public_assets(package_root)
         zip_dir(package_root, package_path)
+        zip_dir_contents(EXT_DIR, addon_path)
         shutil.copy2(package_path, latest_path)
+        shutil.copy2(addon_path, latest_addon_path)
         shutil.copy2(package_path, ONEDRIVE_DIR / package_name)
         shutil.copy2(latest_path, ONEDRIVE_DIR / latest_name)
-        write_sha256_manifest([package_path, latest_path], RELEASE_DIR / "SHA256SUMS.txt")
+        shutil.copy2(addon_path, ONEDRIVE_DIR / addon_name)
+        shutil.copy2(latest_addon_path, ONEDRIVE_DIR / latest_addon_name)
         write_sha256_manifest(
-            [ONEDRIVE_DIR / package_name, ONEDRIVE_DIR / latest_name],
+            [package_path, latest_path, addon_path, latest_addon_path],
+            RELEASE_DIR / "SHA256SUMS.txt",
+        )
+        write_sha256_manifest(
+            [
+                ONEDRIVE_DIR / package_name,
+                ONEDRIVE_DIR / latest_name,
+                ONEDRIVE_DIR / addon_name,
+                ONEDRIVE_DIR / latest_addon_name,
+            ],
             ONEDRIVE_DIR / "SHA256SUMS.txt",
         )
         shutil.copy2(ROOT / "README.md", ONEDRIVE_DIR / "README.md")
@@ -184,7 +211,10 @@ def main() -> int:
 
     print(package_path)
     print(latest_path)
+    print(addon_path)
+    print(latest_addon_path)
     print(ONEDRIVE_DIR / latest_name)
+    print(ONEDRIVE_DIR / latest_addon_name)
     return 0
 
 

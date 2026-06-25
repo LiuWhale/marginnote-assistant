@@ -14,7 +14,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.26-latest-dist.zip"
+DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.27-latest-dist.zip"
+DEFAULT_MNADDON = ROOT / "release/CodexCompanion-0.4.27-latest.mnaddon"
 
 REQUIRED_SUFFIXES = [
     "README.md",
@@ -72,7 +73,7 @@ PRIVATE_PARTS = (
 MARKERS = {
     "README.md": "Codex Companion for MarginNote 4",
     "README.zh-CN.md": "语言: [English](README.md) | **简体中文**",
-    "CHANGELOG.md": "## 0.4.26 - 2026-06-25",
+    "CHANGELOG.md": "## 0.4.27 - 2026-06-25",
     "LICENSE": "MIT License",
     "README-FIRST.txt": "Double-click: Install Codex Companion.command",
     "Install Codex Companion.command": "install.sh",
@@ -95,6 +96,26 @@ MARKERS = {
     "companion/runtime_config.py": "DEFAULT_RUNTIME_SETTINGS",
     "companion/doctor.py": "installable clean zip",
     "extension/codex.mn.assistant/main.js": "appendSelectionPopupMenuActions",
+}
+
+MNADDON_REQUIRED_SUFFIXES = [
+    "main.js",
+    "mnaddon.json",
+    "CodexWebPanelController.js",
+    "CodexPanelController.js",
+    "web/index.html",
+    "web/app.js",
+    "web/app.css",
+    "codex.png",
+]
+
+MNADDON_MARKERS = {
+    "main.js": "PluginVersion",
+    "mnaddon.json": "\"addonid\"",
+    "CodexWebPanelController.js": "UIWebView",
+    "web/index.html": "aiChatShell",
+    "web/app.js": "sendButton",
+    "web/app.css": "queue-available",
 }
 
 
@@ -203,6 +224,59 @@ def inspect_package(path: Path) -> SmokeResult:
     )
 
 
+def inspect_mnaddon(path: Path) -> SmokeResult:
+    path = path.expanduser()
+    problems: list[str] = []
+    if not path.exists():
+        return SmokeResult(False, str(path), "", 0, MNADDON_REQUIRED_SUFFIXES[:], [], list(MNADDON_MARKERS), ["mnaddon does not exist"])
+
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        missing = [item for item in MNADDON_REQUIRED_SUFFIXES if item not in names]
+        nested_root_entries = [name for name in names if name.startswith("codex.mn.assistant/")]
+        private_entries = [
+            name
+            for name in names
+            if name.startswith("__MACOSX/")
+            or name.endswith(".DS_Store")
+            or name.startswith("._")
+            or "/._" in name
+        ]
+        missing_markers: list[str] = []
+        for suffix, marker in MNADDON_MARKERS.items():
+            if suffix not in names:
+                missing_markers.append(suffix)
+                continue
+            text = archive.read(suffix).decode("utf-8", errors="replace")
+            if marker not in text:
+                missing_markers.append(suffix)
+
+    sha256_manifest = inspect_sidecar_sha256_manifest(path, digest)
+    if sha256_manifest.get("exists") and not sha256_manifest.get("matches"):
+        problems.append("sha256 manifest mismatch")
+    if missing:
+        problems.append("missing required files: " + ", ".join(missing))
+    if nested_root_entries:
+        problems.append("mnaddon contains nested codex.mn.assistant root")
+    if private_entries:
+        problems.append(f"private macOS entries found: {len(private_entries)}")
+    if missing_markers:
+        problems.append("missing content markers: " + ", ".join(missing_markers))
+
+    return SmokeResult(
+        ok=not problems,
+        package=str(path),
+        sha256=digest,
+        file_count=len(names),
+        missing=missing,
+        bad_entries=nested_root_entries + private_entries,
+        missing_markers=missing_markers,
+        problems=problems,
+        sha256_manifest=sha256_manifest,
+    )
+
+
 def package_root_from_extract(extract_dir: Path) -> Path:
     roots = [path for path in extract_dir.iterdir() if path.is_dir() and path.name.startswith("CodexCompanion-")]
     if len(roots) != 1:
@@ -263,16 +337,20 @@ def run_install_dry_run(path: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run offline checks against a Codex Companion release zip.")
     parser.add_argument("package", nargs="?", default=str(DEFAULT_PACKAGE), help="Release zip to inspect.")
+    parser.add_argument("--mnaddon", default="", help="Optional .mnaddon bundle to inspect.")
     parser.add_argument("--install-dry-run", action="store_true", help="Extract to a temporary HOME and run install/uninstall in dry-run mode.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     args = parser.parse_args()
 
     result = inspect_package(Path(args.package))
+    addon_result = inspect_mnaddon(Path(args.mnaddon)) if args.mnaddon else None
     dry_run = run_install_dry_run(Path(args.package)) if result.ok and args.install_dry_run else None
-    ok = result.ok and (dry_run is None or bool(dry_run.get("ok")))
+    ok = result.ok and (addon_result is None or addon_result.ok) and (dry_run is None or bool(dry_run.get("ok")))
     if args.json:
         payload = result.__dict__.copy()
         payload["ok"] = ok
+        if addon_result is not None:
+            payload["mnaddon"] = addon_result.__dict__
         if dry_run is not None:
             payload["installDryRun"] = dry_run
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -286,6 +364,14 @@ def main() -> int:
                 print(f"- {problem}")
         if dry_run is not None:
             print(f"installDryRun={dry_run.get('ok')}")
+        if addon_result is not None:
+            addon_status = "OK" if addon_result.ok else "FAIL"
+            print(f"[{addon_status}] {addon_result.package}")
+            print(f"mnaddonSha256={addon_result.sha256}")
+            print(f"mnaddonFiles={addon_result.file_count}")
+            if addon_result.problems:
+                for problem in addon_result.problems:
+                    print(f"- mnaddon: {problem}")
     return 0 if ok else 1
 
 

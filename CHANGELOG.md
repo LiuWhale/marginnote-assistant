@@ -2,6 +2,14 @@
 
 All notable changes to Codex Companion are documented here.
 
+## 0.4.27 - 2026-06-25
+
+### Added
+
+- Built and published a native MarginNote add-on bundle, `CodexCompanion-<version>-latest.mnaddon`, alongside the full installer zip.
+- Added `.mnaddon` smoke checks so release validation verifies that `main.js`, `mnaddon.json`, WebView files, and the icon are at the archive root rather than nested under `codex.mn.assistant/`.
+- Added `.mnaddon` entries to release SHA256 manifests and OneDrive release mirroring.
+
 ## 0.4.26 - 2026-06-25
 
 ### Fixed
