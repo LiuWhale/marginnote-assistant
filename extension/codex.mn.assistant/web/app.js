@@ -56,6 +56,8 @@
     sessionId: '',
     conversationHistoryScope: 'document',
     conversations: [],
+    notebookWorkspace: {schema: 'codex.mn.notebookWorkspace.v1', available: false},
+    notebookWorkspaceInFlight: false,
     objectBrowser: {schema: 'codex.mn.objectBrowser.v1', available: false},
     objectBrowserInFlight: false,
     objectRegistryScanInFlight: false,
@@ -99,6 +101,17 @@
     'workspaceNavKnowledgeGraphButton',
     'workspaceNavWorkflowBuilderButton',
     'workspaceNavSkillCenterButton',
+    'notebookWorkspacePanel',
+    'notebookWorkspaceTitle',
+    'notebookWorkspaceSummary',
+    'notebookWorkspaceRefreshButton',
+    'notebookWorkspaceFocus',
+    'notebookWorkspaceObjectCount',
+    'notebookWorkspaceMindmap',
+    'notebookWorkspaceReview',
+    'notebookWorkspaceWorkflow',
+    'notebookWorkspaceLedger',
+    'notebookWorkspaceActions',
     'workbenchTabs',
     'workbenchTabObject',
     'workbenchTabDialog',
@@ -1702,12 +1715,13 @@
     var operation = state.agentOperation || {};
     var mnObject = operation.mnObject || {};
     var object = operation.object || {};
+    var workspaceFocus = state.notebookWorkspace && state.notebookWorkspace.focusObject ? state.notebookWorkspace.focusObject : {};
     var sourceRef = mnObject.sourceRef || object.sourceRef || {};
     return {
-      objectId: String(mnObject.objectId || object.mnObjectId || ''),
-      kind: String(mnObject.kind || object.kind || ''),
-      title: String(mnObject.title || object.title || ''),
-      sourceRef: sourceRef || {}
+      objectId: String(mnObject.objectId || object.mnObjectId || workspaceFocus.objectId || ''),
+      kind: String(mnObject.kind || object.kind || workspaceFocus.kind || ''),
+      title: String(mnObject.title || object.title || workspaceFocus.title || ''),
+      sourceRef: sourceRef || workspaceFocus.sourceRef || {}
     };
   }
 
@@ -2149,6 +2163,136 @@
       buttons[i].setAttribute('aria-selected', active ? 'true' : 'false');
     }
     setText('workspaceNavigatorSummary', workspaceSurfaceSummary(surface));
+  }
+
+  function notebookWorkspaceCardText(label, value, detail) {
+    var text = label + '：' + (value || '等待');
+    if (detail) text += ' / ' + detail;
+    return text;
+  }
+
+  function runNotebookWorkspaceAction(item) {
+    item = item || {};
+    var action = String(item.action || '');
+    var surface = String(item.surface || '');
+    var payload = item.payload || {};
+    if (surface) switchWorkspaceSurface(surface);
+    if (action === 'request_mn_object_registry_scan') {
+      if (state.objectRegistryScanInFlight) return;
+      state.objectRegistryScanInFlight = true;
+      postCompanion('request_mn_object_registry_scan', Object.assign({source: 'notebook-workspace'}, payload), function(result) {
+        state.objectRegistryScanInFlight = false;
+        if (!result || result.ok === false) {
+          addFailureMessage('MN 对象扫描请求失败', result || {});
+          return;
+        }
+        refreshNotebookWorkspace(false);
+        refreshObjectBrowser(false);
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'mn_read_tree') {
+      requestMindmapTreeRead();
+      return;
+    }
+    if (action === 'agent_plan') {
+      refreshAgentPlan(true);
+      return;
+    }
+    if (action === 'review_queue_list') {
+      refreshKnowledgeWorkspace(true);
+      return;
+    }
+    if (action === 'workflow_list') {
+      refreshWorkflowWorkspace(true);
+      return;
+    }
+    if (action === 'operation_ledger_list') {
+      refreshOperationLedger(true, payload);
+      return;
+    }
+    if (action) {
+      postCompanion(action, payload, function(result) {
+        renderControls(result || {});
+        if (!result || result.ok === false) addFailureMessage('Notebook Workspace 动作失败', result || {});
+      }, {showReply: false});
+    }
+  }
+
+  function renderNotebookWorkspace(data) {
+    if (arguments.length) state.notebookWorkspace = data || {};
+    data = state.notebookWorkspace || {};
+    var focus = data.focusObject || {};
+    var objects = data.objects || {};
+    var mindmap = data.mindmap || {};
+    var review = data.reviewQueue || {};
+    var workflows = data.workflows || {};
+    var ledger = data.ledger || {};
+    var readiness = data.readiness || {};
+    var title = data.documentTitle || data.bookmd5 || data.topicid || '当前 notebook 工作台';
+    setText('notebookWorkspaceTitle', clip(title, 84));
+    setText(
+      'notebookWorkspaceSummary',
+      '当前 notebook 的对象、脑图、复习、workflow 和账本总览。' +
+        ' 权限：' + (readiness.permission || '未知') +
+        ' / MN API：' + (readiness.mnApiAvailable ? '可用' : '未确认')
+    );
+    setText('notebookWorkspaceFocus', notebookWorkspaceCardText('焦点', agentObjectLabel(focus.kind), clip(focus.title || focus.objectId || '等待 MNObject', 50)));
+    setText('notebookWorkspaceObjectCount', notebookWorkspaceCardText('对象', objects.total || 0, 'Registry ' + (objects.registry || 0) + ' / 图谱 ' + (objects.graph || 0)));
+    setText('notebookWorkspaceMindmap', notebookWorkspaceCardText('脑图', mindmap.status || 'missing', (mindmap.nodeCount || 0) + ' 节点 ' + (mindmap.rootTitle ? ('/ ' + clip(mindmap.rootTitle, 34)) : '')));
+    setText('notebookWorkspaceReview', notebookWorkspaceCardText('复习', review.total || 0, '到期 ' + (review.due || 0) + ' / 新卡 ' + (review.new || 0)));
+    setText('notebookWorkspaceWorkflow', notebookWorkspaceCardText('工作流', workflows.runCount || 0, workflows.latestStatus || 'none'));
+    setText('notebookWorkspaceLedger', notebookWorkspaceCardText('账本', ledger.total || 0, '证据项'));
+    var target = byId('notebookWorkspaceActions');
+    if (!target) return;
+    var actions = data.primaryActions || [];
+    if (!actions.length) {
+      replaceElementChildren(target, []);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(actions.length, 6); i++) {
+      (function(item) {
+        item = item || {};
+        var button = document.createElement('button');
+        button.className = 'notebook-workspace-action ' + (item.tone || 'secondary');
+        button.type = 'button';
+        button.textContent = item.label || actionLabel(item.action || '');
+        button.title = item.detail || '';
+        button.setAttribute('data-notebook-workspace-action', item.id || item.action || 'action');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runNotebookWorkspaceAction(item);
+        });
+        nodes.push(button);
+      })(actions[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function refreshNotebookWorkspace(manual) {
+    if (state.notebookWorkspaceInFlight) return;
+    state.notebookWorkspaceInFlight = true;
+    postCompanion('notebook_workspace', {}, function(result) {
+      state.notebookWorkspaceInFlight = false;
+      if (!result || result.ok === false) {
+        if (manual) addFailureMessage('刷新 Notebook Workspace 失败', result || {});
+        return;
+      }
+      var workspace = result.notebookWorkspace || {};
+      renderNotebookWorkspace(workspace);
+      if (result.objectBrowser) renderObjectBrowser(result.objectBrowser);
+      if (result.operationLedger) renderOperationLedger(result.operationLedger);
+      if (result.mindmapTreeCache) renderMindmapTreeCacheStatus(result.mindmapTreeCache);
+      if (result.reviewQueue) {
+        renderKnowledgeWorkspace(Object.assign({}, state.knowledgeWorkspace || {}, {
+          reviewQueue: result.reviewQueue,
+          reviewQueueSummary: result.reviewQueue.summary || {},
+          reviewItems: result.reviewQueue.items || []
+        }));
+      }
+      if (result.workflowWorkspace) renderWorkflowWorkspace(result.workflowWorkspace);
+    }, {showReply: false});
   }
 
   function switchWorkspaceSurface(surface) {
@@ -7157,6 +7301,7 @@
     if (result.mindmapDiff) renderMindmapDiffWorkbench(result);
     if (result.mindmapDiffApply) renderMindmapDiffApplyStatus(result.mindmapDiffApply);
     if (result.aiEditTransactionStatus) renderAiEditTransactionCenter(result.aiEditTransactionStatus);
+    if (result.notebookWorkspace) renderNotebookWorkspace(result.notebookWorkspace);
     if (result.knowledgeWorkspace || result.knowledgeIndex || result.knowledgeIndexStatus) {
       renderKnowledgeWorkspace(result.knowledgeWorkspace || result.knowledgeIndex || result.knowledgeIndexStatus);
     }
@@ -8109,6 +8254,9 @@
     bindButton('newConversationButton', newConversation);
     bindButton('conversationHistoryButton', openConversationHistory);
     bindButton('conversationHistoryCloseButton', closeConversationHistory);
+    bindButton('notebookWorkspaceRefreshButton', function() {
+      refreshNotebookWorkspace(true);
+    });
     bindButton('conversationHistoryAllButton', function() {
       state.conversationHistoryScope = 'document';
       refreshConversationHistory();
@@ -8288,6 +8436,7 @@
     renderMindmapStudioPanel();
     renderAiEditTransactionCenter(state.aiEditTransactionStatus);
     renderAgentWorkbench(null);
+    renderNotebookWorkspace(state.notebookWorkspace);
     renderWorkbenchPanels();
     renderObjectBrowser();
     renderOperationLedgerDetail();
@@ -8302,6 +8451,7 @@
     renderDraft(null);
     renderStagedActionLine();
     bridge('context', {});
+    refreshNotebookWorkspace(false);
     window.setTimeout(reportControlsReady, 80);
     refreshSettings();
     startQueuePump();

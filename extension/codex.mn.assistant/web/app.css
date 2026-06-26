@@ -143,6 +143,10 @@ h1 {
   display: none;
 }
 
+.ai-chat-shell[data-product-mode="chat"] #notebookWorkspacePanel {
+  display: none;
+}
+
 .ai-chat-shell[data-product-mode="chat"] .workbench-layout {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -160,6 +164,10 @@ h1 {
 }
 
 .ai-chat-shell[data-product-mode="workspace"] #workspaceNavigator {
+  display: block;
+}
+
+.ai-chat-shell[data-product-mode="workspace"] #notebookWorkspacePanel {
   display: block;
 }
 
@@ -254,6 +262,95 @@ h1 {
 .workspace-surface-focus {
   outline: 2px solid rgba(31, 122, 104, 0.38);
   outline-offset: 2px;
+}
+
+.notebook-workspace-panel {
+  display: none;
+  padding: 9px 12px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #f7faf9;
+}
+
+.notebook-workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.notebook-workspace-kicker {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.notebook-workspace-header h2 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.notebook-workspace-summary {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.notebook-workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(118px, 1fr));
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.notebook-workspace-card {
+  min-height: 44px;
+  border: 1px solid #cfded8;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 7px 8px;
+  overflow-wrap: anywhere;
+}
+
+.notebook-workspace-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.notebook-workspace-action {
+  flex: 0 0 auto;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 5px 8px;
+}
+
+.notebook-workspace-action.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.notebook-workspace-action.secondary {
+  color: var(--ink);
 }
 
 .workbench-tabs {

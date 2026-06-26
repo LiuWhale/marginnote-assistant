@@ -3708,6 +3708,96 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(status["mindmapTreeCache"]["treePreview"][2]["title"], "Motivation")
             self.assertEqual(status["mindmapTreeCache"]["treePreviewCount"], 4)
 
+    def test_notebook_workspace_summarizes_objects_workflows_review_and_mindmap_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            companion.append_event(
+                {
+                    "event": "mindmapTreeReadFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "selectedNoteId": "N-root",
+                        "selectedNoteTitle": "Paper Map",
+                        "currentMindmap": {
+                            "noteId": "N-root",
+                            "title": "Paper Map",
+                            "children": [{"noteId": "N1", "title": "Problem", "children": []}],
+                        },
+                        "nodeCount": 2,
+                    },
+                }
+            )
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                return ("## 概念卡\n解释注意力 mask。", "codex-cli")
+
+            companion.generate_reply = fake_generate_reply
+            generated_cards = companion.generate_card(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "selectionText": "Claim: attention maps can guide VLA safety checks.",
+                }
+            )
+            draft = companion.save_draft(
+                {
+                    "originalAction": "generate_card",
+                    "draft": generated_cards,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+            companion.handle_action(
+                {
+                    "action": "review_queue_add",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draftId": draft["draft"]["id"],
+                }
+            )
+            workflow = companion.handle_action(
+                {
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "把当前选区做成短卡",
+                    "selectionText": "Claim: attention maps can guide VLA safety checks.",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Park et al. 2026",
+                    "selectionText": "Claim: attention maps can guide VLA safety checks.",
+                }
+            )
+
+            self.assertTrue(workspace["ok"], workspace)
+            summary = workspace["notebookWorkspace"]
+            self.assertEqual(summary["schema"], "codex.mn.notebookWorkspace.v1")
+            self.assertEqual(summary["topicid"], "T1")
+            self.assertEqual(summary["bookmd5"], "B1")
+            self.assertEqual(summary["documentTitle"], "Park et al. 2026")
+            self.assertEqual(summary["focusObject"]["kind"], "selection")
+            self.assertEqual(summary["mindmap"]["status"], "available")
+            self.assertEqual(summary["mindmap"]["nodeCount"], 2)
+            self.assertEqual(summary["reviewQueue"]["total"], 1)
+            self.assertEqual(summary["workflows"]["runCount"], 1)
+            self.assertEqual(summary["workflows"]["latestStatus"], workflow["summary"]["status"])
+            self.assertGreaterEqual(summary["objects"]["total"], 1)
+            self.assertGreaterEqual(summary["ledger"]["total"], 1)
+            action_ids = [item["id"] for item in summary["primaryActions"]]
+            self.assertEqual(action_ids[:3], ["scan_mn_objects", "read_mindmap_tree", "plan_next_operation"])
+            self.assertEqual(workspace["objectBrowser"]["schema"], "codex.mn.objectBrowser.v1")
+            self.assertEqual(workspace["reviewQueue"]["schema"], "codex.mn.reviewQueue.v1")
+            self.assertEqual(workspace["workflowWorkspace"]["schema"], "codex.mn.workflowWorkspace.v1")
+            self.assertEqual(workspace["mindmapTreeCache"]["schema"], "codex.mn.mindmapTreeCache.v1")
+
     def test_agent_plan_combines_current_object_workflow_and_write_gate_without_queueing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

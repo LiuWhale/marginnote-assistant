@@ -72,6 +72,26 @@
       </div>
     </section>
 
+    <section id="notebookWorkspacePanel" class="notebook-workspace-panel" aria-label="Notebook Workspace">
+      <div class="notebook-workspace-header">
+        <div>
+          <div class="notebook-workspace-kicker">Notebook Workspace</div>
+          <h2 id="notebookWorkspaceTitle">当前 notebook 工作台</h2>
+          <div id="notebookWorkspaceSummary" class="notebook-workspace-summary">当前 notebook 的对象、脑图、复习、workflow 和账本总览。</div>
+        </div>
+        <button id="notebookWorkspaceRefreshButton" class="small-button notebook-workspace-refresh" type="button">刷新</button>
+      </div>
+      <div class="notebook-workspace-grid">
+        <div id="notebookWorkspaceFocus" class="notebook-workspace-card">焦点：等待 MNObject</div>
+        <div id="notebookWorkspaceObjectCount" class="notebook-workspace-card">对象：等待扫描</div>
+        <div id="notebookWorkspaceMindmap" class="notebook-workspace-card">脑图：未读取</div>
+        <div id="notebookWorkspaceReview" class="notebook-workspace-card">复习：等待卡片</div>
+        <div id="notebookWorkspaceWorkflow" class="notebook-workspace-card">工作流：等待运行</div>
+        <div id="notebookWorkspaceLedger" class="notebook-workspace-card">账本：等待证据</div>
+      </div>
+      <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
+    </section>
+
     <section id="workbenchTabs" class="workbench-tabs" role="tablist" aria-label="工作台">
       <button id="workbenchTabObject" class="workbench-tab active" data-workbench-pane="object" type="button">对象</button>
       <button id="workbenchTabDialog" class="workbench-tab" data-workbench-pane="dialog" type="button">对话</button>

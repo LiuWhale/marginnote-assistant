@@ -23,7 +23,7 @@ DB_PATH = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Priva
 ONEDRIVE_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 MN4_APP = Path("/Applications/MarginNote 4.app")
 EVENTS_PATH = ROOT / "events.jsonl"
-CURRENT_PLUGIN_VERSION = "0.4.30"
+CURRENT_PLUGIN_VERSION = "0.4.31"
 REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-arm-next-selection-default",
     "native-highlight-prefer-next-selection-v1",
@@ -41,7 +41,7 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-mindmap-diff-apply-create-v1",
     "native-mindmap-delete-suggestion-confirm-v1",
 ]
-CURRENT_RC_VERSION = "0.4.30"
+CURRENT_RC_VERSION = "0.4.31"
 PREFERRED_LAUNCH_LABEL = "com.codex.paper-companion"
 LEGACY_LAUNCH_LABEL = "com.liuwhale.codex-marginnote-assistant"
 LATEST_PACKAGE = ROOT / f"release/CodexCompanion-{CURRENT_RC_VERSION}-latest-dist.zip"
@@ -69,6 +69,17 @@ REQUIRED_WEB_CONTROL_IDS = [
     "workspaceNavKnowledgeGraphButton",
     "workspaceNavWorkflowBuilderButton",
     "workspaceNavSkillCenterButton",
+    "notebookWorkspacePanel",
+    "notebookWorkspaceTitle",
+    "notebookWorkspaceSummary",
+    "notebookWorkspaceRefreshButton",
+    "notebookWorkspaceFocus",
+    "notebookWorkspaceObjectCount",
+    "notebookWorkspaceMindmap",
+    "notebookWorkspaceReview",
+    "notebookWorkspaceWorkflow",
+    "notebookWorkspaceLedger",
+    "notebookWorkspaceActions",
     "workbenchTabs",
     "workbenchTabObject",
     "workbenchTabDialog",

@@ -4,6 +4,12 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.31 - 2026-06-27
+
+### Added
+
+- Added the first Notebook Workspace summary surface. The Companion exposes `notebook_workspace` with `codex.mn.notebookWorkspace.v1`, aggregating the current focus object, Object Browser counts, mind-map tree cache, review queue, workflow runs, and Operation Ledger counts into one workspace payload. The WebView now renders this as a first-screen Agent Workspace overview with direct actions for MN object scanning, mind-map tree reading, operation planning, review queue, workflows, and ledger inspection.
+
 ## 0.4.30 - 2026-06-27
 
 ### Changed

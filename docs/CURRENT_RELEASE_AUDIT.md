@@ -6,19 +6,58 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.30 公开预览版
-- MN4 插件 manifest：0.4.30
-- Companion：0.4.30
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.30`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.30-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.30-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.30-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.30-latest.mnaddon`
+- 当前发布候选：0.4.31 公开预览版
+- MN4 插件 manifest：0.4.31
+- Companion：0.4.31
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.31`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.31-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.31-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.31-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.31-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.30-latest.pkg`，已生成但未签名、未公证
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.31-latest.pkg`，已生成但未签名、未公证
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.31 发布候选：Notebook Workspace 首屏总览
+
+本轮把 0.4.30 之后的开发态归档为 0.4.31 公开预览候选。这个版本继续把产品入口从“聊天框加按钮”推向 notebook/object-first 工作台，但仍不宣称完成最终 v3.0 Knowledge OS。
+
+主要变化包括：
+
+- 新增 `notebook_workspace` 后端动作，返回 `codex.mn.notebookWorkspace.v1`，聚合当前焦点 `MNObject`、Object Browser 计数、当前脑图树缓存、复习队列、workflow run 和 Operation Ledger 计数。
+- WebView 在 Workspace Navigator 下方新增 `Notebook Workspace` 总览，显示焦点、对象、脑图、复习、工作流和账本状态。
+- 总览动作可直接触发 MN 对象扫描、读取当前脑图树、生成操作计划、查看复习队列、workflow 和账本证据；这些动作复用现有确认/队列/ledger 机制，不绕过写入确认。
+- `doctor.py`、Web 静态检查和单文档验收 required controls 已加入 Notebook Workspace 控件，运行态缺失会被 gate 发现。
+
+本轮本地验证结果：
+
+```text
+python3 -m unittest tests.test_companion_controls tests.test_web_controls_static tests.test_doctor_checks tests.test_single_document_acceptance tests.test_release_docs
+277 tests passed
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 -m py_compile companion.py doctor.py release_acceptance.py single_document_acceptance.py
+PASS
+
+git diff --check
+PASS
+```
+
+本轮 artifact：
+
+- `CodexCompanion-0.4.31-latest-dist.zip`
+- `CodexCompanion-0.4.31-latest.mnaddon`
+- `CodexCompanion-0.4.31-latest.pkg`
+- 精确 sha256 不写死在包内文档里；以 release 目录、OneDrive 镜像和 GitHub Release asset 旁边的外部 `SHA256SUMS.txt` 为准。
+
+本机将替换到 0.4.31：MN4 扩展目录 `mnaddon.json` 应为 `0.4.31`，`main.js` 应为 `PluginVersion = '0.4.31'`，Companion `/status.pluginVersion` 应为 `0.4.31`。MN4 运行态仍需重新打开面板或重启 MN4 后才会上报 `pluginVersion=0.4.31` 的 `webControlsReady` 和 `nativeApiCapabilities`。
+
+当前 release acceptance 剩余阻塞仍预计包括：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。这些是最终 v1.0/正式发布证据，不阻止 0.4.31 作为公开预览版发布。
 
 ### 2026-06-27 v0.4.30 发布候选：运行态 handler gate 收紧
 

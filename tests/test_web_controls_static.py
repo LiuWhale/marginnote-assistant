@@ -33,6 +33,17 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="workspaceNavKnowledgeGraphButton"',
             'id="workspaceNavWorkflowBuilderButton"',
             'id="workspaceNavSkillCenterButton"',
+            'id="notebookWorkspacePanel"',
+            'id="notebookWorkspaceTitle"',
+            'id="notebookWorkspaceSummary"',
+            'id="notebookWorkspaceRefreshButton"',
+            'id="notebookWorkspaceFocus"',
+            'id="notebookWorkspaceObjectCount"',
+            'id="notebookWorkspaceMindmap"',
+            'id="notebookWorkspaceReview"',
+            'id="notebookWorkspaceWorkflow"',
+            'id="notebookWorkspaceLedger"',
+            'id="notebookWorkspaceActions"',
             'id="workbenchTabs"',
             'id="workbenchTabObject"',
             'id="workbenchTabDialog"',
@@ -152,6 +163,13 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("function renderProductMode", self.js)
         self.assertIn("function switchWorkspaceSurface", self.js)
         self.assertIn("function renderWorkspaceNavigator", self.js)
+        self.assertIn("function refreshNotebookWorkspace", self.js)
+        self.assertIn("function renderNotebookWorkspace", self.js)
+        self.assertIn("function runNotebookWorkspaceAction", self.js)
+        self.assertIn("state.notebookWorkspace", self.js)
+        self.assertIn("postCompanion('notebook_workspace'", self.js)
+        self.assertIn("notebookWorkspaceRefreshButton", self.js)
+        self.assertIn("data-notebook-workspace-action", self.js)
         self.assertIn("data-product-mode", self.js)
         self.assertIn("data-workspace-surface", self.js)
         self.assertIn("modeSwitchBar", self.js)
@@ -169,6 +187,9 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".workspace-navigator", self.css)
         self.assertIn(".workspace-nav-card", self.css)
         self.assertIn(".workspace-nav-card.active", self.css)
+        self.assertIn(".notebook-workspace-panel", self.css)
+        self.assertIn(".notebook-workspace-card", self.css)
+        self.assertIn(".notebook-workspace-action", self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workbenchTabs', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] .workbench-panel', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workspaceNavigator', self.css)
@@ -180,6 +201,8 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("pane = 'object'", self.js)
         self.assertNotIn("activeWorkbenchPane: 'dialog'", self.js)
         self.assertIn("对象、关系、活动、账本", self.html)
+        self.assertIn("Notebook Workspace", self.html)
+        self.assertIn("当前 notebook 的对象、脑图、复习、workflow 和账本总览", self.html)
         self.assertIn("function renderWorkbenchPanels", self.js)
         self.assertIn("function renderObjectWorkspaceMnObject", self.js)
         self.assertIn("function renderObjectRiskPanel", self.js)

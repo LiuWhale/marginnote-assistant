@@ -89,7 +89,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.30"
+CURRENT_PLUGIN_VERSION = "0.4.31"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -218,6 +218,7 @@ READ_ONLY_ACTIONS = {
     "mn_object_registry",
     "request_mn_object_registry_scan",
     "request_mn_object_existence_probe",
+    "notebook_workspace",
     "object_browser",
     "object_graph",
     "object_graph_relation_save",
@@ -1576,6 +1577,213 @@ def workflow_list(payload: dict[str, Any]) -> dict[str, Any]:
         "runCount": len(runs),
         "latestStatus": str(runs[0].get("status") or "none") if runs else "none",
         "workflowTemplates": workflow_engine.list_workflow_templates(),
+    }
+
+
+def notebook_workspace_action(
+    action_id: str,
+    label: str,
+    action: str,
+    payload: dict[str, Any],
+    surface: str,
+    detail: str,
+    tone: str = "primary",
+) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.notebookWorkspaceAction.v1",
+        "id": action_id,
+        "label": label,
+        "action": action,
+        "payload": payload,
+        "surface": surface,
+        "detail": detail,
+        "tone": tone,
+    }
+
+
+def notebook_workspace_primary_actions(
+    payload: dict[str, Any],
+    object_ref: dict[str, Any],
+    *,
+    mindmap_ready: bool,
+    review_total: int,
+    workflow_count: int,
+    ledger_total: int,
+) -> list[dict[str, Any]]:
+    object_payload = {
+        "mnObject": object_ref if object_ref_has_identity(object_ref) else {},
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "topicid": normalize_topic_id(payload),
+        "bookmd5": normalize_book_md5(payload),
+    }
+    actions = [
+        notebook_workspace_action(
+            "scan_mn_objects",
+            "扫描 MN 对象",
+            "request_mn_object_registry_scan",
+            object_payload,
+            "console",
+            "请求 MarginNote 原生侧扫描当前 notebook 可见对象，更新 Object Browser。",
+        ),
+        notebook_workspace_action(
+            "read_mindmap_tree",
+            "读取当前脑图",
+            "mn_read_tree",
+            object_payload,
+            "mindmap_studio",
+            "读取当前选中脑图树，作为 Diff 和重组的真实基线。",
+            "primary" if not mindmap_ready else "secondary",
+        ),
+        notebook_workspace_action(
+            "plan_next_operation",
+            "生成操作计划",
+            "agent_plan",
+            object_payload,
+            "mindmap_studio",
+            "把当前对象和用户意图编译成带 dry-run、确认点和验证义务的操作计划。",
+        ),
+        notebook_workspace_action(
+            "open_review_queue",
+            f"查看复习队列 {review_total}",
+            "review_queue_list",
+            object_payload,
+            "card_factory",
+            "查看当前对象的 Card Factory 复习卡。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "open_workflows",
+            f"查看工作流 {workflow_count}",
+            "workflow_list",
+            object_payload,
+            "workflow_builder",
+            "查看当前对象的 workflow run、模板和确认点。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "open_operation_ledger",
+            f"查看账本 {ledger_total}",
+            "operation_ledger_list",
+            object_payload,
+            "ledger_explorer",
+            "查看当前对象的操作证据、事务、回滚和残留记录。",
+            "secondary",
+        ),
+    ]
+    return actions
+
+
+def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    mn_object = agent_workbench.build_mn_object(payload)
+    object_ref = object_ref_from_mapping({"mnObject": mn_object})
+    if not object_ref_has_identity(object_ref):
+        object_ref = {
+            "objectId": str(mn_object.get("objectId") or ""),
+            "kind": str(mn_object.get("kind") or ""),
+            "title": str(mn_object.get("title") or ""),
+            "sourceRef": mn_object.get("sourceRef") if isinstance(mn_object.get("sourceRef"), dict) else {},
+        }
+    scoped_payload = {
+        **payload,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "mnObject": object_ref,
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "limit": int(payload.get("limit") or 12),
+    }
+    document_payload = {
+        **payload,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "mnObject": {},
+        "mnObjectId": "",
+        "objectId": "",
+        "limit": int(payload.get("limit") or 12),
+    }
+    object_browser_payload = object_browser(scoped_payload)
+    ledger_payload = operation_ledger_list(document_payload)
+    review_payload = review_queue_list(document_payload)
+    workflow_payload = workflow_list(document_payload)
+    workflow_payload = {"schema": "codex.mn.workflowWorkspace.v1", **workflow_payload}
+    mindmap_cache = latest_mindmap_tree_cache_status(topic_id, book_md5)
+    review_summary = review_payload.get("summary") if isinstance(review_payload.get("summary"), dict) else {}
+    workflow_runs = workflow_payload.get("workflowRuns") if isinstance(workflow_payload.get("workflowRuns"), list) else []
+    object_counts = object_browser_payload.get("counts") if isinstance(object_browser_payload.get("counts"), dict) else {}
+    ledger_counts = ledger_payload.get("counts") if isinstance(ledger_payload.get("counts"), dict) else {}
+    review_total = int(review_summary.get("totalCount") or len(review_payload.get("items") if isinstance(review_payload.get("items"), list) else []))
+    workflow_count = int(workflow_payload.get("runCount") or len(workflow_runs))
+    ledger_total = int(ledger_counts.get("total") or 0)
+    mindmap_ready = bool(mindmap_cache.get("available"))
+    settings = runtime_settings()
+    mn_api = mn_api_status_fields(settings).get("mnApi", {})
+    document_title = str(
+        payload.get("documentTitle")
+        or payload.get("bookTitle")
+        or (object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {}).get("documentTitle")
+        or ""
+    )
+    summary = {
+        "schema": "codex.mn.notebookWorkspace.v1",
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "documentTitle": document_title,
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "focusObject": object_ref if object_ref_has_identity(object_ref) else {},
+        "objects": {
+            "status": "ready" if object_browser_payload.get("ok") else "blocked",
+            "total": int(object_counts.get("total") or 0),
+            "registry": int(object_counts.get("registry") or 0),
+            "graph": int(object_counts.get("object_graph") or 0),
+            "activity": int(object_counts.get("object_activity") or 0),
+            "ledger": int(object_counts.get("operation_ledger") or 0),
+        },
+        "mindmap": {
+            "status": "available" if mindmap_ready else "missing",
+            "nodeCount": int(mindmap_cache.get("nodeCount") or 0),
+            "rootTitle": str(mindmap_cache.get("rootTitle") or mindmap_cache.get("selectedNoteTitle") or ""),
+            "updatedAt": str(mindmap_cache.get("updatedAt") or ""),
+        },
+        "reviewQueue": {
+            "total": review_total,
+            "due": int(review_summary.get("dueCount") or 0),
+            "new": int(review_summary.get("newCount") or 0),
+        },
+        "workflows": {
+            "runCount": workflow_count,
+            "latestStatus": str(workflow_payload.get("latestStatus") or "none"),
+            "templateCount": len(workflow_payload.get("workflowTemplates") if isinstance(workflow_payload.get("workflowTemplates"), list) else []),
+        },
+        "ledger": {
+            "total": ledger_total,
+            "filteredTotal": int(ledger_counts.get("filteredTotal") or ledger_total),
+            "unfilteredTotal": int(ledger_counts.get("unfilteredTotal") or ledger_total),
+        },
+        "readiness": {
+            "permission": str(settings.get("permission") or ""),
+            "mnApiAvailable": bool(mn_api.get("available")),
+            "mnApiBackend": str(mn_api.get("backend") or ""),
+            "nativeAvailable": bool(mn_api.get("nativeAvailable")),
+        },
+    }
+    summary["primaryActions"] = notebook_workspace_primary_actions(
+        payload,
+        object_ref,
+        mindmap_ready=mindmap_ready,
+        review_total=review_total,
+        workflow_count=workflow_count,
+        ledger_total=ledger_total,
+    )
+    return {
+        "ok": True,
+        "message": "已读取 Notebook Workspace。",
+        "notebookWorkspace": summary,
+        "objectBrowser": object_browser_payload,
+        "operationLedger": ledger_payload,
+        "reviewQueue": review_payload.get("reviewQueue") if isinstance(review_payload.get("reviewQueue"), dict) else {},
+        "workflowWorkspace": workflow_payload,
+        "mindmapTreeCache": mindmap_cache,
     }
 
 
@@ -4150,7 +4358,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.30-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.31-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -10986,6 +11194,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             },
             **mn_api_status_fields(runtime_settings()),
         }
+    if action == "notebook_workspace":
+        return notebook_workspace(payload)
     if action == "agent_plan":
         return agent_plan(payload)
     if action == "operation_plan_preview":
