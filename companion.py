@@ -89,7 +89,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.34"
+CURRENT_PLUGIN_VERSION = "0.4.35"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1733,6 +1733,38 @@ def notebook_runbook_continue_action(step: dict[str, Any] | None) -> dict[str, A
     }
 
 
+def notebook_runbook_auto_plan(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    safe_step_ids = ["scan_objects", "mindmap_baseline", "operation_plan"]
+    actions: list[dict[str, Any]] = []
+    blocked: list[dict[str, str]] = []
+    by_id = {str(step.get("id") or ""): step for step in steps if isinstance(step, dict)}
+    for step_id in safe_step_ids:
+        step = by_id.get(step_id) if isinstance(by_id.get(step_id), dict) else {}
+        if not step:
+            continue
+        status = str(step.get("status") or "")
+        action = notebook_runbook_continue_action(step)
+        if status == "action_required" and action.get("action"):
+            actions.append({**action, "order": len(actions) + 1})
+        elif status == "blocked":
+            blocked.append(
+                {
+                    "stepId": step_id,
+                    "stepTitle": str(step.get("title") or ""),
+                    "detail": str(step.get("detail") or ""),
+                }
+            )
+    return {
+        "schema": "codex.mn.notebookRunbookAutoPlan.v1",
+        "mode": "safe_preflight",
+        "label": "自动准备工作台",
+        "canRun": bool(actions),
+        "actions": actions,
+        "blocked": blocked,
+        "detail": "顺序执行安全预检动作：扫描 MN 对象、读取脑图基线、生成操作计划；不直接写入 MarginNote。",
+    }
+
+
 def notebook_workspace_runbook(
     summary: dict[str, Any],
     primary_actions: list[dict[str, Any]],
@@ -1824,6 +1856,7 @@ def notebook_workspace_runbook(
         "steps": steps,
         "nextStep": next_step if isinstance(next_step, dict) else {},
         "continueAction": notebook_runbook_continue_action(next_step),
+        "autoPlan": notebook_runbook_auto_plan(steps),
     }
 
 
@@ -4518,7 +4551,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.34-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.35-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )

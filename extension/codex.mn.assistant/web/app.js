@@ -2176,52 +2176,66 @@
     return text;
   }
 
-  function runNotebookWorkspaceAction(item) {
+  function runNotebookWorkspaceAction(item, done) {
     item = item || {};
+    done = typeof done === 'function' ? done : function() {};
     var action = String(item.action || '');
     var surface = String(item.surface || '');
     var payload = item.payload || {};
     if (surface) switchWorkspaceSurface(surface);
     if (action === 'request_mn_object_registry_scan') {
-      if (state.objectRegistryScanInFlight) return;
+      if (state.objectRegistryScanInFlight) {
+        done({ok: false, skipped: true, reason: 'object-registry-scan-in-flight'});
+        return;
+      }
       state.objectRegistryScanInFlight = true;
       postCompanion('request_mn_object_registry_scan', Object.assign({source: 'notebook-workspace'}, payload), function(result) {
         state.objectRegistryScanInFlight = false;
         if (!result || result.ok === false) {
           addFailureMessage('MN 对象扫描请求失败', result || {});
+          done(result || {ok: false});
           return;
         }
         refreshNotebookWorkspace(false);
         refreshObjectBrowser(false);
+        done(result);
       }, {showReply: false});
       return;
     }
     if (action === 'mn_read_tree') {
       requestMindmapTreeRead();
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 900);
       return;
     }
     if (action === 'agent_plan') {
       refreshAgentPlan(true);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 900);
       return;
     }
     if (action === 'review_queue_list') {
       refreshKnowledgeWorkspace(true);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
       return;
     }
     if (action === 'workflow_list') {
       refreshWorkflowWorkspace(true);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
       return;
     }
     if (action === 'operation_ledger_list') {
       refreshOperationLedger(true, payload);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
       return;
     }
     if (action) {
       postCompanion(action, payload, function(result) {
         renderControls(result || {});
         if (!result || result.ok === false) addFailureMessage('Notebook Workspace 动作失败', result || {});
+        done(result || {});
       }, {showReply: false});
+      return;
     }
+    done({ok: false, reason: 'missing-action'});
   }
 
   function notebookRunbookStatusLabel(status) {
@@ -2243,11 +2257,38 @@
     runNotebookWorkspaceAction(action);
   }
 
+  function runNotebookWorkspaceAutoActionSequence(actions, index) {
+    actions = actions || [];
+    index = index || 0;
+    if (index >= actions.length) {
+      refreshNotebookWorkspace(false);
+      return;
+    }
+    runNotebookWorkspaceAction(actions[index], function() {
+      window.setTimeout(function() {
+        runNotebookWorkspaceAutoActionSequence(actions, index + 1);
+      }, 250);
+    });
+  }
+
+  function runNotebookWorkspaceAutoPlan() {
+    var runbook = state.notebookWorkspace && state.notebookWorkspace.runbook ? state.notebookWorkspace.runbook : {};
+    var plan = runbook.autoPlan || {};
+    var actions = plan.actions || [];
+    if (!plan.canRun || !actions.length) {
+      addFailureMessage('Notebook Runbook 暂无可自动准备步骤', {ok: false, message: '当前 runbook 没有可自动执行的安全预检动作。'});
+      return;
+    }
+    addMessage('assistant', 'Notebook Runbook 将自动准备 ' + actions.length + ' 个安全预检步骤，不会直接写入 MarginNote。');
+    runNotebookWorkspaceAutoActionSequence(actions, 0);
+  }
+
   function renderNotebookWorkspaceRunbook(runbook) {
     runbook = runbook || {};
     var panel = byId('notebookWorkspaceRunbook');
     var summaryNode = byId('notebookWorkspaceRunbookSummary');
     var list = byId('notebookWorkspaceRunbookList');
+    var autoButton = byId('notebookWorkspaceRunbookAutoButton');
     var continueButton = byId('notebookWorkspaceRunbookContinueButton');
     if (!panel || !summaryNode || !list) return;
     var counts = runbook.summary || {};
@@ -2261,6 +2302,20 @@
         ' / 阻断 ' + (counts.blocked || 0) +
         ' / 等待 ' + (counts.pending || 0)
     );
+    var autoPlan = runbook.autoPlan || {};
+    if (autoButton) {
+      if (autoPlan.canRun && autoPlan.actions && autoPlan.actions.length) {
+        autoButton.classList.remove('hidden');
+        autoButton.disabled = false;
+        autoButton.textContent = autoPlan.label || '自动准备';
+        autoButton.title = autoPlan.detail || '';
+      } else {
+        autoButton.classList.add('hidden');
+        autoButton.disabled = true;
+        autoButton.textContent = '自动准备';
+        autoButton.title = '';
+      }
+    }
     var continueAction = runbook.continueAction || {};
     if (continueButton) {
       if (continueAction && continueAction.action) {
@@ -8386,6 +8441,7 @@
     bindButton('notebookWorkspaceRefreshButton', function() {
       refreshNotebookWorkspace(true);
     });
+    bindButton('notebookWorkspaceRunbookAutoButton', runNotebookWorkspaceAutoPlan);
     bindButton('notebookWorkspaceRunbookContinueButton', runNotebookWorkspaceContinue);
     bindButton('conversationHistoryAllButton', function() {
       state.conversationHistoryScope = 'document';

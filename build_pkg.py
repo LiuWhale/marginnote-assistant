@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_VERSION = "0.4.34"
+DEFAULT_VERSION = "0.4.35"
 DEFAULT_ZIP = ROOT / f"release/CodexCompanion-{DEFAULT_VERSION}-latest-dist.zip"
 DEFAULT_OUTPUT = ROOT / f"release/CodexCompanion-{DEFAULT_VERSION}-latest.pkg"
 ONEDRIVE_DIR = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion"

@@ -4,6 +4,13 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.35 - 2026-06-27
+
+### Added
+
+- Added `autoPlan` to `codex.mn.notebookRunbook.v1` with schema `codex.mn.notebookRunbookAutoPlan.v1`. The plan groups safe preflight actions such as native MN object scanning, mind-map baseline reading, and operation planning without performing writes.
+- Added the visible `notebookWorkspaceRunbookAutoButton` in Notebook Workspace. It runs the safe preflight plan sequentially through existing workspace actions and keeps write operations behind the existing Diff, confirmation, and ledger gates.
+
 ## 0.4.34 - 2026-06-27
 
 ### Added

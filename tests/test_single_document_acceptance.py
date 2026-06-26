@@ -41,6 +41,7 @@ CURRENT_WEB_CONTROLS = ",".join(
         "notebookWorkspaceActions",
         "notebookWorkspaceRunbook",
         "notebookWorkspaceRunbookSummary",
+        "notebookWorkspaceRunbookAutoButton",
         "notebookWorkspaceRunbookContinueButton",
         "notebookWorkspaceRunbookList",
         "commandPanePanel",

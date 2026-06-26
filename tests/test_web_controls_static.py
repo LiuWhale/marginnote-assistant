@@ -46,6 +46,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="notebookWorkspaceActions"',
             'id="notebookWorkspaceRunbook"',
             'id="notebookWorkspaceRunbookSummary"',
+            'id="notebookWorkspaceRunbookAutoButton"',
             'id="notebookWorkspaceRunbookContinueButton"',
             'id="notebookWorkspaceRunbookList"',
             'id="commandPanePanel"',
@@ -184,6 +185,9 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("renderNotebookWorkspaceRunbook", self.js)
         self.assertIn("data-notebook-runbook-step", self.js)
         self.assertIn("data.runbook", self.js)
+        self.assertIn("runNotebookWorkspaceAutoPlan", self.js)
+        self.assertIn("notebookWorkspaceRunbookAutoButton", self.js)
+        self.assertIn("runbook.autoPlan", self.js)
         self.assertIn("runNotebookWorkspaceContinue", self.js)
         self.assertIn("notebookWorkspaceRunbookContinueButton", self.js)
         self.assertIn("runbook.continueAction", self.js)

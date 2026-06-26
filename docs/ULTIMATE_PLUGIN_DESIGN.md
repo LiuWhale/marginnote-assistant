@@ -29,7 +29,7 @@ v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
 
 0.4.x 已经开始执行这个迁移：聊天流不再是 Agent Workspace 里的同级工作台 tab，而是独立 `Command Pane`。Workspace 模式默认收起对话历史，只保留输入和发送入口；Chat Mode 才展开完整对话。这一步能让用户第一眼看到 notebook/object 工作台，而不是看到一个更复杂的聊天页。但它仍只是信息架构迁移的开始，不等于完整 v3.0。
 
-0.4.34 继续把 `Notebook Workspace` 从“总览层”推进到“可执行入口”：`Notebook Runbook` 不只显示上下文、MN 原生对象扫描、脑图基线、操作计划、workflow runtime 和账本证据，还会暴露 `继续下一步`，由后端根据真实缺口选择第一个 `action_required` 步骤执行。对象扫描是否完成现在看 `native_object_scan` 证据，而不是把脑图缓存导入的 Registry 对象误当成原生扫描。它仍不是终局 Knowledge OS，因为它还不能像 Finder 一样实时浏览整个 notebook，也不能完整原地编辑和证明所有真实 MN 对象；但它建立了终局需要的用户路径：先看 notebook 状态和缺口，再由 runbook 带着用户进入对象、脑图、工作流和账本，而不是先问一句话再找回答下方按钮。
+0.4.35 继续把 `Notebook Workspace` 从“单步执行入口”推进到“安全预检入口”：`Notebook Runbook` 不只显示上下文、MN 原生对象扫描、脑图基线、操作计划、workflow runtime 和账本证据，还会暴露 `继续下一步` 与 `自动准备`。后端根据真实缺口生成 `nextStep` 和 `autoPlan`；`autoPlan` 只顺序执行扫描 MN 对象、读取脑图基线、生成操作计划这类安全预检动作，不直接写入 MarginNote。对象扫描是否完成仍看 `native_object_scan` 证据，而不是把脑图缓存导入的 Registry 对象误当成原生扫描。它仍不是终局 Knowledge OS，因为它还不能像 Finder 一样实时浏览整个 notebook，也不能完整原地编辑和证明所有真实 MN 对象；但它建立了终局需要的用户路径：先看 notebook 状态和缺口，再由 runbook 带着用户进入对象、脑图、工作流和账本，而不是先问一句话再找回答下方按钮。
 
 ### 0.1 终局选择：B + C，而不是 A
 
