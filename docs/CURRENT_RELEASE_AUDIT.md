@@ -6,19 +6,65 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.31 公开预览版
-- MN4 插件 manifest：0.4.31
-- Companion：0.4.31
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.31`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.31-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.31-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.31-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.31-latest.mnaddon`
+- 当前发布候选：0.4.32 公开预览版
+- MN4 插件 manifest：0.4.32
+- Companion：0.4.32
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.32`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.32-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.32-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.32-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.32-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.31-latest.pkg`，已生成但未签名、未公证
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.32-latest.pkg`，已生成但未签名、未公证
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.32 发布候选：Command Pane 降级聊天中心
+
+本轮把 0.4.31 的 Notebook Workspace 继续向“工作台优先”推进。对话流不再作为 Agent Workspace 的同级 tab；它被移到独立 `Command Pane`。Workspace 模式保留输入框和发送按钮，但默认收起对话历史，让 Notebook Workspace、对象、操作、知识和工作流区域成为第一视觉中心。Chat Mode 仍展开完整对话，用于快速阅读问答。
+
+主要变化包括：
+
+- WebView 新增 `commandPanePanel/commandPaneHeader/commandPaneStatus/commandPaneToggleButton/commandPaneBody/commandPaneComposer` 运行态必需控件。
+- 删除 Workspace tab 中的 `workbenchTabDialog` / `dialogWorkspacePanel` 依赖；写入类动作仍经 Operation Compiler、Diff、确认和 Operation Ledger。
+- 预设或自定义按钮填入 prompt 时不再强制切回 Chat Mode，而是在 Command Pane 输入区等待用户确认发送。
+- `doctor.py`、Web 静态检查和单文档验收 required controls 已更新到 Command Pane 结构。
+
+本轮本地验证结果：
+
+```text
+python3 -m unittest discover -s tests
+502 tests passed
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 -m py_compile companion.py doctor.py release_acceptance.py release_smoke_test.py package_release.py build_pkg.py single_document_acceptance.py prepare_release_handoff.py refresh_mn_runtime.py
+PASS
+
+git diff --check
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.32-latest-dist.zip --mnaddon release/CodexCompanion-0.4.32-latest.mnaddon
+PASS, zip sha256=870d5678da8f47cd2e654483c84c53fa42819d570acf00d9f1b4b5f66827b85d, mnaddon sha256=0a9a122ca3fbb56bbe58ec38e194f897be43e926cf3fb0cac96d45f581dbc300
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.32-latest-dist.zip --mnaddon release/CodexCompanion-0.4.32-latest.mnaddon --install-dry-run
+PASS
+
+python3 build_pkg.py release/CodexCompanion-0.4.32-latest-dist.zip --json
+PASS, generated release/CodexCompanion-0.4.32-latest.pkg
+```
+
+本轮 artifact：
+
+- `CodexCompanion-0.4.32-latest-dist.zip`
+- `CodexCompanion-0.4.32-latest.mnaddon`
+- `CodexCompanion-0.4.32-latest.pkg`
+- `SHA256SUMS.txt`
+
+当前 release acceptance 剩余阻塞为：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。其中前两项需要 MN4 重新打开面板或重启后上报 `pluginVersion=0.4.32` 的 WebView/native 事件；其余仍是最终 v1.0/正式发布门槛，不阻止 0.4.32 作为公开预览版发布。
 
 ### 2026-06-27 v0.4.31 发布候选：Notebook Workspace 首屏总览
 

@@ -4,6 +4,12 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.32 - 2026-06-27
+
+### Changed
+
+- Moved the chat stream out of the Agent Workspace tab set into a dedicated `Command Pane`. In Workspace mode the command pane keeps the prompt and send button available but collapses the conversation history by default, so `Notebook Workspace`, object, operation, knowledge, and workflow surfaces become the primary working area. `Chat Mode` still opens the full conversation for lightweight reading Q&A.
+
 ## 0.4.31 - 2026-06-27
 
 ### Added

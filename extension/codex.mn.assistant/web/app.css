@@ -147,16 +147,26 @@ h1 {
   display: none;
 }
 
-.ai-chat-shell[data-product-mode="chat"] .workbench-layout {
-  grid-template-columns: minmax(0, 1fr);
+.ai-chat-shell[data-product-mode="chat"] #workbenchLayout {
+  display: none;
 }
 
 .ai-chat-shell[data-product-mode="chat"] .workbench-panel {
   display: none;
 }
 
-.ai-chat-shell[data-product-mode="chat"] #dialogWorkspacePanel {
+.ai-chat-shell[data-product-mode="chat"] #commandPanePanel {
+  flex: 1;
+  min-height: 0;
+  border-bottom: 0;
+}
+
+.ai-chat-shell[data-product-mode="chat"] #commandPaneBody {
   display: flex;
+}
+
+.ai-chat-shell[data-product-mode="chat"] #commandPaneToggleButton {
+  display: none;
 }
 
 .ai-chat-shell[data-product-mode="workspace"] #workbenchTabs {
@@ -171,6 +181,19 @@ h1 {
   display: block;
 }
 
+.ai-chat-shell[data-product-mode="workspace"] #commandPanePanel {
+  display: block;
+}
+
+.ai-chat-shell[data-product-mode="workspace"][data-command-pane-expanded="false"] #commandPaneBody {
+  display: none;
+}
+
+.ai-chat-shell[data-product-mode="workspace"][data-command-pane-expanded="true"] #commandPaneBody {
+  display: flex;
+  max-height: 220px;
+}
+
 .ai-chat-shell[data-product-mode="workspace"] .workbench-layout {
   grid-template-columns:
     minmax(170px, 0.95fr)
@@ -179,9 +202,54 @@ h1 {
     minmax(200px, 1fr);
 }
 
-.ai-chat-shell[data-product-mode="workspace"] #workbenchTabDialog,
-.ai-chat-shell[data-product-mode="workspace"] #dialogWorkspacePanel {
-  display: none;
+.command-pane-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.command-pane-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 7px;
+}
+
+.command-pane-kicker {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.command-pane-status {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.command-pane-toggle {
+  min-height: 28px;
+  white-space: nowrap;
+}
+
+.command-pane-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 7px;
+}
+
+.command-pane-composer {
+  min-height: 0;
 }
 
 .workspace-navigator {

@@ -44,15 +44,19 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="notebookWorkspaceWorkflow"',
             'id="notebookWorkspaceLedger"',
             'id="notebookWorkspaceActions"',
+            'id="commandPanePanel"',
+            'id="commandPaneHeader"',
+            'id="commandPaneStatus"',
+            'id="commandPaneToggleButton"',
+            'id="commandPaneBody"',
+            'id="commandPaneComposer"',
             'id="workbenchTabs"',
             'id="workbenchTabObject"',
-            'id="workbenchTabDialog"',
             'id="workbenchTabOperation"',
             'id="workbenchTabKnowledge"',
             'id="workbenchTabWorkflow"',
             'id="workbenchLayout"',
             'id="objectWorkspacePanel"',
-            'id="dialogWorkspacePanel"',
             'id="operationWorkspacePanel"',
             'id="knowledgeWorkspacePanel"',
             'id="workflowWorkspacePanel"',
@@ -157,10 +161,13 @@ class WebControlsStaticTests(unittest.TestCase):
             self.assertIn(marker, self.html)
 
         self.assertIn("activeProductMode: 'workspace'", self.js)
+        self.assertIn("commandPaneExpanded: false", self.js)
         self.assertIn("lastWorkspacePane: 'object'", self.js)
         self.assertIn("activeWorkspaceSurface: 'console'", self.js)
         self.assertIn("function switchProductMode", self.js)
         self.assertIn("function renderProductMode", self.js)
+        self.assertIn("function renderCommandPane", self.js)
+        self.assertIn("function toggleCommandPane", self.js)
         self.assertIn("function switchWorkspaceSurface", self.js)
         self.assertIn("function renderWorkspaceNavigator", self.js)
         self.assertIn("function refreshNotebookWorkspace", self.js)
@@ -193,15 +200,22 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workbenchTabs', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] .workbench-panel', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workspaceNavigator', self.css)
+        self.assertIn('.ai-chat-shell[data-product-mode="chat"] #commandPaneBody', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="workspace"] #workspaceNavigator', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="workspace"] #workbenchTabs', self.css)
+        self.assertIn('.ai-chat-shell[data-product-mode="workspace"][data-command-pane-expanded="false"] #commandPaneBody', self.css)
+        self.assertIn('.command-pane-panel', self.css)
+        self.assertIn('.command-pane-header', self.css)
+        self.assertIn('.command-pane-composer', self.css)
         self.assertIn("function switchWorkbenchPane", self.js)
         self.assertIn("activeWorkbenchPane: 'object'", self.js)
         self.assertIn("pane = String(pane || 'object')", self.js)
         self.assertIn("pane = 'object'", self.js)
         self.assertNotIn("activeWorkbenchPane: 'dialog'", self.js)
+        self.assertNotIn('id="workbenchTabDialog"', self.html)
         self.assertIn("对象、关系、活动、账本", self.html)
         self.assertIn("Notebook Workspace", self.html)
+        self.assertIn("Command Pane", self.html)
         self.assertIn("当前 notebook 的对象、脑图、复习、workflow 和账本总览", self.html)
         self.assertIn("function renderWorkbenchPanels", self.js)
         self.assertIn("function renderObjectWorkspaceMnObject", self.js)
@@ -364,8 +378,9 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".mindmap-tree-cache-status", self.css)
         self.assertIn(".mindmap-tree-preview-list", self.css)
         self.assertIn(".mindmap-tree-preview-node", self.css)
-        self.assertLess(main_html.index('id="objectWorkspacePanel"'), main_html.index('id="dialogWorkspacePanel"'))
-        self.assertLess(main_html.index('id="dialogWorkspacePanel"'), main_html.index('id="operationWorkspacePanel"'))
+        self.assertLess(main_html.index('id="workbenchTabs"'), main_html.index('id="commandPanePanel"'))
+        self.assertLess(main_html.index('id="commandPanePanel"'), main_html.index('id="workbenchLayout"'))
+        self.assertLess(main_html.index('id="objectWorkspacePanel"'), main_html.index('id="operationWorkspacePanel"'))
         self.assertLess(main_html.index('id="operationWorkspacePanel"'), main_html.index('id="knowledgeWorkspacePanel"'))
         self.assertLess(main_html.index('id="knowledgeWorkspacePanel"'), main_html.index('id="workflowWorkspacePanel"'))
 
@@ -485,13 +500,14 @@ class WebControlsStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, self.js + self.css)
 
-    def test_staged_prompt_actions_return_to_chat_mode(self) -> None:
+    def test_staged_prompt_actions_stay_in_command_pane(self) -> None:
         stage_body = self.js.split("function stagePromptAction", 1)[1].split(
             "\n  function stageOrExplainPromptAction", 1
         )[0]
 
-        self.assertIn("switchProductMode('chat')", stage_body)
-        self.assertIn("switchTab('chat')", stage_body)
+        self.assertIn("renderCommandPane()", stage_body)
+        self.assertNotIn("switchProductMode('chat')", stage_body)
+        self.assertNotIn("switchTab('chat')", stage_body)
 
     def test_top_mindmap_target_selector_controls_generation_destination(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
@@ -661,7 +677,7 @@ class WebControlsStaticTests(unittest.TestCase):
 
     def test_object_graph_exposes_manual_relation_editor(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
-        object_html = main_html.split('id="objectWorkspacePanel"', 1)[1].split('id="dialogWorkspacePanel"', 1)[0]
+        object_html = main_html.split('id="objectWorkspacePanel"', 1)[1].split('id="operationWorkspacePanel"', 1)[0]
         for marker in [
             'id="objectGraphRelationAddButton"',
             'id="objectGraphRelationEditor"',
@@ -1540,6 +1556,12 @@ class WebControlsStaticTests(unittest.TestCase):
         required_body = self.js.split("var requiredControlIds = [", 1)[1].split("];", 1)[0]
         for marker in [
             "'aiChatShell'",
+            "'commandPanePanel'",
+            "'commandPaneHeader'",
+            "'commandPaneStatus'",
+            "'commandPaneToggleButton'",
+            "'commandPaneBody'",
+            "'commandPaneComposer'",
             "'settingsButton'",
             "'promptInput'",
             "'sendButton'",

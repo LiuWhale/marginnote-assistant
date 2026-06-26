@@ -81,6 +81,7 @@
     workflowWorkspace: {schema: 'codex.mn.workflowWorkspace.v1', available: false},
     workflowRunInspector: null,
     activeProductMode: 'workspace',
+    commandPaneExpanded: false,
     lastWorkspacePane: 'object',
     activeWorkspaceSurface: 'console',
     activeWorkbenchPane: 'object'
@@ -112,15 +113,19 @@
     'notebookWorkspaceWorkflow',
     'notebookWorkspaceLedger',
     'notebookWorkspaceActions',
+    'commandPanePanel',
+    'commandPaneHeader',
+    'commandPaneStatus',
+    'commandPaneToggleButton',
+    'commandPaneBody',
+    'commandPaneComposer',
     'workbenchTabs',
     'workbenchTabObject',
-    'workbenchTabDialog',
     'workbenchTabOperation',
     'workbenchTabKnowledge',
     'workbenchTabWorkflow',
     'workbenchLayout',
     'objectWorkspacePanel',
-    'dialogWorkspacePanel',
     'operationWorkspacePanel',
     'knowledgeWorkspacePanel',
     'workflowWorkspacePanel',
@@ -2317,6 +2322,28 @@
     }, 0);
   }
 
+  function renderCommandPane() {
+    var mode = state.activeProductMode === 'chat' ? 'chat' : 'workspace';
+    var expanded = mode === 'chat' || !!state.commandPaneExpanded;
+    var shell = byId('aiChatShell');
+    if (shell) {
+      shell.setAttribute('data-command-pane-expanded', expanded ? 'true' : 'false');
+    }
+    var status = expanded
+      ? 'Command Pane 已展开：可以查看完整对话；写入类动作仍会进入工作台计划、Diff、确认和账本。'
+      : 'Command Pane 已收起：保留输入入口，Notebook Workspace、对象、操作、知识和工作流占据主工作区。';
+    if (mode === 'chat') {
+      status = 'Chat Mode：完整对话展开；适合快速问答和解释当前上下文。';
+    }
+    setText('commandPaneStatus', status);
+    setText('commandPaneToggleButton', expanded ? '收起对话' : '展开对话');
+  }
+
+  function toggleCommandPane() {
+    state.commandPaneExpanded = !state.commandPaneExpanded;
+    renderCommandPane();
+  }
+
   function renderProductMode() {
     var mode = state.activeProductMode === 'chat' ? 'chat' : 'workspace';
     var shell = byId('aiChatShell');
@@ -2334,14 +2361,17 @@
         ? '当前：Chat Mode，保持轻量对话、选区解释和回答后续动作。'
         : '当前：Agent Workspace，围绕 MNObject、脑图、知识、账本和 workflow 操作。'
     );
+    renderCommandPane();
   }
 
   function switchProductMode(mode) {
     mode = String(mode || 'workspace') === 'chat' ? 'chat' : 'workspace';
     state.activeProductMode = mode;
     if (mode === 'chat') {
+      state.commandPaneExpanded = true;
       switchWorkbenchPane('dialog', {fromProductMode: true});
     } else {
+      state.commandPaneExpanded = false;
       var pane = state.activeWorkbenchPane === 'dialog' ? state.lastWorkspacePane : state.activeWorkbenchPane;
       switchWorkbenchPane(pane || state.lastWorkspacePane || 'object', {fromProductMode: true});
     }
@@ -7030,8 +7060,7 @@
     state.stagedPrompt = stagedPrompt;
     state.stagedLabel = String(label || actionLabel(state.stagedAction));
     setValue('promptInput', stagedPrompt);
-    switchTab('chat');
-    switchProductMode('chat');
+    renderCommandPane();
     renderStagedActionLine();
     updateActionAvailability();
     updateRunToggleButton();
@@ -8254,6 +8283,7 @@
     bindButton('newConversationButton', newConversation);
     bindButton('conversationHistoryButton', openConversationHistory);
     bindButton('conversationHistoryCloseButton', closeConversationHistory);
+    bindButton('commandPaneToggleButton', toggleCommandPane);
     bindButton('notebookWorkspaceRefreshButton', function() {
       refreshNotebookWorkspace(true);
     });
@@ -8436,6 +8466,7 @@
     renderMindmapStudioPanel();
     renderAiEditTransactionCenter(state.aiEditTransactionStatus);
     renderAgentWorkbench(null);
+    renderCommandPane();
     renderNotebookWorkspace(state.notebookWorkspace);
     renderWorkbenchPanels();
     renderObjectBrowser();

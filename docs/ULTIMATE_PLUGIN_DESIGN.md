@@ -27,6 +27,8 @@ v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
 
 当前 Agent Workspace 只能作为迁移壳层，不能被当成终局。它的价值是让当前插件逐步具备对象、操作、证据和 workflow 能力；它不是 v3.0 的信息架构本身。v3.0 必须允许未来把当前聊天页降级为 command pane，把回答按钮降级为快捷命令，把当前 settings/logs/status 面板降级为系统抽屉。
 
+0.4.x 已经开始执行这个迁移：聊天流不再是 Agent Workspace 里的同级工作台 tab，而是独立 `Command Pane`。Workspace 模式默认收起对话历史，只保留输入和发送入口；Chat Mode 才展开完整对话。这一步能让用户第一眼看到 notebook/object 工作台，而不是看到一个更复杂的聊天页。但它仍只是信息架构迁移的开始，不等于完整 v3.0。
+
 ### 0.1 终局选择：B + C，而不是 A
 
 终局不走“MarginNote 自带 AI 的超强版”这条路。那条路只会得到一个更会聊天、更会生成脑图的面板，和当前 0.4.x 的差异不够大。

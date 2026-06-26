@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="app.css?v=20260627-mindmap-studio-v1">
 </head>
 <body>
-  <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace">
+  <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
     <section class="topbar">
       <div>
         <h1>Codex Companion</h1>
@@ -94,10 +94,53 @@
 
     <section id="workbenchTabs" class="workbench-tabs" role="tablist" aria-label="工作台">
       <button id="workbenchTabObject" class="workbench-tab active" data-workbench-pane="object" type="button">对象</button>
-      <button id="workbenchTabDialog" class="workbench-tab" data-workbench-pane="dialog" type="button">对话</button>
       <button id="workbenchTabOperation" class="workbench-tab" data-workbench-pane="operation" type="button">操作</button>
       <button id="workbenchTabKnowledge" class="workbench-tab" data-workbench-pane="knowledge" type="button">知识</button>
       <button id="workbenchTabWorkflow" class="workbench-tab" data-workbench-pane="workflow" type="button">工作流</button>
+    </section>
+
+    <section id="commandPanePanel" class="command-pane-panel" aria-label="Command Pane">
+      <header id="commandPaneHeader" class="command-pane-header">
+        <div>
+          <div class="command-pane-kicker">Command Pane</div>
+          <div id="commandPaneStatus" class="command-pane-status">输入意图，写入类动作会进入工作台计划、Diff、确认和账本。</div>
+        </div>
+        <button id="commandPaneToggleButton" class="small-button command-pane-toggle" type="button">展开对话</button>
+      </header>
+      <div id="commandPaneBody" class="command-pane-body">
+        <section class="status-row ai-chat-status-row">
+          <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
+          <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
+        </section>
+
+        <section id="updateNotice" class="update-notice hidden">
+          <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
+          <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
+        </section>
+
+        <section id="liveHistory" class="history ai-chat-history" aria-live="polite">
+          <article class="message assistant">
+            <div class="message-role">Codex</div>
+            <div class="message-body">可以直接提问；如果在 MarginNote 里选中了内容，我会优先结合当前选区和节点回答。</div>
+          </article>
+        </section>
+      </div>
+      <div id="commandPaneComposer" class="command-pane-composer">
+        <section class="composer ai-chat-composer">
+          <div class="composer-input-row">
+            <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
+            <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">
+              <span class="send-button-main">发送</span>
+              <span class="send-button-sub">可排队</span>
+            </button>
+          </div>
+          <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
+            <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
+            <div id="pdfCacheBannerText" class="pdf-cache-banner-text">PDF缓存：等待当前文档</div>
+            <button id="pdfCacheFileBannerButton" class="small-button pdf-cache-action" type="button">选择PDF</button>
+          </div>
+        </section>
+      </div>
     </section>
 
     <section id="workbenchLayout" class="workbench-layout" aria-label="MarginNote Agent 工作台">
@@ -259,40 +302,6 @@
           </section>
         </section>
       </aside>
-
-      <section id="dialogWorkspacePanel" class="workbench-panel dialog-workspace-panel active" data-workbench-pane="dialog" aria-label="对话">
-        <section class="status-row ai-chat-status-row">
-          <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
-          <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
-        </section>
-
-        <section id="updateNotice" class="update-notice hidden">
-          <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
-          <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
-        </section>
-
-        <section id="liveHistory" class="history ai-chat-history" aria-live="polite">
-          <article class="message assistant">
-            <div class="message-role">Codex</div>
-            <div class="message-body">可以直接提问；如果在 MarginNote 里选中了内容，我会优先结合当前选区和节点回答。</div>
-          </article>
-        </section>
-
-        <section class="composer ai-chat-composer">
-          <div class="composer-input-row">
-            <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
-            <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">
-              <span class="send-button-main">发送</span>
-              <span class="send-button-sub">可排队</span>
-            </button>
-          </div>
-          <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
-            <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
-            <div id="pdfCacheBannerText" class="pdf-cache-banner-text">PDF缓存：等待当前文档</div>
-            <button id="pdfCacheFileBannerButton" class="small-button pdf-cache-action" type="button">选择PDF</button>
-          </div>
-        </section>
-      </section>
 
       <aside id="operationWorkspacePanel" class="workbench-panel operation-workspace-panel active" data-workbench-pane="operation" aria-label="操作">
         <header class="workbench-panel-header">
