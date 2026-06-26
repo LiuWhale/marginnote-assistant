@@ -6,19 +6,57 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.29 公开预览版
-- MN4 插件 manifest：0.4.29
-- Companion：0.4.29
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.29`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.29-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.29-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.29-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.29-latest.mnaddon`
+- 当前发布候选：0.4.30 公开预览版
+- MN4 插件 manifest：0.4.30
+- Companion：0.4.30
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.30`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.30-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.30-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.30-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.30-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.29-latest.pkg`，已生成但未签名、未公证
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.30-latest.pkg`，已生成但未签名、未公证
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.30 发布候选：运行态 handler gate 收紧
+
+本轮把 0.4.29 之后的开发态归档为 0.4.30 公开预览候选。这个版本不是终极 v3.0，而是把后续 v2 原生对象工作台必须依赖的 handler 能力提前变成发布 gate，防止“界面看起来有对象区，但运行态 handler 不支持真实对象操作”的错判。
+
+主要变化包括：
+
+- Companion、doctor 和 release acceptance 的必需 handler fingerprints 增加 `native-mn-object-registry-scan-v1`、`native-mn-object-existence-probe-v1`、`native-mindmap-diff-apply-create-v1` 和 `native-mindmap-delete-suggestion-confirm-v1`。
+- 如果 MN4 WebView 仍加载旧 handler，运行态 gate 会明确 BLOCK，而不是继续显示成可发布状态。
+- 这与终极产品路线保持一致：当前 0.4.x 仍是 Chat Companion + Agent Workspace 雏形；完整 v2/v3 还需要真实对象浏览、Diff 工作台、事务回滚证明和 Knowledge OS 级工作流。
+
+本轮本地验证结果：
+
+```text
+python3 -m unittest discover -s tests
+501 tests passed
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 -m py_compile companion.py doctor.py release_acceptance.py release_smoke_test.py package_release.py build_pkg.py single_document_acceptance.py prepare_release_handoff.py refresh_mn_runtime.py
+PASS
+
+git diff --check
+PASS
+```
+
+本轮 artifact：
+
+- `CodexCompanion-0.4.30-latest-dist.zip`
+- `CodexCompanion-0.4.30-latest.mnaddon`
+- `CodexCompanion-0.4.30-latest.pkg`
+- 精确 sha256 不写死在包内文档里；以 release 目录、OneDrive 镜像和 GitHub Release asset 旁边的外部 `SHA256SUMS.txt` 为准。
+
+本机将替换到 0.4.30：MN4 扩展目录 `mnaddon.json` 应为 `0.4.30`，`main.js` 应为 `PluginVersion = '0.4.30'`，Companion `/status.pluginVersion` 应为 `0.4.30`。MN4 运行态仍需重新打开面板或重启 MN4 后才会上报 `pluginVersion=0.4.30` 的 `webControlsReady` 和 `nativeApiCapabilities`。
+
+当前 release acceptance 剩余阻塞仍预计包括：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。这些是最终 v1.0/正式发布证据，不阻止 0.4.30 作为公开预览版发布。
 
 ### 2026-06-27 v0.4.29 发布候选：真实对象 probe 与 Knowledge OS 路线纠偏
 

@@ -283,20 +283,20 @@ curl http://127.0.0.1:48761/status
 构建 release zip：
 
 ```bash
-python3 package_release.py 0.4.29
+python3 package_release.py 0.4.30
 ```
 
 Smoke test：
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.29-latest-dist.zip --mnaddon release/CodexCompanion-0.4.29-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.29-latest-dist.zip --mnaddon release/CodexCompanion-0.4.29-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.30-latest-dist.zip --mnaddon release/CodexCompanion-0.4.30-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.30-latest-dist.zip --mnaddon release/CodexCompanion-0.4.30-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance：
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.29-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.30-latest-dist.zip --json
 ```
 
 Release acceptance 可能因为机器相关证据不足而阻塞，例如原生高亮证据、签名/公证证据、跨机器安装证据。这些是发布证据检查，不代表源码打包失败。
