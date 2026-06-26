@@ -4354,6 +4354,28 @@
         function() { showAiEditTransactionEvidence(transactionId); }
       )
     ];
+    var nextActions = Array.isArray(verification.nextActions) ? verification.nextActions : [];
+    for (var i = 0; i < nextActions.length; i++) {
+      var nextAction = nextActions[i] || {};
+      if (
+        String(nextAction.id || '') === 'request_object_existence_probe' ||
+        String(nextAction.action || '') === 'request_mn_object_existence_probe'
+      ) {
+        var noteIds = Array.isArray(nextAction.noteIds)
+          ? nextAction.noteIds
+          : (verification.remainingNoteIds || verification.createdNoteIds || latest.createdNoteIds || []);
+        nodes.push(
+          makeAiEditTransactionActionButton(
+            '检查真实对象',
+            'ai-edit-transaction-probe',
+            !transactionId,
+            (function(capturedNoteIds) {
+              return function() { requestAiEditObjectExistenceProbe(transactionId, capturedNoteIds); };
+            })(noteIds)
+          )
+        );
+      }
+    }
     replaceElementChildren(actions, nodes);
   }
 
@@ -4428,6 +4450,24 @@
         latest: result.transaction || current.latest || {},
         verification: result.verification || current.verification || {}
       });
+    }, {showReply: false});
+  }
+
+  function requestAiEditObjectExistenceProbe(transactionId, noteIds) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    noteIds = Array.isArray(noteIds) ? noteIds.filter(function(item) { return !!item; }) : [];
+    setText('aiEditTransactionSummary', '正在请求 MN4 检查真实对象：' + transactionId + '。');
+    postCompanion('request_mn_object_existence_probe', {
+      transactionId: transactionId,
+      noteIds: noteIds
+    }, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('请求真实对象检查失败', result || {});
+        return;
+      }
+      addMessage('assistant', result.reply || result.message || '已请求 MN4 检查真实对象。');
+      refreshAiEditTransactionVerification(transactionId);
     }, {showReply: false});
   }
 

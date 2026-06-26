@@ -696,7 +696,7 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     rollback_complete = False
     accepted = status == "accepted"
     report_status = "pending"
-    next_actions: list[dict[str, str]] = []
+    next_actions: list[dict[str, Any]] = []
 
     requires_confirmation = transaction_requires_confirmation(transaction)
 
@@ -796,6 +796,21 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
                 "reason": "自动回滚未确认删除全部新增对象。",
             }
         )
+
+    if not probe_results and status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"}:
+        probe_note_ids = created_note_ids if status in {"rolled_back", "rollback_failed"} else target_note_ids
+        if probe_note_ids:
+            next_actions.insert(
+                0,
+                {
+                    "id": "request_object_existence_probe",
+                    "label": "检查真实 MN 对象",
+                    "action": "request_mn_object_existence_probe",
+                    "reason": "当前残留判断仍来自删除计数或失败事件，建议让 MN4 原生侧按 noteId 复查真实对象是否仍存在。",
+                    "transactionId": transaction_id,
+                    "noteIds": probe_note_ids,
+                },
+            )
 
     proof = residual_proof(
         transaction=transaction,

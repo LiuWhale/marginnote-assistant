@@ -4,7 +4,30 @@
 目标版本：v3.0  
 状态：终局产品蓝图。当前 0.4.x 是 Chat Mode + Agent Workspace 雏形，不是终局。
 
-## 0. 终局选择：B + C，而不是 A
+## 0. 关键纠偏：终局必须换产品主语
+
+用户看到终局设计后如果觉得“和现在功能没什么区别”，说明设计还没有把产品断层说清楚。终局不能只是继续修聊天、按钮、设置、日志、脑图生成和卡片生成。那些能力最多把当前 0.4.x 做成更稳定的 Study Copilot。
+
+终局的主语必须从 **消息和按钮** 换成 **真实 MarginNote 对象和知识工作流**：
+
+- 当前 0.4.x 的主语是“这条回答”。用户输入一句话，AI 输出文字，用户再点回答下方按钮。
+- v1.x 的主语是“这份材料”。插件能稳定读选区/全文，能生成短卡和脑图，体验对标 MN4 自带 AI。
+- v2.x 的主语是“这个 MN 对象”。插件能读取、编辑、合并、移动、删除和验证真实 noteId、脑图节点、卡片、摘录和关系。
+- v3.x 的主语是“这个 notebook 的知识系统”。插件能管理对象库、知识图谱、复习队列、workflow、技能和外部自动化。
+
+因此 v3.0 的默认首屏不能再是聊天框。即使聊天框旁边有 Object Browser、Mindmap Studio、Card Factory、Operation Ledger 和 Workflow Builder，只要用户的主要动作仍是“输入 prompt -> 等回答 -> 点生成按钮”，产品本质仍是 Chat Companion。
+
+v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
+
+- 左侧是 notebook 对象浏览器，而不是消息历史。
+- 中间是脑图/卡片/知识图谱/工作流的真实编辑区，而不是回答正文。
+- 右侧或底部才是 AI 对话，用来解释、下指令、修改 plan。
+- 写入入口是 operation plan、Diff、dry-run、确认点和验证报告，而不是回答下方按钮。
+- 失败入口是 ledger、残留对象、回滚证明和恢复动作，而不是一条错误消息。
+
+当前 Agent Workspace 只能作为迁移壳层，不能被当成终局。它的价值是让当前插件逐步具备对象、操作、证据和 workflow 能力；它不是 v3.0 的信息架构本身。v3.0 必须允许未来把当前聊天页降级为 command pane，把回答按钮降级为快捷命令，把当前 settings/logs/status 面板降级为系统抽屉。
+
+### 0.1 终局选择：B + C，而不是 A
 
 终局不走“MarginNote 自带 AI 的超强版”这条路。那条路只会得到一个更会聊天、更会生成脑图的面板，和当前 0.4.x 的差异不够大。
 
@@ -23,13 +46,14 @@ Chat Mode 仍然保留，但它不是终局主产品。Chat Mode 只负责快速
 
 > Codex Companion v3.0 是 MarginNote 里的 Notebook Knowledge OS：把文档、摘录、高亮、卡片、脑图、概念、复习、外部文件和自动化请求统一成可浏览、可编辑、可验证、可回滚的知识对象系统。
 
-## 1. 三个不同产品，不允许混淆
+## 1. 四个不同产品，不允许混淆
 
 | 产品代际 | 第一眼像什么 | 用户主要在操作什么 | 典型动作 | 不能冒充什么 |
 | --- | --- | --- | --- | --- |
 | v0.4.x AI Chat Plugin | 聊天面板加工具按钮 | prompt、回答、草稿 | 问问题、生成卡片、生成脑图、看状态 | 不能叫知识工作台 |
+| v1.x Study Copilot | 稳定的阅读/制卡/脑图助手 | 当前材料、选区、目标脑图 | 对标 MN4 自带 AI；稳定全文读取；生成短卡；生成结构化脑图 | 不能叫原生对象编辑器 |
 | v2.x Native Knowledge Editor | MN 原生知识编辑器 | 真实脑图节点、卡片、摘录和 Diff | 读取现有脑图、逐节点改写、合并、移动、删除、回滚、残留证明 | 不能叫全局知识 OS |
-| v3.x Notebook Knowledge OS | notebook 工作台 | notebook 对象图、知识图谱、学习目标、workflow、账本、复习系统 | 自动精读、重组知识结构、生成并排程卡片、跨文档对比、外部自动化、技能运行 | 这是终局 |
+| v3.x Notebook Knowledge OS | notebook 工作台 / Knowledge IDE | notebook 对象图、知识图谱、学习目标、workflow、账本、复习系统 | 自动精读、重组知识结构、生成并排程卡片、跨文档对比、外部自动化、技能运行 | 这是终局 |
 
 当前 0.4.x 即使已经出现 Object Browser、Mindmap Studio、Card Factory、Workflow Runtime 和 Operation Ledger，也仍然是第一代产品。原因很简单：用户仍然主要通过“输入一句话、得到回答、点击按钮”来工作。终局必须把主语换掉：
 
@@ -81,6 +105,24 @@ v3.0 的硬边界：
 - 复习队列和覆盖率是 Card Factory 的必选闭环。
 - 外部自动化不能绕过 dry-run、确认、ledger 和回滚。
 - 技能包不是自定义 prompt。
+
+### 2.1 现有功能在终局里的位置
+
+终局不是删除当前功能，而是重新安放它们。当前功能如果继续放在聊天页中心，会让产品停留在 v1.x；只有把它们迁移到对象和 workflow 体系里，才进入 v2/v3。
+
+| 当前功能 | 现在的位置 | 终局位置 | 迁移动作 |
+| --- | --- | --- | --- |
+| 发送/可排队 | 聊天输入按钮 | Command Pane | 只负责表达意图；写入类意图必须编译成 operation plan |
+| 回答下方生成脑图树 | 回答快捷按钮 | Mindmap Studio | 变成“基于当前对象生成 Diff”，不直接新建重复树 |
+| 生成卡片 | 聊天快捷按钮 | Card Factory | 变成按学习目标、卡型、来源、复习队列生成和审计 |
+| 目标/长任务 | 聊天运行状态 | Workflow Builder | 变成可保存、可恢复、可验收 workflow run |
+| 队列 | pending 任务列表 | Workflow Runtime | 只保留为底层调度，不再承担产品解释 |
+| 设置页 | 杂项配置集合 | System Drawer | 只放低频配置、权限、后端、路径、诊断和更新 |
+| 日志 | 调试信息 | Operation Ledger Explorer | 变成用户可读证据链，可按对象和事务追溯 |
+| 文件路径管理 | 设置子模块 | Source Registry | 变成文件、PDF 缓存、上传资料和 MN 文档的统一来源对象 |
+| 自定义按钮 | prompt 列表 | Skill Center / Command Palette | 简单 prompt 是命令；可发布能力必须升级为技能包 |
+
+这张表是产品断层的验收口径：只要这些能力仍然主要停留在聊天页，v3.0 就没有实现。只有当它们都围绕 `MNObject Registry`、Diff、Card Factory、Workflow Runtime 和 Operation Ledger 工作时，当前插件才真正从 Chat Companion 过渡到 Knowledge OS。
 
 ## 3. 终局的用户故事必须明显不同
 

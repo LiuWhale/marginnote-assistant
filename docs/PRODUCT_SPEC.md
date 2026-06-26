@@ -4,9 +4,9 @@
 
 把 Codex 变成一个可在 MarginNote 4 里直接使用的通用工作面板：用户打开资料、论文、笔记或项目材料后，不需要切换到终端，就能在 MN4 侧边面板里对话、运行自定义 prompt、生成原生卡片、生成脑图、建立回链、做可见高亮，并在需要时导出带标注 PDF 副本。论文精读是重点预设场景，但不是产品边界。
 
-本文件定义的是发布级可用产品目标。终极形态另见 `docs/ULTIMATE_PLUGIN_DESIGN.md`，它的边界不是“能聊天、能生成脑图”，也不是当前聊天插件的增强版；终极目标是 **MarginNote Knowledge Agent OS**。终局路线明确采用 **知识编辑工作台 + 自动学习代理**：默认首屏应是 `Notebook Workspace`，显示当前 notebook 的对象、脑图、卡片、知识关系、workflow、复习状态和操作账本；`Chat Mode` 只是快速阅读和意图输入入口，不能成为高阶知识工作的中心。
+本文件定义的是当前公开预览版和 v1.x 的发布级可用目标，不定义 v3.0 终局。终极形态另见 `docs/ULTIMATE_PLUGIN_DESIGN.md`，它的边界不是“能聊天、能生成脑图”，也不是当前聊天插件的增强版；终极目标是 **MarginNote Knowledge Agent OS**。终局路线明确采用 **知识编辑工作台 + 自动学习代理**：默认首屏应是 `Notebook Workspace`，显示当前 notebook 的对象、脑图、卡片、知识关系、workflow、复习状态和操作账本；`Chat Mode` 只是快速阅读和意图输入入口，不能成为高阶知识工作的中心。
 
-发布级当前目标和 v3.0 终局必须分开验收：当前 0.4.x 是 Chat Mode + Agent Workspace 雏形，重点是让 MN4 内的 AI 对话、卡片、脑图、目标、历史、设置、缓存、日志、对象面板和事务闭环稳定可用；v3.0 终局则必须以 `Notebook Workspace`、`Knowledge Console`、`Object Browser`、`Mindmap Studio`、`Card Factory`、`Knowledge Graph Studio`、`Workflow Builder`、`Operation Ledger Explorer` 和 `Skill Center` 这些一等产品界面为验收对象。只要高阶工作仍只能靠“聊天后点按钮生成内容”，就只能叫 Agent Workbench 或 Study Copilot，不能叫 Knowledge Agent OS。
+发布级当前目标和 v3.0 终局必须分开验收。当前 0.4.x 是 Chat Mode + Agent Workspace 雏形，重点是让 MN4 内的 AI 对话、卡片、脑图、目标、历史、设置、缓存、日志、对象面板和事务闭环稳定可用；v1.x 是对标 MN4 自带 AI 的 Study Copilot；v2.x 才进入真实 MN 对象编辑器；v3.0 终局则必须以 `Notebook Workspace`、`Knowledge Console`、`Object Browser`、`Mindmap Studio`、`Card Factory`、`Knowledge Graph Studio`、`Workflow Builder`、`Operation Ledger Explorer` 和 `Skill Center` 这些一等产品界面为验收对象。只要高阶工作仍只能靠“聊天后点按钮生成内容”，就只能叫 Agent Workbench 或 Study Copilot，不能叫 Knowledge Agent OS。
 
 ## 用户体验原则
 

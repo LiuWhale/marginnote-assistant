@@ -14,10 +14,12 @@ All notable changes to Codex Companion are documented here.
 - Added first-stage per-operation dry-run evidence for mind-map operations: `operationDryRunDetails` now shows each planned node operation's mutation, noteId, required capability, status, reason, and verification level, and blocked local Diff apply responses return the same `codex.mn.perOperationDryRun.v1` payload.
 - Added `codex.mn.residualProof.v1` to AI edit transaction verification, so rollback/retain evidence can report each created or target note's expected state, actual state, residual flag, and native-event evidence level instead of only a residual count.
 - Added native MN object existence probing for edit transactions: Companion can enqueue `probe_mn_object_existence`, the MarginNote handler checks real note objects by `noteId`, and transaction verification uses the probe to report confirmed residual objects instead of relying only on deleted/failed counts.
+- Added a visible AI edit transaction action for native object existence probes: when verification still depends on delete counts or failed rollback events, the transaction center now exposes `检查真实对象` and requests `request_mn_object_existence_probe`.
 
 ### Changed
 
 - Reframed the v3.0 ultimate design as `Notebook Knowledge OS`: the default end-state is a Notebook Workspace plus workflow-based learning agent, not a stronger chat page with more buttons.
+- Split the long-term roadmap into explicit product stages: `v0.4.x` Chat Companion, `v1.x` Study Copilot, `v2.x` Native Knowledge Editor, and `v3.x` Notebook Knowledge OS, so current Agent Workspace panels cannot be mistaken for the final Knowledge IDE.
 
 ## 0.4.28 - 2026-06-27
 

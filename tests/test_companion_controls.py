@@ -6606,6 +6606,15 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(by_note["N3"]["actualState"], "remaining_reported")
             self.assertTrue(by_note["N3"]["residual"])
             self.assertIn("仍可能残留", tx_status["summary"])
+            probe_action = next(
+                item
+                for item in tx_status["verification"]["nextActions"]
+                if item["id"] == "request_object_existence_probe"
+            )
+            self.assertEqual(probe_action["action"], "request_mn_object_existence_probe")
+            self.assertEqual(probe_action["transactionId"], "ai-edit-latest")
+            self.assertEqual(probe_action["noteIds"], ["N1", "N2", "N3"])
+            self.assertIn("真实 MN 对象", probe_action["label"])
 
     def test_ai_edit_verification_uses_native_object_existence_probe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6679,6 +6688,10 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(by_note["N2"]["evidence"]["probeId"], "probe-001")
             self.assertEqual(by_note["N3"]["actualState"], "missing_confirmed")
             self.assertFalse(by_note["N3"]["residual"])
+            self.assertNotIn(
+                "request_object_existence_probe",
+                [item["id"] for item in verification["nextActions"]],
+            )
 
 
 if __name__ == "__main__":
