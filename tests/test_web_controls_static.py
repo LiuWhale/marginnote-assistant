@@ -603,6 +603,9 @@ class WebControlsStaticTests(unittest.TestCase):
             "operation.operationPlan",
             "operation.verificationPlan",
             "operation.operationCompiler",
+            "function operationActionGate",
+            "data-operation-gate-status",
+            "Operation Compiler 阻断",
             "写入需确认",
             "Dry-run",
         ]:
@@ -618,6 +621,8 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".operation-compiler-panel", self.css)
         self.assertIn(".operation-plan-stat", self.css)
         self.assertIn(".operation-compiler-check", self.css)
+        self.assertIn(".workbench-action-button:disabled", self.css)
+        self.assertIn(".workbench-action-button.blocked", self.css)
 
     def test_object_graph_exposes_manual_relation_editor(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]

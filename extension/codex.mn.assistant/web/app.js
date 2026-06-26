@@ -584,6 +584,60 @@
     return actions.slice(0, 3);
   }
 
+  function operationActionIsWriteCapable(item) {
+    item = item || {};
+    var action = String(item.action || '');
+    if (item.requiresConfirmation || item.requiresDraft) return true;
+    return [
+      'workflow_start',
+      'operation_plan_preview',
+      'mindmap_diff_preview',
+      'write_draft',
+      'request_native_highlight_selection',
+      'mindmap_diff_apply'
+    ].indexOf(action) >= 0;
+  }
+
+  function operationCompilerGateReason(operation) {
+    operation = operation || {};
+    var plan = operation.operationPlan || {};
+    var dryRun = plan.dryRun || {};
+    var compiler = operation.operationCompiler || {};
+    var status = String(compiler.status || plan.status || '').toLowerCase();
+    var planStatus = String(plan.status || '').toLowerCase();
+    var dryStatus = String(dryRun.status || '').toLowerCase();
+    var checks = compiler.checks || [];
+    var detail = '';
+    for (var i = 0; i < checks.length; i++) {
+      if (!checks[i]) continue;
+      if (checks[i].tone === 'block' || checks[i].status === 'blocked' || checks[i].status === 'unknown') {
+        detail = checks[i].detail || checks[i].status || checks[i].label || '';
+        break;
+      }
+    }
+    if (!detail && dryRun.message) detail = dryRun.message;
+    if (!detail && dryStatus) detail = 'dry-run: ' + dryStatus;
+    if (status === 'blocked' || status === 'block' || planStatus === 'blocked' || dryStatus === 'blocked') {
+      return 'Operation Compiler 阻断：' + (detail || '当前写入计划未通过能力、权限或 dry-run 检查。');
+    }
+    if (status === 'unknown' || planStatus === 'unknown' || dryStatus === 'unknown') {
+      return 'Operation Compiler 待确认：' + (detail || '当前写入计划仍有 native capability 未确认。');
+    }
+    return '';
+  }
+
+  function operationActionGate(item, operation) {
+    if (!operationActionIsWriteCapable(item)) {
+      return {blocked: false, status: 'ready', reason: ''};
+    }
+    var reason = operationCompilerGateReason(operation || state.agentOperation || {});
+    return {
+      blocked: !!reason,
+      status: reason ? 'blocked' : 'ready',
+      reason: reason
+    };
+  }
+
   function formatKnowledgeSearchResult(result) {
     result = result || {};
     var matches = result.matches || [];
@@ -1514,12 +1568,22 @@
         item = item || {};
         var button = document.createElement('button');
         var actionId = String(item.id || '');
-        button.className = 'small-button ' + (actionId === 'create_card_tree' ? 'reply-mindmap-tree-button' : 'reply-agent-action-button');
+        var gate = operationActionGate(item, state.agentOperation || {});
+        button.className = 'small-button ' + (actionId === 'create_card_tree' ? 'reply-mindmap-tree-button' : 'reply-agent-action-button') + (gate.blocked ? ' blocked' : '');
         button.type = 'button';
         button.textContent = item.label || actionLabel(item.action || '');
         button.setAttribute('data-agent-next-action', actionId || item.action || 'action');
+        button.setAttribute('data-operation-gate-status', gate.status);
+        if (gate.blocked) {
+          button.disabled = true;
+          button.title = gate.reason;
+        }
         button.addEventListener('click', function(ev) {
           releaseButtonFocus(ev.currentTarget);
+          if (gate.blocked) {
+            addMessage('assistant', gate.reason);
+            return;
+          }
           runAgentNextAction(item, replyText);
         });
         wrapper.appendChild(button);
@@ -3897,8 +3961,19 @@
         button.type = 'button';
         button.textContent = item.label || actionLabel(item.action || '');
         button.setAttribute('data-operation-workbench-action', item.id || item.action || 'action');
+        var gate = operationActionGate(item, operation || state.agentOperation || {});
+        button.setAttribute('data-operation-gate-status', gate.status);
+        if (gate.blocked) {
+          button.disabled = true;
+          button.className += ' blocked';
+          button.title = gate.reason;
+        }
         button.addEventListener('click', function(ev) {
           releaseButtonFocus(ev.currentTarget);
+          if (gate.blocked) {
+            addMessage('assistant', gate.reason);
+            return;
+          }
           runAgentNextAction(item, state.latestAssistantReply || promptValue());
         });
         nodes.push(button);

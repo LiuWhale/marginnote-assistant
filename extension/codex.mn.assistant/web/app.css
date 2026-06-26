@@ -521,6 +521,22 @@ h1 {
   color: #fff;
 }
 
+.workbench-action-button:disabled,
+.workbench-action-button.blocked,
+.reply-agent-action-button.blocked {
+  cursor: default;
+  border-color: #e8ce83;
+  background: #fff9e7;
+  color: #8a5a00;
+  opacity: 0.82;
+}
+
+.workbench-action-button.primary.blocked {
+  border-color: #e8ce83;
+  background: #fff3ce;
+  color: #7a4b00;
+}
+
 .object-browser-panel {
   display: grid;
   gap: 8px;
