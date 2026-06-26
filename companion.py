@@ -3100,35 +3100,51 @@ def request_mindmap_diff_apply(payload: dict[str, Any]) -> dict[str, Any]:
 
     native_caps = latest_native_api_capabilities(topic_id, book_md5)
     matrix = native_caps.get("capabilityMatrix") if isinstance(native_caps.get("capabilityMatrix"), dict) else {}
-    blocked: list[dict[str, str]] = []
-    for operation in clean_operations:
-        mutation = str(operation.get("mutation") or "")
-        requirements = operation.get("requires") if isinstance(operation.get("requires"), list) else []
-        for requirement in requirements:
-            requirement_key = str(requirement or "")
-            if not requirement_key or requirement_key == "nativeMindmap":
-                continue
-            capability = matrix.get(requirement_key) if isinstance(matrix.get(requirement_key), dict) else {}
-            if capability.get("ready"):
-                continue
-            blocked.append(
-                {
-                    "opId": str(operation.get("opId") or ""),
-                    "op": str(operation.get("op") or ""),
-                    "mutation": mutation,
-                    "title": str(operation.get("title") or ""),
-                    "requirement": requirement_key,
-                    "reason": str(capability.get("blockedReason") or f"{requirement_key}-unverified"),
-                    "nextStep": str(capability.get("nextStep") or "刷新 MN 原生能力；当前仅稳定支持 create 局部操作。"),
-                }
-            )
-            break
+    native_caps_for_apply = dict(native_caps)
+    matrix_for_apply = dict(matrix)
+    native_mindmap = matrix_for_apply.get("nativeMindmap") if isinstance(matrix_for_apply.get("nativeMindmap"), dict) else {}
+    matrix_for_apply["nativeMindmap"] = {
+        **native_mindmap,
+        "ready": True,
+        "available": True,
+        "nextStep": str(native_mindmap.get("nextStep") or "create 操作走本地脑图 Diff 执行器。"),
+    }
+    native_caps_for_apply["capabilityMatrix"] = matrix_for_apply
+    dry_run_plan = {
+        **plan,
+        "operationCount": len(clean_operations),
+        "operations": clean_operations,
+    }
+    dry_run = operation_runtime.simulate_operation_manifest(
+        {"operationPlan": dry_run_plan},
+        {**runtime_settings(), "permission": permission, "mnApiBackend": "native"},
+        native_caps_for_apply,
+        {},
+    )
+    per_operation = dry_run.get("perOperation") if isinstance(dry_run.get("perOperation"), dict) else {}
+    dry_run_items = per_operation.get("items") if isinstance(per_operation.get("items"), list) else []
+    blocked = [
+        {
+            "opId": str(item.get("opId") or ""),
+            "op": str(item.get("op") or ""),
+            "mutation": str(item.get("mutation") or ""),
+            "title": str(item.get("title") or ""),
+            "requirement": str(item.get("requirement") or ""),
+            "reason": str(item.get("reason") or ""),
+            "nextStep": str(item.get("nextStep") or ""),
+            "noteId": str(item.get("noteId") or ""),
+            "verificationLevel": str(item.get("verificationLevel") or ""),
+        }
+        for item in dry_run_items
+        if str(item.get("status") or "") in {"blocked", "unknown"}
+    ]
 
     if blocked:
         apply_plan = {
             **plan,
             "operationCount": len(clean_operations),
             "operations": clean_operations,
+            "dryRun": dry_run,
             "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
             "applyBoundary": {
                 **(plan.get("applyBoundary") if isinstance(plan.get("applyBoundary"), dict) else {}),
@@ -3148,6 +3164,7 @@ def request_mindmap_diff_apply(payload: dict[str, Any]) -> dict[str, Any]:
                 "请先刷新 MN 原生能力；update/merge/move/delete 不能在未确认能力时执行。"
             ),
             "applyPlan": apply_plan,
+            "dryRun": dry_run,
             "blockedOperations": blocked,
             "nativeApiCapabilities": native_caps,
             "queue": queue_status_payload(topic_id, book_md5),
@@ -3161,6 +3178,7 @@ def request_mindmap_diff_apply(payload: dict[str, Any]) -> dict[str, Any]:
         "transactionId": transaction_id,
         "operationCount": len(clean_operations),
         "operations": clean_operations,
+        "dryRun": dry_run,
         "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
         "applyBoundary": {
             **(plan.get("applyBoundary") if isinstance(plan.get("applyBoundary"), dict) else {}),

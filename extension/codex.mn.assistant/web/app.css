@@ -1441,6 +1441,66 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.operation-dry-run-details {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.operation-dry-run-title {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.operation-dry-run-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.operation-dry-run-row strong {
+  flex: 0 0 auto;
+  min-width: 56px;
+  text-transform: uppercase;
+}
+
+.operation-dry-run-row.pass {
+  border-color: #b7dfcf;
+}
+
+.operation-dry-run-row.pass strong {
+  color: #0c7b5d;
+}
+
+.operation-dry-run-row.warn {
+  border-color: #ecd99b;
+}
+
+.operation-dry-run-row.warn strong {
+  color: #9a6700;
+}
+
+.operation-dry-run-row.block {
+  border-color: #efaaa5;
+}
+
+.operation-dry-run-row.block strong {
+  color: #b42318;
+}
+
+.operation-dry-run-row.empty {
+  background: var(--soft);
+  color: var(--muted);
+}
+
 .operation-compiler-repair-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

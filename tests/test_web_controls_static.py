@@ -90,6 +90,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="operationCompilerSummary"',
             'id="operationPlanStats"',
             'id="operationCompilerChecks"',
+            'id="operationDryRunDetails"',
             'id="operationWorkspaceNextActions"',
             'id="mindmapStudioPanel"',
             'id="mindmapStudioSummary"',
@@ -591,11 +592,13 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('id="operationCompilerPanel"', operation_html)
         self.assertIn('id="operationPlanStats"', operation_html)
         self.assertIn('id="operationCompilerChecks"', operation_html)
+        self.assertIn('id="operationDryRunDetails"', operation_html)
         self.assertIn('id="operationCompilerRepairActions"', operation_html)
         for marker in [
             "state.agentOperation",
             "function renderAgentWorkbench",
             "function renderOperationCompilerPanel",
+            "function renderOperationDryRunDetails",
             "function renderOperationCompilerRepairActions",
             "function runOperationCompilerRepairAction",
             "function refreshAgentPlan",
@@ -609,6 +612,10 @@ class WebControlsStaticTests(unittest.TestCase):
             "function operationActionGate",
             "data-operation-gate-status",
             "data-operation-repair-action",
+            "codex.mn.perOperationDryRun.v1",
+            "operation-dry-run-details",
+            "operation-dry-run-row",
+            "verificationLevel",
             "Operation Compiler 阻断",
             "写入需确认",
             "Dry-run",

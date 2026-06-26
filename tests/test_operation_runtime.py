@@ -321,6 +321,57 @@ class OperationRuntimeTests(unittest.TestCase):
         self.assertEqual(plan["applyBoundary"]["acceptButtonBehavior"], "queues_local_create_operations")
         self.assertEqual(plan["applyBoundary"]["blockedLocalMutations"], [])
 
+    def test_operation_dry_run_reports_per_mindmap_node_capability_evidence(self) -> None:
+        diff = {
+            "schema": "codex.mn.mindmapDiff.v1",
+            "operations": [
+                {"op": "create", "title": "New Node", "proposedPath": "0.1", "targetParent": "Root"},
+                {
+                    "op": "update",
+                    "title": "Existing Node",
+                    "proposedPath": "0.2",
+                    "existingPath": "0.5",
+                    "currentRef": {"noteId": "mn-existing"},
+                    "targetParent": "Root",
+                },
+            ],
+        }
+        plan = operation_runtime.build_mindmap_diff_operation_plan(diff)
+
+        dry_run = operation_runtime.simulate_operation_manifest(
+            {"operationPlan": plan},
+            settings={"permission": "notes", "mnApiBackend": "native"},
+            native_caps={
+                "capabilityMatrix": {
+                    "nativeMindmap": {"ready": True, "available": True},
+                    "nativeMindmapUpdate": {
+                        "ready": False,
+                        "available": False,
+                        "blockedReason": "unverified-note-update-api",
+                        "nextStep": "刷新 MN 能力。",
+                    },
+                }
+            },
+        )
+
+        self.assertEqual(dry_run["schema"], "codex.mn.operationDryRun.v1")
+        self.assertEqual(dry_run["status"], "blocked")
+        self.assertEqual(dry_run["perOperation"]["schema"], "codex.mn.perOperationDryRun.v1")
+        self.assertEqual(dry_run["perOperation"]["blockedCount"], 1)
+        by_id = {item["opId"]: item for item in dry_run["perOperation"]["items"]}
+        self.assertEqual(by_id["mindmap-diff:1"]["title"], "New Node")
+        self.assertEqual(by_id["mindmap-diff:1"]["mutation"], "create")
+        self.assertEqual(by_id["mindmap-diff:1"]["status"], "ready")
+        self.assertEqual(by_id["mindmap-diff:1"]["requiredCapabilities"], ["nativeMindmap"])
+        self.assertEqual(by_id["mindmap-diff:1"]["targetParent"], "Root")
+        self.assertEqual(by_id["mindmap-diff:1"]["verificationLevel"], "native_capability_ready")
+        self.assertEqual(by_id["mindmap-diff:2"]["noteId"], "mn-existing")
+        self.assertEqual(by_id["mindmap-diff:2"]["mutation"], "update")
+        self.assertEqual(by_id["mindmap-diff:2"]["status"], "blocked")
+        self.assertEqual(by_id["mindmap-diff:2"]["reason"], "unverified-note-update-api")
+        self.assertEqual(by_id["mindmap-diff:2"]["requiredCapabilities"], ["nativeMindmapUpdate"])
+        self.assertEqual(by_id["mindmap-diff:2"]["verificationLevel"], "native_capability_missing")
+
     def test_mindmap_diff_marks_current_only_nodes_as_delete_suggestions(self) -> None:
         proposed = {
             "title": "Paper",

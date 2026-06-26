@@ -161,6 +161,7 @@
     'operationCompilerSummary',
     'operationPlanStats',
     'operationCompilerChecks',
+    'operationDryRunDetails',
     'operationCompilerRepairActions',
     'operationWorkspaceNextActions',
     'mindmapStudioPanel',
@@ -2787,6 +2788,63 @@
     replaceElementChildren(target, nodes);
   }
 
+  function renderOperationDryRunDetails(plan) {
+    var target = byId('operationDryRunDetails');
+    if (!target) return;
+    plan = plan || {};
+    var dryRun = plan.dryRun || {};
+    var perOperation = dryRun.perOperation || {};
+    var items = Array.isArray(perOperation.items) ? perOperation.items : [];
+    var status = String(perOperation.status || dryRun.status || 'idle');
+    target.className = 'operation-dry-run-details ' + operationCompilerTone(status);
+    if (perOperation.schema !== 'codex.mn.perOperationDryRun.v1' || !items.length) {
+      var empty = document.createElement('div');
+      empty.className = 'operation-dry-run-row empty';
+      empty.textContent = dryRun.message || '逐节点 dry-run 明细会显示每个操作的 noteId、能力和阻断原因。';
+      replaceElementChildren(target, [empty]);
+      return;
+    }
+    var rows = [];
+    var title = document.createElement('div');
+    title.className = 'operation-dry-run-title';
+    title.textContent =
+      '逐节点 Dry-run：' +
+      (perOperation.blockedCount || 0) + ' 阻断 / ' +
+      (perOperation.unknownCount || 0) + ' 未确认 / ' +
+      (perOperation.readyCount || 0) + ' 可执行';
+    rows.push(title);
+    for (var i = 0; i < items.length && i < 8; i++) {
+      var item = items[i] || {};
+      var row = document.createElement('div');
+      var tone = operationCompilerTone(item.status);
+      row.className = 'operation-dry-run-row ' + tone;
+      row.setAttribute('data-operation-dry-run-status', String(item.status || 'unknown'));
+      row.setAttribute('data-operation-id', String(item.opId || ''));
+      row.setAttribute('data-note-id', String(item.noteId || ''));
+      row.setAttribute('data-verification-level', String(item.verificationLevel || ''));
+      var badge = document.createElement('strong');
+      badge.textContent = item.status || 'unknown';
+      var text = document.createElement('span');
+      text.textContent =
+        (item.title || item.opId || item.op || '操作') +
+        ' / ' + (item.mutation || item.op || 'op') +
+        (item.noteId ? (' / noteId ' + item.noteId) : '') +
+        (item.requiredCapabilities && item.requiredCapabilities.length ? (' / ' + item.requiredCapabilities.join('、')) : '') +
+        (item.reason ? (' / ' + item.reason) : '') +
+        (item.verificationLevel ? (' / ' + item.verificationLevel) : '');
+      row.appendChild(badge);
+      row.appendChild(text);
+      rows.push(row);
+    }
+    if (items.length > 8) {
+      var more = document.createElement('div');
+      more.className = 'operation-dry-run-row empty';
+      more.textContent = '还有 ' + (items.length - 8) + ' 个 dry-run 操作未展开。';
+      rows.push(more);
+    }
+    replaceElementChildren(target, rows);
+  }
+
   function renderOperationCompilerPanel(operation) {
     operation = operation || {};
     var panel = byId('operationCompilerPanel');
@@ -2826,6 +2884,7 @@
         replaceElementChildren(checks, rows);
       }
     }
+    renderOperationDryRunDetails(plan);
     renderOperationCompilerRepairActions(compiler);
   }
 

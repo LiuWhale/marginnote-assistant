@@ -356,7 +356,7 @@ Skill Marketplace 管理技能包安装、运行、升级、禁用和审计。
 
 Operation Compiler 必须负责 schema 检查、上下文范围检查、权限检查、native capability dry-run、Diff 生成、confirmation point 生成、rollback plan 生成和 verification plan 生成。
 
-当前 0.4.x 只能称为 Operation Compiler 第一阶段：它已经把写入类意图拆成结构化计划，并把计划、写入数量、原生能力 dry-run 结果和验证要求暴露给前端和 doctor/单文档验收清单；普通 `agent_plan` 也会在草稿生成前复用写入 dry-run 门槛，缺少必要 native capability 时直接阻断计划。但它还没有完成逐节点 native dry-run、跨对象残留扫描、完整回滚证明和技能包级 schema 迁移。因此它是从“聊天按钮”走向“对象操作系统”的关键断层，不是终局完成证明。
+当前 0.4.x 只能称为 Operation Compiler 第一阶段：它已经把写入类意图拆成结构化计划，并把计划、写入数量、原生能力 dry-run 结果、逐操作 `codex.mn.perOperationDryRun.v1` 明细和验证要求暴露给前端和 doctor/单文档验收清单；普通 `agent_plan` 也会在草稿生成前复用写入 dry-run 门槛，缺少必要 native capability 时直接阻断计划。它还没有完成真实 MN 对象存在性 probe、跨对象残留扫描、完整回滚证明和技能包级 schema 迁移。因此它是从“聊天按钮”走向“对象操作系统”的关键断层，不是终局完成证明。
 
 ## 8. 典型终局工作流
 

@@ -7,6 +7,7 @@ from typing import Any
 
 MANIFEST_SCHEMA = "codex.mn.operationManifest.v1"
 PLAN_SCHEMA = "codex.mn.operationPlan.v1"
+PER_OPERATION_DRY_RUN_SCHEMA = "codex.mn.perOperationDryRun.v1"
 MINDMAP_DIFF_SCHEMA = "codex.mn.mindmapDiff.v1"
 MINDMAP_DIFF_OPERATION_PLAN_SCHEMA = "codex.mn.mindmapDiffOperationPlan.v1"
 CARD_QUALITY_SCHEMA = "codex.mn.cardQuality.v1"
@@ -700,6 +701,68 @@ def _capability_state(native_caps: dict[str, Any], key: str) -> dict[str, Any]:
     }
 
 
+def _operation_note_id(operation: dict[str, Any]) -> str:
+    current_ref = operation.get("currentRef") if isinstance(operation.get("currentRef"), dict) else {}
+    proposed_ref = operation.get("proposedRef") if isinstance(operation.get("proposedRef"), dict) else {}
+    return _clean_text(
+        current_ref.get("noteId")
+        or current_ref.get("id")
+        or proposed_ref.get("noteId")
+        or proposed_ref.get("id"),
+        160,
+    )
+
+
+def _operation_dry_run_item(
+    operation: dict[str, Any],
+    *,
+    status: str,
+    reason: str,
+    next_step: str,
+    via: str,
+    capability_evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    current_ref = operation.get("currentRef") if isinstance(operation.get("currentRef"), dict) else {}
+    proposed_ref = operation.get("proposedRef") if isinstance(operation.get("proposedRef"), dict) else {}
+    requirements = operation.get("requires") if isinstance(operation.get("requires"), list) else []
+    if status == "ready" and via == "url_api":
+        verification_level = "url_api_ready"
+    elif status == "ready":
+        verification_level = "native_capability_ready"
+    elif status == "unknown":
+        verification_level = "native_capability_unknown"
+    else:
+        verification_level = "native_capability_missing"
+    primary_requirement = ""
+    for evidence in capability_evidence:
+        if not bool(evidence.get("ready")):
+            primary_requirement = str(evidence.get("requirement") or "")
+            break
+    if not primary_requirement and capability_evidence:
+        primary_requirement = str(capability_evidence[0].get("requirement") or "")
+    return {
+        "opId": str(operation.get("opId") or ""),
+        "op": str(operation.get("op") or ""),
+        "mutation": str(operation.get("mutation") or ""),
+        "kind": str(operation.get("kind") or ""),
+        "title": _clean_text(operation.get("title"), 160),
+        "status": status,
+        "via": via,
+        "reason": reason,
+        "nextStep": next_step,
+        "requirement": primary_requirement,
+        "requiredCapabilities": [str(item) for item in requirements],
+        "noteId": _operation_note_id(operation),
+        "currentRef": current_ref,
+        "proposedRef": proposed_ref,
+        "targetParent": _clean_text(operation.get("targetParent") or operation.get("parentRef"), 200),
+        "existingPath": str(operation.get("existingPath") or ""),
+        "proposedPath": str(operation.get("proposedPath") or operation.get("path") or ""),
+        "verificationLevel": verification_level,
+        "capabilityEvidence": capability_evidence,
+    }
+
+
 def simulate_operation_manifest(
     manifest: dict[str, Any],
     settings: dict[str, Any] | None = None,
@@ -717,21 +780,21 @@ def simulate_operation_manifest(
     checks: list[dict[str, Any]] = []
     blocked: list[dict[str, str]] = []
     unknown: list[dict[str, str]] = []
+    ready: list[dict[str, Any]] = []
 
     for operation in operations:
         if not isinstance(operation, dict):
             continue
-        op_id = str(operation.get("opId") or "")
-        op_name = str(operation.get("op") or "")
         requirements = operation.get("requires") if isinstance(operation.get("requires"), list) else []
         if permission == "read_only" and str(operation.get("mutation") or "") in {"create", "update", "move", "delete"}:
-            item = {
-                "opId": op_id,
-                "op": op_name,
-                "status": "blocked",
-                "reason": "read-only-permission",
-                "nextStep": "在设置页把权限从 read_only 改为 notes 或 full。",
-            }
+            item = _operation_dry_run_item(
+                operation,
+                status="blocked",
+                reason="read-only-permission",
+                next_step="在设置页把权限从 read_only 改为 notes 或 full。",
+                via="permission",
+                capability_evidence=[],
+            )
             checks.append(item)
             blocked.append(item)
             continue
@@ -740,9 +803,19 @@ def simulate_operation_manifest(
         reason = ""
         next_step = ""
         via = "native"
+        capability_evidence: list[dict[str, Any]] = []
         for requirement in requirements:
             requirement_key = str(requirement)
             capability = _capability_state(native_caps, requirement_key)
+            capability_evidence.append(
+                {
+                    "requirement": requirement_key,
+                    "ready": bool(capability["ready"]),
+                    "available": bool(capability["available"]),
+                    "blockedReason": capability["blockedReason"],
+                    "nextStep": capability["nextStep"],
+                }
+            )
             if capability["ready"]:
                 continue
             if backend in {"auto", "url_api"} and url_api_ready:
@@ -763,19 +836,21 @@ def simulate_operation_manifest(
             next_step = capability["nextStep"] or "打开当前文档并刷新 MN 能力；或配置 URL API Gateway。"
             break
 
-        item = {
-            "opId": op_id,
-            "op": op_name,
-            "status": requirement_status,
-            "via": via,
-            "reason": reason,
-            "nextStep": next_step,
-        }
+        item = _operation_dry_run_item(
+            operation,
+            status=requirement_status,
+            reason=reason,
+            next_step=next_step,
+            via=via,
+            capability_evidence=capability_evidence,
+        )
         checks.append(item)
         if requirement_status == "blocked":
             blocked.append(item)
         elif requirement_status == "unknown":
             unknown.append(item)
+        else:
+            ready.append(item)
 
     if blocked:
         status = "blocked"
@@ -794,4 +869,13 @@ def simulate_operation_manifest(
         "blockedCount": len(blocked),
         "unknownCount": len(unknown),
         "checks": checks,
+        "perOperation": {
+            "schema": PER_OPERATION_DRY_RUN_SCHEMA,
+            "status": status,
+            "operationCount": len(checks),
+            "readyCount": len(ready),
+            "blockedCount": len(blocked),
+            "unknownCount": len(unknown),
+            "items": checks,
+        },
     }

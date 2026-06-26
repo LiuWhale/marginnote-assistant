@@ -457,6 +457,7 @@ def build_operation_plan(
                 for item in (dry_run.get("checks") if isinstance(dry_run.get("checks"), list) else [])
                 if isinstance(item, dict)
             ][:8],
+            "perOperation": dry_run.get("perOperation") if isinstance(dry_run.get("perOperation"), dict) else {},
         },
         "verify": {
             "expectedCreatedItems": write_count,

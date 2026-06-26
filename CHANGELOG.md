@@ -11,6 +11,8 @@ All notable changes to Codex Companion are documented here.
 - Moved native capability dry-run forward into `agent_plan`: write-capable workflow plans now reuse the operation dry-run gate before a draft exists, so missing required native capabilities can block the plan instead of failing only at final write time.
 - Gated Agent Workspace and reply next-action buttons with Operation Compiler status: write-capable or confirmation actions are disabled when the compiler reports blocked or unknown dry-run/capability state, while read-only actions remain available.
 - Added first-stage Operation Compiler repair actions: blocked plans can now surface actionable recovery buttons such as refreshing MarginNote native capabilities, opening settings, or caching the current PDF.
+- Added first-stage per-operation dry-run evidence for mind-map operations: `operationDryRunDetails` now shows each planned node operation's mutation, noteId, required capability, status, reason, and verification level, and blocked local Diff apply responses return the same `codex.mn.perOperationDryRun.v1` payload.
+- Added `codex.mn.residualProof.v1` to AI edit transaction verification, so rollback/retain evidence can report each created or target note's expected state, actual state, residual flag, and native-event evidence level instead of only a residual count.
 
 ## 0.4.28 - 2026-06-27
 

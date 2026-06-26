@@ -3317,6 +3317,11 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(result["ok"], result)
             self.assertEqual(result["applyPlan"]["applyBoundary"]["localApplyStatus"], "blocked")
             self.assertEqual(result["blockedOperations"][0]["reason"], "unverified-note-update-api")
+            self.assertEqual(result["dryRun"]["perOperation"]["schema"], "codex.mn.perOperationDryRun.v1")
+            self.assertEqual(result["dryRun"]["perOperation"]["blockedCount"], 1)
+            self.assertEqual(result["dryRun"]["perOperation"]["items"][0]["noteId"], "N-existing")
+            self.assertEqual(result["dryRun"]["perOperation"]["items"][0]["mutation"], "update")
+            self.assertEqual(result["dryRun"]["perOperation"]["items"][0]["verificationLevel"], "native_capability_missing")
             self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
 
     def test_request_mindmap_diff_apply_queues_update_merge_move_when_capabilities_are_ready(self) -> None:

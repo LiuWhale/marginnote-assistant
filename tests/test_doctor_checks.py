@@ -105,6 +105,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "operationCompilerSummary",
             "operationPlanStats",
             "operationCompilerChecks",
+            "operationDryRunDetails",
             "operationCompilerRepairActions",
             "operationWorkspaceNextActions",
             "mindmapStudioPanel",

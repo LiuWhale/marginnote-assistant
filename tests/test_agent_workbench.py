@@ -211,6 +211,71 @@ class AgentWorkbenchTests(unittest.TestCase):
         risk_items = {item["id"]: item for item in operation["operationPolicy"]["riskRegister"]["items"]}
         self.assertEqual(risk_items["permission"]["status"], "read_only_blocked")
 
+    def test_operation_plan_preserves_per_operation_dry_run(self) -> None:
+        operation = agent_workbench.build_agent_operation(
+            {
+                "prompt": "重组当前脑图结构",
+                "selectedNoteId": "N-root",
+                "selectedNoteTitle": "Root",
+                "topicid": "T1",
+                "bookmd5": "B1",
+            },
+            workflow={
+                "id": "mindmap_reorganize",
+                "title": "当前脑图重组工作流",
+                "status": "ready",
+                "steps": [
+                    {"id": "write", "action": "write_draft", "writes": True},
+                ],
+                "confirmationPoints": ["write"],
+            },
+            dry_run={
+                "schema": "codex.mn.operationDryRun.v1",
+                "status": "blocked",
+                "message": "写入前 dry-run 阻断：1 个操作不可执行。",
+                "blockedCount": 1,
+                "unknownCount": 0,
+                "checks": [
+                    {
+                        "opId": "mindmap-diff:2",
+                        "op": "update_mindmap_node",
+                        "mutation": "update",
+                        "title": "Existing Node",
+                        "status": "blocked",
+                        "reason": "unverified-note-update-api",
+                        "noteId": "N-existing",
+                    }
+                ],
+                "perOperation": {
+                    "schema": "codex.mn.perOperationDryRun.v1",
+                    "status": "blocked",
+                    "operationCount": 1,
+                    "readyCount": 0,
+                    "blockedCount": 1,
+                    "unknownCount": 0,
+                    "items": [
+                        {
+                            "opId": "mindmap-diff:2",
+                            "op": "update_mindmap_node",
+                            "mutation": "update",
+                            "title": "Existing Node",
+                            "status": "blocked",
+                            "reason": "unverified-note-update-api",
+                            "noteId": "N-existing",
+                            "verificationLevel": "native_capability_missing",
+                        }
+                    ],
+                },
+            },
+            settings={"permission": "notes"},
+        )
+
+        dry_run = operation["operationPlan"]["dryRun"]
+        self.assertEqual(dry_run["status"], "blocked")
+        self.assertEqual(dry_run["perOperation"]["schema"], "codex.mn.perOperationDryRun.v1")
+        self.assertEqual(dry_run["perOperation"]["items"][0]["noteId"], "N-existing")
+        self.assertEqual(dry_run["perOperation"]["items"][0]["verificationLevel"], "native_capability_missing")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -111,6 +111,7 @@ REQUIRED_WEB_CONTROL_IDS = [
     "operationCompilerSummary",
     "operationPlanStats",
     "operationCompilerChecks",
+    "operationDryRunDetails",
     "operationCompilerRepairActions",
     "operationWorkspaceNextActions",
     "mindmapStudioPanel",
