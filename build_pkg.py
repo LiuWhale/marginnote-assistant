@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,8 +15,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_ZIP = ROOT / "release/CodexCompanion-0.4.28-latest-dist.zip"
-DEFAULT_OUTPUT = ROOT / "release/CodexCompanion-0.4.28-latest.pkg"
+DEFAULT_VERSION = "0.4.29"
+DEFAULT_ZIP = ROOT / f"release/CodexCompanion-{DEFAULT_VERSION}-latest-dist.zip"
+DEFAULT_OUTPUT = ROOT / f"release/CodexCompanion-{DEFAULT_VERSION}-latest.pkg"
 ONEDRIVE_DIR = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 PACKAGE_IDENTIFIER = "com.codex.marginnote-companion"
 SHARED_INSTALL_PARENT = Path("Users/Shared/Codex Companion")
@@ -63,6 +65,15 @@ def release_manifest_paths(zip_path: Path, pkg_path: Path) -> list[Path]:
         paths.append(mnaddon_path)
     paths.append(pkg_path)
     return paths
+
+
+def infer_release_version(zip_path: Path) -> str:
+    match = re.search(r"CodexCompanion-(\d+\.\d+\.\d+)-", zip_path.name)
+    return match.group(1) if match else DEFAULT_VERSION
+
+
+def default_output_for_zip(zip_path: Path, version: str) -> Path:
+    return zip_path.expanduser().resolve().with_name(f"CodexCompanion-{version}-latest.pkg")
 
 
 def sync_release_artifacts(zip_path: Path, pkg_path: Path, onedrive_dir: Path = ONEDRIVE_DIR) -> dict[str, object]:
@@ -382,8 +393,8 @@ def build_pkg(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a macOS pkg wrapper for Codex Companion.")
     parser.add_argument("zip", nargs="?", default=str(DEFAULT_ZIP), help="CodexCompanion release zip.")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output .pkg path.")
-    parser.add_argument("--version", default="0.4.28", help="pkg version string.")
+    parser.add_argument("--output", default="", help="Output .pkg path. Defaults to the matching release latest pkg.")
+    parser.add_argument("--version", default="", help="pkg version string. Defaults to the version inferred from the release zip.")
     parser.add_argument("--sign-identity", default="", help="Developer ID Installer identity for productbuild --sign.")
     parser.add_argument("--auto-sign", action="store_true", help="Use the single Developer ID Installer identity found in the current keychain.")
     parser.add_argument("--dry-run", action="store_true", help="Stage payload and scripts without invoking pkgbuild/productbuild.")
@@ -392,10 +403,13 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        zip_path = Path(args.zip)
+        version = args.version or infer_release_version(zip_path)
+        output_path = Path(args.output) if args.output else default_output_for_zip(zip_path, version)
         result = build_pkg(
-            Path(args.zip),
-            Path(args.output),
-            args.version,
+            zip_path,
+            output_path,
+            version,
             sign_identity=args.sign_identity,
             auto_sign=args.auto_sign,
             dry_run=args.dry_run,

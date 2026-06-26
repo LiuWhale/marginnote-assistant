@@ -1,6 +1,6 @@
 # Codex Companion 产品手册
 
-适用版本：`0.4.28`
+适用版本：`0.4.29`
 更新时间：2026-06-27
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
@@ -548,7 +548,7 @@ OpenAI Key 写在：
 
 ## 21. 当前预览版限制
 
-截至 2026-06-27，`v0.4.28` 是当前公开预览版发布候选；本轮目标是完成 GitHub Release、双语 README、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.28 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
+截至 2026-06-27，`v0.4.29` 是当前公开预览版发布候选；本轮目标是完成 GitHub Release、双语 README、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.29 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
 
 - MarginNote 原生可见高亮仍缺活跃 PDF 选区下的完整证据。
 - `release_sha256_manifest` 已覆盖 zip、`.mnaddon` 和 `.pkg` 并通过；当前阻塞不再来自 artifact hash manifest。
@@ -556,7 +556,7 @@ OpenAI Key 写在：
 - 还缺第二用户或第二机器的结构化安装验收。
 - 还缺同一文档完整按钮/工作流验收 PASS evidence。
 
-这些限制不影响使用 `v0.4.28` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
+这些限制不影响使用 `v0.4.29` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
 
 ## 22. 给用户的最短使用路径
 

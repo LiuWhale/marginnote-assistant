@@ -4,6 +4,8 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.29 - 2026-06-27
+
 ### Added
 
 - Added the first Operation Compiler surface: `agent_plan` now returns `codex.mn.operationPlan.v1`, `codex.mn.verificationPlan.v1`, and `codex.mn.operationCompiler.v1`, and the operation workspace renders planned steps, write count, verification status, compiler checks, and blocking reasons.
