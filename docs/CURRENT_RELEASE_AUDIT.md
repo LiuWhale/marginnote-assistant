@@ -6,38 +6,37 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.36 公开预览版
-- MN4 插件 manifest：0.4.36
-- Companion：0.4.36
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.36`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.36-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.36-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.36-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.36-latest.mnaddon`
+- 当前发布候选：0.4.37 公开预览版
+- MN4 插件 manifest：0.4.37
+- Companion：0.4.37
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.37`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.37-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.37-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.37-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.37-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.36-latest.pkg`，已生成但未签名、未公证
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.37-latest.pkg`，已生成但未签名、未公证
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
 
-### 2026-06-27 v0.4.36 发布候选：Notebook Runbook Preflight Ledger
+### 2026-06-27 v0.4.37 发布候选：Zero-Message Study Program
 
-本轮把 0.4.35 的 `Notebook Runbook AutoPlan` 从前端按钮序列推进成有后端证据的安全预检运行。`Notebook Workspace` 仍会从 runbook 中产出 `autoPlan`，Web 面板仍显示 `自动准备` 按钮，按顺序触发扫描 MN 对象、读取脑图基线、生成操作计划这类安全准备动作；但每次自动准备现在会创建 `codex.mn.notebookRunbookPreflightRun.v1`，记录 running/completed/failed/cancelled 状态、动作列表、完成计数和事件时间线，并以 `notebook_runbook_preflight` 进入 Operation Ledger。它不直接写入 MarginNote，写入仍必须进入 Diff、确认和真实写入事务账本。`继续下一步` 仍保留，用于手动推进第一个真实缺口。
+本轮把 `Notebook Workspace` 从“可执行 runbook 和预检账本”继续推进到“打开文档即可看到学习计划”。后端 `notebook_workspace` 新增 `codex.mn.studyProgram.v1`，根据当前上下文、MN 原生对象扫描、脑图基线、复习卡、workflow run 和 Operation Ledger 证据计算覆盖率与缺口；Web 首屏新增 `Study Program` 面板，直接显示对象/脑图/复习卡/workflow/账本缺口，并推荐 `paper_deep_reading`、`mindmap_reorganize`、`selection_to_cards` 等 workflow。用户不需要先输入 prompt 才知道下一步。点击推荐仍调用现有 `workflow_start`，写入步骤继续受确认点、dry-run、事务和 Operation Ledger 约束。
 
 主要变化包括：
 
-- 后端新增 `notebook_runbook_preflight_record`，返回 `codex.mn.notebookRunbookPreflightRun.v1`，并强制 `writePolicy=no_write_preflight`。
-- 后端 `notebook_workspace` 返回的 `codex.mn.notebookRunbookAutoPlan.v1` 现在包含 `latestRun`，用于显示最近一次自动准备状态。
-- `operation_ledger_list/get` 新增 `notebook_runbook_preflight` 类型，可按账本筛选并查看动作列表、事件时间线和 no-write verification。
-- WebView 新增 `notebookWorkspaceRunbookAutoStatus`，点击 `notebookWorkspaceRunbookAutoButton` 后先记录 running，完成后记录 completed，失败时记录 failed 并停止后续步骤。
-- Runbook 动作继续复用现有 MN 对象扫描、读取脑图树、`agent_plan`、workflow list 和 Operation Ledger list，不绕过权限、确认、Diff 或账本机制。
-- `doctor.py`、Web 静态检查和单文档验收 required controls 已更新到 Notebook Runbook Preflight Ledger 结构。
+- 后端新增 `notebook_study_program`，返回 `codex.mn.studyProgram.v1`、`codex.mn.studyProgramCoverage.v1`、`codex.mn.studyProgramGap.v1` 和 `codex.mn.studyProgramRecommendation.v1`。
+- `notebookWorkspace.notebookWorkspace.studyProgram` 包含 `mode=zero_message`、`requiresPrompt=false`、覆盖率分数、缺口列表、推荐 workflow 和 primary recommendation。
+- WebView 新增 `notebookWorkspaceStudyProgram`、`notebookWorkspaceStudyCoverage`、`notebookWorkspaceStudyGaps`、`notebookWorkspaceStudyRecommendations`，显示首屏学习计划。
+- 推荐 workflow 复用现有 `workflow_start` 路径，不新增绕过权限、确认、Diff 或账本的写入通道。
+- `doctor.py`、Web 静态检查和单文档验收 required controls 已更新到 Study Program + Notebook Runbook 结构。
 
 本轮本地验证结果：
 
 ```text
 python3 -m unittest discover -s tests
-503 tests passed
+504 tests passed
 
 node --check extension/codex.mn.assistant/main.js
 node --check extension/codex.mn.assistant/web/app.js
@@ -49,24 +48,24 @@ PASS
 git diff --check
 PASS
 
-python3 release_smoke_test.py release/CodexCompanion-0.4.36-latest-dist.zip --mnaddon release/CodexCompanion-0.4.36-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.37-latest-dist.zip --mnaddon release/CodexCompanion-0.4.37-latest.mnaddon
 PASS, exact artifact hashes are recorded in release/SHA256SUMS.txt and the OneDrive mirror.
 
-python3 release_smoke_test.py release/CodexCompanion-0.4.36-latest-dist.zip --mnaddon release/CodexCompanion-0.4.36-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.37-latest-dist.zip --mnaddon release/CodexCompanion-0.4.37-latest.mnaddon --install-dry-run
 PASS
 
-python3 build_pkg.py release/CodexCompanion-0.4.36-latest-dist.zip --json
-PASS, generated release/CodexCompanion-0.4.36-latest.pkg
+python3 build_pkg.py release/CodexCompanion-0.4.37-latest-dist.zip --json
+PASS, generated release/CodexCompanion-0.4.37-latest.pkg
 ```
 
 本轮 artifact：
 
-- `CodexCompanion-0.4.36-latest-dist.zip`
-- `CodexCompanion-0.4.36-latest.mnaddon`
-- `CodexCompanion-0.4.36-latest.pkg`
+- `CodexCompanion-0.4.37-latest-dist.zip`
+- `CodexCompanion-0.4.37-latest.mnaddon`
+- `CodexCompanion-0.4.37-latest.pkg`
 - `SHA256SUMS.txt`
 
-当前 release acceptance 剩余阻塞为：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。其中前两项需要 MN4 重新打开面板或重启后上报 `pluginVersion=0.4.36` 的 WebView/native 事件；其余仍是最终 v1.0/正式发布门槛，不阻止 0.4.36 作为公开预览版发布。
+当前 release acceptance 剩余阻塞为：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。其中前两项需要 MN4 重新打开面板或重启后上报 `pluginVersion=0.4.37` 的 WebView/native 事件；其余仍是最终 v1.0/正式发布门槛，不阻止 0.4.37 作为公开预览版发布。
 
 ### 2026-06-27 v0.4.31 发布候选：Notebook Workspace 首屏总览
 

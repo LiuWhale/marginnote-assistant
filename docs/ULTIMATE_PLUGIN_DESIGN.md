@@ -31,6 +31,8 @@ v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
 
 0.4.36 继续把 `Notebook Workspace` 从“单步执行入口”推进到“有证据的安全预检入口”：`Notebook Runbook` 不只显示上下文、MN 原生对象扫描、脑图基线、操作计划、workflow runtime 和账本证据，还会暴露 `继续下一步` 与 `自动准备`。后端根据真实缺口生成 `nextStep` 和 `autoPlan`；`autoPlan` 只顺序执行扫描 MN 对象、读取脑图基线、生成操作计划这类安全预检动作，不直接写入 MarginNote。每次自动准备都会写入 `codex.mn.notebookRunbookPreflightRun.v1`，带 `writePolicy=no_write_preflight`、动作列表、完成/失败计数和事件时间线，并作为 `notebook_runbook_preflight` 进入 Operation Ledger。对象扫描是否完成仍看 `native_object_scan` 证据，而不是把脑图缓存导入的 Registry 对象误当成原生扫描。它仍不是终局 Knowledge OS，因为它还不能像 Finder 一样实时浏览整个 notebook，也不能完整原地编辑和证明所有真实 MN 对象；但它建立了终局需要的用户路径：先看 notebook 状态和缺口，再由 runbook 带着用户进入对象、脑图、工作流和账本，而不是先问一句话再找回答下方按钮。
 
+0.4.37 继续把这个迁移从“预检步骤”推进到“zero-message 学习计划”：`notebook_workspace` 返回 `codex.mn.studyProgram.v1`，Web 首屏显示 `Study Program`，直接给出覆盖率、对象/脑图/复习卡/workflow/账本缺口和推荐 workflow。用户打开文档后，不输入 prompt 也能看到 `paper_deep_reading`、`mindmap_reorganize`、`selection_to_cards` 等下一步，并且点击推荐会进入现有 `workflow_start`、确认点和账本链路，而不是绕过工作台直接写 MN。这仍是 Study Program Engine 的第一阶段：它现在能提出计划和缺口，但还没有真正维护长期学习目标、复习间隔、跨文档概念覆盖和完整知识缺口计算。
+
 ### 0.1 终局选择：B + C，而不是 A
 
 终局不走“MarginNote 自带 AI 的超强版”这条路。那条路只会得到一个更会聊天、更会生成脑图的面板，和当前 0.4.x 的差异不够大。

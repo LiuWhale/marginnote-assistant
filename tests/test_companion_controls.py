@@ -3825,6 +3825,42 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(workspace["workflowWorkspace"]["schema"], "codex.mn.workflowWorkspace.v1")
             self.assertEqual(workspace["mindmapTreeCache"]["schema"], "codex.mn.mindmapTreeCache.v1")
 
+    def test_notebook_workspace_returns_zero_message_study_program_recommendations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Zero Message Paper",
+                }
+            )
+
+            self.assertTrue(workspace["ok"], workspace)
+            program = workspace["notebookWorkspace"]["studyProgram"]
+            self.assertEqual(program["schema"], "codex.mn.studyProgram.v1")
+            self.assertEqual(program["mode"], "zero_message")
+            self.assertFalse(program["requiresPrompt"])
+            self.assertEqual(program["scope"]["topicid"], "T1")
+            self.assertEqual(program["scope"]["bookmd5"], "B1")
+            self.assertEqual(program["scope"]["documentTitle"], "Zero Message Paper")
+            self.assertIn("mindmap_baseline", [item["id"] for item in program["gaps"]])
+            self.assertIn("review_cards", [item["id"] for item in program["gaps"]])
+            self.assertGreaterEqual(program["coverage"]["gapCount"], 2)
+            self.assertGreaterEqual(program["coverage"]["readinessScore"], 0)
+            self.assertLessEqual(program["coverage"]["readinessScore"], 100)
+            self.assertEqual(program["primaryRecommendation"]["workflowId"], "paper_deep_reading")
+            self.assertEqual(program["primaryRecommendation"]["action"]["action"], "workflow_start")
+            self.assertEqual(program["primaryRecommendation"]["action"]["surface"], "workflow_builder")
+            self.assertIn("Zero Message Paper", program["primaryRecommendation"]["action"]["payload"]["prompt"])
+            self.assertEqual(
+                [item["workflowId"] for item in program["recommendedWorkflows"][:3]],
+                ["paper_deep_reading", "mindmap_reorganize", "selection_to_cards"],
+            )
+
     def test_notebook_runbook_preflight_record_is_visible_in_workspace_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

@@ -4,6 +4,18 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.37 - 2026-06-27
+
+### Added
+
+- Added `codex.mn.studyProgram.v1` to `notebook_workspace`. Notebook Workspace now returns a zero-message Study Program with coverage scores, concrete gaps, and recommended workflows before the user types a prompt.
+- Added the visible `Study Program` panel to the Notebook Workspace first screen. It shows object, mind-map, review-card, workflow, and ledger gaps, then offers direct workflow recommendations such as `paper_deep_reading`, `mindmap_reorganize`, and `selection_to_cards`.
+- Promoted `notebookWorkspaceStudyProgram`, `notebookWorkspaceStudyCoverage`, `notebookWorkspaceStudyGaps`, and `notebookWorkspaceStudyRecommendations` to required WebView/runtime controls in doctor and single-document acceptance checks.
+
+### Changed
+
+- Moved the v3 transition one step closer to a zero-message Notebook Knowledge OS: opening a document can now produce a learning plan and executable workflow recommendations without first asking a chat question.
+
 ## 0.4.36 - 2026-06-27
 
 ### Added

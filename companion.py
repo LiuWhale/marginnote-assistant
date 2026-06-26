@@ -90,7 +90,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.36"
+CURRENT_PLUGIN_VERSION = "0.4.37"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1953,6 +1953,224 @@ def notebook_runbook_auto_plan(steps: list[dict[str, Any]], latest_run: dict[str
     }
 
 
+def notebook_study_program_gap(
+    gap_id: str,
+    title: str,
+    status: str,
+    detail: str,
+    *,
+    action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    severity = {
+        "blocked": "danger",
+        "action_required": "warning",
+        "pending": "secondary",
+        "ready": "ready",
+    }.get(status, "secondary")
+    return {
+        "schema": "codex.mn.studyProgramGap.v1",
+        "id": gap_id,
+        "title": title,
+        "status": status,
+        "severity": severity,
+        "detail": detail,
+        "action": action if isinstance(action, dict) else {},
+    }
+
+
+def notebook_study_program_workflow_action(
+    workflow_id: str,
+    title: str,
+    summary: dict[str, Any],
+    *,
+    tone: str = "primary",
+) -> dict[str, Any]:
+    document_title = str(summary.get("documentTitle") or "当前文档")
+    prompt = {
+        "paper_deep_reading": f"精读并整理当前文档：{document_title}",
+        "mindmap_reorganize": f"基于当前脑图重组知识结构：{document_title}",
+        "selection_to_cards": f"为当前材料生成大小适中的复习卡：{document_title}",
+    }.get(workflow_id, f"处理当前材料：{document_title}")
+    focus = summary.get("focusObject") if isinstance(summary.get("focusObject"), dict) else {}
+    payload = {
+        "workflowId": workflow_id,
+        "prompt": prompt,
+        "topicid": str(summary.get("topicid") or ""),
+        "bookmd5": str(summary.get("bookmd5") or ""),
+        "documentTitle": document_title,
+        "mnObject": focus if object_ref_has_identity(focus) else {},
+        "source": "notebook-study-program",
+    }
+    return notebook_workspace_action(
+        f"start_{workflow_id}",
+        title,
+        "workflow_start",
+        payload,
+        "workflow_builder",
+        "从 Notebook Workspace 直接启动可审计 workflow；写入步骤仍需要确认。",
+        tone,
+    )
+
+
+def notebook_study_program_recommendation(
+    workflow_id: str,
+    title: str,
+    reason: str,
+    gap_ids: list[str],
+    summary: dict[str, Any],
+    *,
+    tone: str = "primary",
+) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.studyProgramRecommendation.v1",
+        "workflowId": workflow_id,
+        "title": title,
+        "reason": reason,
+        "gapIds": [str(item) for item in gap_ids],
+        "action": notebook_study_program_workflow_action(workflow_id, title, summary, tone=tone),
+    }
+
+
+def notebook_study_program(
+    summary: dict[str, Any],
+    primary_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    actions_by_id = {str(item.get("id") or ""): item for item in primary_actions if isinstance(item, dict)}
+    focus = summary.get("focusObject") if isinstance(summary.get("focusObject"), dict) else {}
+    objects = summary.get("objects") if isinstance(summary.get("objects"), dict) else {}
+    mindmap = summary.get("mindmap") if isinstance(summary.get("mindmap"), dict) else {}
+    review = summary.get("reviewQueue") if isinstance(summary.get("reviewQueue"), dict) else {}
+    workflows = summary.get("workflows") if isinstance(summary.get("workflows"), dict) else {}
+    ledger = summary.get("ledger") if isinstance(summary.get("ledger"), dict) else {}
+    readiness = summary.get("readiness") if isinstance(summary.get("readiness"), dict) else {}
+    has_context = bool(summary.get("topicid") or summary.get("bookmd5") or summary.get("documentTitle") or object_ref_has_identity(focus))
+    native_scan_count = int(objects.get("nativeScan") or 0)
+    mindmap_ready = str(mindmap.get("status") or "") == "available"
+    review_total = int(review.get("total") or 0)
+    workflow_count = int(workflows.get("runCount") or 0)
+    ledger_total = int(ledger.get("total") or 0)
+
+    gaps: list[dict[str, Any]] = []
+    if not has_context:
+        gaps.append(
+            notebook_study_program_gap(
+                "context_scope",
+                "缺少上下文",
+                "blocked",
+                "还没有当前 notebook、文档或 MNObject，不能自动生成可靠学习计划。",
+            )
+        )
+    if native_scan_count <= 0:
+        gaps.append(
+            notebook_study_program_gap(
+                "mn_object_scan",
+                "未扫描 MN 原生对象",
+                "action_required" if readiness.get("mnApiAvailable") else "blocked",
+                "需要先扫描原生对象，后续覆盖率、脑图 Diff 和回滚证明才有对象基线。",
+                action=actions_by_id.get("scan_mn_objects"),
+            )
+        )
+    if not mindmap_ready:
+        gaps.append(
+            notebook_study_program_gap(
+                "mindmap_baseline",
+                "缺少脑图基线",
+                "action_required" if readiness.get("mnApiAvailable") else "blocked",
+                "需要读取当前真实脑图树，避免默认新建重复脑图。",
+                action=actions_by_id.get("read_mindmap_tree"),
+            )
+        )
+    if review_total <= 0:
+        gaps.append(
+            notebook_study_program_gap(
+                "review_cards",
+                "缺少复习卡覆盖",
+                "action_required" if has_context else "blocked",
+                "当前材料还没有可见复习卡；Card Factory 应按概念、公式、方法、实验和局限生成短卡。",
+                action=actions_by_id.get("open_review_queue"),
+            )
+        )
+    if workflow_count <= 0:
+        gaps.append(
+            notebook_study_program_gap(
+                "workflow_runtime",
+                "缺少可恢复工作流",
+                "pending",
+                "还没有当前文档 workflow run；长任务应从可暂停、可恢复、可验收的 workflow 进入。",
+                action=actions_by_id.get("open_workflows"),
+            )
+        )
+    if ledger_total <= 0:
+        gaps.append(
+            notebook_study_program_gap(
+                "operation_evidence",
+                "缺少操作证据",
+                "pending",
+                "当前文档还没有 Operation Ledger 证据；后续写入、确认和回滚必须留痕。",
+                action=actions_by_id.get("open_operation_ledger"),
+            )
+        )
+
+    axis_scores = {
+        "context": 100 if has_context else 0,
+        "objects": 100 if native_scan_count > 0 else (40 if int(objects.get("total") or 0) > 0 else 0),
+        "mindmap": 100 if mindmap_ready else 0,
+        "review": 100 if review_total > 0 else 0,
+        "workflow": 100 if workflow_count > 0 else 0,
+        "ledger": 100 if ledger_total > 0 else 0,
+    }
+    readiness_score = int(round(sum(axis_scores.values()) / max(len(axis_scores), 1)))
+    recommendations = [
+        notebook_study_program_recommendation(
+            "paper_deep_reading",
+            "启动文档精读工作流",
+            "先补齐全文缓存、脑图草稿、短卡草稿和写入 dry-run，是当前文档最完整的 zero-message 路径。",
+            ["mindmap_baseline", "review_cards", "workflow_runtime", "operation_evidence"],
+            summary,
+            tone="primary",
+        ),
+        notebook_study_program_recommendation(
+            "mindmap_reorganize",
+            "重组当前脑图",
+            "围绕现有脑图做非破坏式重组草稿，避免重复新建一棵相似脑图。",
+            ["mindmap_baseline", "mn_object_scan"],
+            summary,
+            tone="secondary",
+        ),
+        notebook_study_program_recommendation(
+            "selection_to_cards",
+            "生成复习短卡",
+            "把当前材料转成大小适中的复习卡，并进入 Card Factory 和确认链。",
+            ["review_cards"],
+            summary,
+            tone="secondary",
+        ),
+    ]
+    if not has_context:
+        recommendations = []
+    return {
+        "schema": "codex.mn.studyProgram.v1",
+        "mode": "zero_message",
+        "requiresPrompt": False,
+        "status": "blocked" if any(item.get("status") == "blocked" for item in gaps) else ("needs_action" if gaps else "ready"),
+        "scope": {
+            "topicid": str(summary.get("topicid") or ""),
+            "bookmd5": str(summary.get("bookmd5") or ""),
+            "documentTitle": str(summary.get("documentTitle") or ""),
+            "focusObject": focus if object_ref_has_identity(focus) else {},
+        },
+        "coverage": {
+            "schema": "codex.mn.studyProgramCoverage.v1",
+            "readinessScore": readiness_score,
+            "gapCount": len(gaps),
+            **axis_scores,
+        },
+        "gaps": gaps,
+        "recommendedWorkflows": recommendations,
+        "primaryRecommendation": recommendations[0] if recommendations else {},
+    }
+
+
 def notebook_workspace_runbook(
     summary: dict[str, Any],
     primary_actions: list[dict[str, Any]],
@@ -2155,6 +2373,7 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
         ledger_total=ledger_total,
     )
     summary["primaryActions"] = primary_actions
+    summary["studyProgram"] = notebook_study_program(summary, primary_actions)
     summary["runbook"] = notebook_workspace_runbook(summary, primary_actions)
     return {
         "ok": True,
@@ -4739,7 +4958,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.36-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.37-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )

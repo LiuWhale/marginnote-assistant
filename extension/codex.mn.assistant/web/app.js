@@ -113,6 +113,10 @@
     'notebookWorkspaceWorkflow',
     'notebookWorkspaceLedger',
     'notebookWorkspaceActions',
+    'notebookWorkspaceStudyProgram',
+    'notebookWorkspaceStudyCoverage',
+    'notebookWorkspaceStudyGaps',
+    'notebookWorkspaceStudyRecommendations',
     'commandPanePanel',
     'commandPaneHeader',
     'commandPaneStatus',
@@ -2176,6 +2180,70 @@
     return text;
   }
 
+  function renderNotebookStudyProgram(program) {
+    program = program || {};
+    var panel = byId('notebookWorkspaceStudyProgram');
+    var coverageNode = byId('notebookWorkspaceStudyCoverage');
+    var gapsNode = byId('notebookWorkspaceStudyGaps');
+    var recommendationsNode = byId('notebookWorkspaceStudyRecommendations');
+    if (!panel || !coverageNode || !gapsNode || !recommendationsNode) return;
+    var status = String(program.status || 'idle');
+    var coverage = program.coverage || {};
+    panel.className = 'notebook-study-program ' + status;
+    coverageNode.textContent =
+      '覆盖率：' + (coverage.readinessScore || 0) + '%' +
+      ' / 缺口 ' + (coverage.gapCount || 0) +
+      ' / 对象 ' + (coverage.objects || 0) +
+      ' / 脑图 ' + (coverage.mindmap || 0) +
+      ' / 复习 ' + (coverage.review || 0) +
+      ' / 账本 ' + (coverage.ledger || 0);
+
+    var gaps = program.gaps || [];
+    if (!gaps.length) {
+      replaceElementChildren(gapsNode, [textNode('div', 'notebook-study-gap empty', '当前材料暂无明显缺口。')]);
+    } else {
+      var gapNodes = [];
+      for (var i = 0; i < Math.min(gaps.length, 6); i++) {
+        (function(gap) {
+          gap = gap || {};
+          var row = document.createElement('div');
+          row.className = 'notebook-study-gap ' + String(gap.severity || gap.status || 'secondary');
+          row.setAttribute('data-study-program-gap', gap.id || 'gap');
+          row.appendChild(textNode('div', 'notebook-study-gap-title', gap.title || '学习缺口'));
+          row.appendChild(textNode('div', 'notebook-study-gap-detail', gap.detail || '等待工作台补齐证据。'));
+          gapNodes.push(row);
+        })(gaps[i]);
+      }
+      replaceElementChildren(gapsNode, gapNodes);
+    }
+
+    var recommendations = program.recommendedWorkflows || [];
+    if (!recommendations.length) {
+      replaceElementChildren(recommendationsNode, [textNode('div', 'notebook-study-recommendation empty', '当前上下文不足，暂时不能推荐 workflow。')]);
+      return;
+    }
+    var recNodes = [];
+    for (var j = 0; j < Math.min(recommendations.length, 3); j++) {
+      (function(item) {
+        item = item || {};
+        var action = item.action || {};
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'notebook-study-recommendation ' + (action.tone || (j === 0 ? 'primary' : 'secondary'));
+        button.setAttribute('data-study-workflow-id', item.workflowId || '');
+        button.title = item.reason || action.detail || '';
+        button.appendChild(textNode('span', 'notebook-study-recommendation-title', item.title || action.label || '启动 workflow'));
+        button.appendChild(textNode('span', 'notebook-study-recommendation-detail', item.reason || action.detail || '进入可审计 workflow。'));
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runNotebookWorkspaceAction(action);
+        });
+        recNodes.push(button);
+      })(recommendations[j]);
+    }
+    replaceElementChildren(recommendationsNode, recNodes);
+  }
+
   function runNotebookWorkspaceAction(item, done) {
     item = item || {};
     done = typeof done === 'function' ? done : function() {};
@@ -2469,6 +2537,7 @@
     setText('notebookWorkspaceReview', notebookWorkspaceCardText('复习', review.total || 0, '到期 ' + (review.due || 0) + ' / 新卡 ' + (review.new || 0)));
     setText('notebookWorkspaceWorkflow', notebookWorkspaceCardText('工作流', workflows.runCount || 0, workflows.latestStatus || 'none'));
     setText('notebookWorkspaceLedger', notebookWorkspaceCardText('账本', ledger.total || 0, '证据项'));
+    renderNotebookStudyProgram(data.studyProgram || {});
     renderNotebookWorkspaceRunbook(data.runbook || {});
     var target = byId('notebookWorkspaceActions');
     if (!target) return;

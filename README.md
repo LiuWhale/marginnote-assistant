@@ -23,6 +23,7 @@ The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Compa
 - Switch between `Chat Mode` for lightweight reading conversation and `Agent Workspace` for object, operation, knowledge, and workflow work.
 - Use the `Workspace Navigator` in Agent Workspace to jump directly to `Knowledge Console`, `Mindmap Studio`, `Card Factory`, `Operation Ledger`, `Knowledge Graph`, `Workflow Builder`, and `Skill Center`.
 - Open into a first-stage `Notebook Workspace` overview instead of a blank chat page. The overview aggregates the current focus object, object counts, mind-map cache, review queue, workflow runs, and Operation Ledger counts, then exposes direct actions to scan MarginNote objects, read the current mind-map tree, plan the next operation, inspect review cards, workflows, and ledger evidence.
+- Show a first-stage `Study Program` in the Notebook Workspace. It computes a zero-message coverage snapshot and concrete gaps for MN objects, mind-map baseline, review cards, workflow runs, and Operation Ledger evidence, then recommends workflows such as `paper_deep_reading`, `mindmap_reorganize`, and `selection_to_cards` without requiring a chat prompt first.
 - Use the first `Notebook Runbook` in the workspace. It turns the notebook overview into an executable checklist for context, native object scan, mind-map baseline, operation plan, workflow runtime, and ledger evidence, with a status, evidence line, action button for each step, a single `Continue next step` button, and an `Auto prepare` preflight plan that runs safe setup actions without writing to MarginNote. Each AutoPlan run now records a `notebook_runbook_preflight` ledger entry and shows the latest preflight status in the Runbook panel.
 - Use a dedicated `Command Pane` instead of a dialog tab inside the workbench. Workspace mode keeps the prompt/send controls visible but collapses the conversation history by default; Chat Mode expands the full conversation when you want a built-in-AI-style reading chat.
 - Choose the context scope explicitly: auto, selection/node only, or full document.
@@ -286,20 +287,20 @@ curl http://127.0.0.1:48761/status
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.36
+python3 package_release.py 0.4.37
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.36-latest-dist.zip --mnaddon release/CodexCompanion-0.4.36-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.36-latest-dist.zip --mnaddon release/CodexCompanion-0.4.36-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.37-latest-dist.zip --mnaddon release/CodexCompanion-0.4.37-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.37-latest-dist.zip --mnaddon release/CodexCompanion-0.4.37-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.36-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.37-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

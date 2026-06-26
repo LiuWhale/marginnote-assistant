@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260627-runbook-preflight-v1">
+  <link rel="stylesheet" href="app.css?v=20260627-study-program-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
@@ -90,6 +90,20 @@
         <div id="notebookWorkspaceLedger" class="notebook-workspace-card">账本：等待证据</div>
       </div>
       <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
+      <section id="notebookWorkspaceStudyProgram" class="notebook-study-program idle" aria-label="Study Program">
+        <div class="notebook-study-header">
+          <div>
+            <div class="notebook-study-kicker">Study Program</div>
+            <div id="notebookWorkspaceStudyCoverage" class="notebook-study-coverage">等待当前材料覆盖率。</div>
+          </div>
+        </div>
+        <div id="notebookWorkspaceStudyGaps" class="notebook-study-gaps">
+          <div class="notebook-study-gap empty">对象、脑图、卡片、workflow 和账本缺口会显示在这里。</div>
+        </div>
+        <div id="notebookWorkspaceStudyRecommendations" class="notebook-study-recommendations">
+          <div class="notebook-study-recommendation empty">推荐 workflow 会在这里出现，不需要先输入 prompt。</div>
+        </div>
+      </section>
       <section id="notebookWorkspaceRunbook" class="notebook-runbook idle" aria-label="Notebook Runbook">
         <div class="notebook-runbook-header">
           <div>
@@ -681,6 +695,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260627-runbook-preflight-v1"></script>
+  <script src="app.js?v=20260627-study-program-v1"></script>
 </body>
 </html>
