@@ -3715,6 +3715,47 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("review_operation_plan", [item["id"] for item in operation["nextActions"]])
             self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
 
+    def test_agent_plan_blocks_write_plan_when_required_native_capability_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes", "mnApiBackend": "native"}})
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "capabilityMatrix": {
+                            "nativeCards": {
+                                "available": False,
+                                "ready": False,
+                                "blockedReason": "unverified-note-api",
+                                "nextStep": "刷新 MN 原生能力。",
+                            }
+                        }
+                    },
+                }
+            )
+
+            planned = companion.handle_action(
+                {
+                    "action": "agent_plan",
+                    "prompt": "把这个选区做成短卡",
+                    "selectionText": "selected evidence",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(planned["ok"], planned)
+            self.assertEqual(planned["operationPlan"]["status"], "blocked")
+            self.assertEqual(planned["dryRun"]["status"], "blocked")
+            self.assertGreater(planned["dryRun"]["blockedCount"], 0)
+            self.assertEqual(planned["operationCompiler"]["status"], "blocked")
+            compiler_checks = {item["id"]: item for item in planned["operationCompiler"]["checks"]}
+            self.assertEqual(compiler_checks["dry_run"]["tone"], "block")
+            self.assertIn("unverified-note-api", planned["dryRun"]["checks"][0]["reason"])
+
     def test_workflow_start_enqueues_safe_steps_and_pauses_at_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

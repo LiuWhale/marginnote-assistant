@@ -8,6 +8,7 @@ All notable changes to Codex Companion are documented here.
 
 - Added the first Operation Compiler surface: `agent_plan` now returns `codex.mn.operationPlan.v1`, `codex.mn.verificationPlan.v1`, and `codex.mn.operationCompiler.v1`, and the operation workspace renders planned steps, write count, verification status, compiler checks, and blocking reasons.
 - Added Operation Compiler controls to doctor, Web static checks, and single-document acceptance so the structured plan layer is treated as a required runtime surface rather than hidden JSON.
+- Moved native capability dry-run forward into `agent_plan`: write-capable workflow plans now reuse the operation dry-run gate before a draft exists, so missing required native capabilities can block the plan instead of failing only at final write time.
 
 ## 0.4.28 - 2026-06-27
 

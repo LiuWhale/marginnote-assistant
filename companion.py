@@ -483,6 +483,47 @@ def operation_dry_run(manifest: dict[str, Any], topic_id: str = "", book_md5: st
     return operation_runtime.simulate_operation_manifest(manifest, settings, native_caps, mn_api)
 
 
+def workflow_operation_plan_dry_run(
+    operation_plan: dict[str, Any],
+    settings: dict[str, Any],
+    native_caps: dict[str, Any],
+    mn_api: dict[str, Any],
+) -> dict[str, Any]:
+    operations = operation_plan.get("operations") if isinstance(operation_plan.get("operations"), list) else []
+    local_ready = {"rollbackLedger"}
+    write_operations: list[dict[str, Any]] = []
+    for operation in operations:
+        if not isinstance(operation, dict) or not operation.get("writes"):
+            continue
+        clean_operation = dict(operation)
+        requirements = operation.get("requires") if isinstance(operation.get("requires"), list) else []
+        clean_operation["requires"] = [str(item) for item in requirements if str(item) not in local_ready]
+        write_operations.append(clean_operation)
+    if not write_operations:
+        return {
+            "schema": "codex.mn.operationDryRun.v1",
+            "status": "ready",
+            "message": "当前 workflow 没有写入步骤。",
+            "operationCount": 0,
+            "blockedCount": 0,
+            "unknownCount": 0,
+            "checks": [],
+            "source": "agent_operation_plan",
+            "localReadyCapabilities": sorted(local_ready),
+        }
+    dry_run = operation_runtime.simulate_operation_manifest(
+        {"operationPlan": {"operations": write_operations}},
+        settings,
+        native_caps,
+        mn_api,
+    )
+    return {
+        **dry_run,
+        "source": "agent_operation_plan",
+        "localReadyCapabilities": sorted(local_ready),
+    }
+
+
 def draft_operation_manifest(
     cards: list[Any],
     mindmap: dict[str, Any] | None,
@@ -856,6 +897,17 @@ def agent_plan(payload: dict[str, Any]) -> dict[str, Any]:
         dry_run=dry_run,
         settings=settings,
     )
+    if not dry_run and isinstance(operation.get("operationPlan"), dict):
+        operation_plan = operation.get("operationPlan") if isinstance(operation.get("operationPlan"), dict) else {}
+        if int(operation_plan.get("writeCount") or 0) > 0:
+            dry_run = workflow_operation_plan_dry_run(operation_plan, settings, native_caps, mn_api)
+            operation = agent_workbench.build_agent_operation(
+                payload,
+                workflow=workflow,
+                knowledge=knowledge,
+                dry_run=dry_run,
+                settings=settings,
+            )
     focus = operation.get("object") if isinstance(operation.get("object"), dict) else {}
     policy = operation.get("operationPolicy") if isinstance(operation.get("operationPolicy"), dict) else {}
     risk = policy.get("risk") if isinstance(policy.get("risk"), dict) else {}
