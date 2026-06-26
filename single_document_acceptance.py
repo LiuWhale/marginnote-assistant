@@ -14,7 +14,7 @@ EVENTS_PATH = ROOT / "events.jsonl"
 DEFAULT_ACTION_RESULTS_PATH = ROOT / "release/evidence/action-results.jsonl"
 SCHEMA = "codex-companion-single-document-acceptance-v1"
 NATIVE_HIGHLIGHT_SCHEMA = "codex-companion-native-highlight-v1"
-CURRENT_PLUGIN_VERSION = "0.4.35"
+CURRENT_PLUGIN_VERSION = "0.4.36"
 NATIVE_HIGHLIGHT_EVIDENCE_PATTERNS = [
     "codex-companion-native-highlight-evidence-current.json",
     "codex-companion-native-highlight-evidence-*.json",
@@ -199,6 +199,7 @@ def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookm
         "notebookWorkspaceRunbook",
         "notebookWorkspaceRunbookSummary",
         "notebookWorkspaceRunbookAutoButton",
+        "notebookWorkspaceRunbookAutoStatus",
         "notebookWorkspaceRunbookContinueButton",
         "notebookWorkspaceRunbookList",
         "commandPanePanel",

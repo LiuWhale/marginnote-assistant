@@ -4,6 +4,18 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.36 - 2026-06-27
+
+### Added
+
+- Added `notebook_runbook_preflight_record` and schema `codex.mn.notebookRunbookPreflightRun.v1`. Notebook Runbook AutoPlan now records running/completed/failed preflight runs with `writePolicy=no_write_preflight`, action counts, event history, and the safe action list.
+- Added `autoPlan.latestRun` to `codex.mn.notebookRunbookAutoPlan.v1`, plus the visible `notebookWorkspaceRunbookAutoStatus` line in Notebook Workspace. Users can see whether the latest AutoPlan preflight is idle, running, completed, failed, or cancelled.
+- Added `notebook_runbook_preflight` entries to Operation Ledger list/detail, including verification evidence that the preflight did not perform MarginNote writes.
+
+### Changed
+
+- Sharpened the v3.0 design boundary: the ultimate product must support zero-message notebook workflows, live object kernels, transactional native editing, source registry, workflow runtime, connector gateway, skill runtime, and verification agent behavior instead of only improving the current chat, buttons, settings, queue, and logs.
+
 ## 0.4.35 - 2026-06-27
 
 ### Added

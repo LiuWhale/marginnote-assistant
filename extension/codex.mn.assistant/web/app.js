@@ -2247,6 +2247,24 @@
     return status || '未知';
   }
 
+  function notebookRunbookPreflightStatusText(run) {
+    run = run || {};
+    var status = String(run.status || 'idle');
+    if (status === 'running') {
+      return '自动准备：运行中 ' + (run.completedCount || 0) + ' / ' + (run.actionCount || 0);
+    }
+    if (status === 'completed') {
+      return '自动准备：已完成 ' + (run.completedCount || run.actionCount || 0) + ' / ' + (run.actionCount || 0) + '，已进入 Operation Ledger。';
+    }
+    if (status === 'failed') {
+      return '自动准备：失败，已记录失败证据。';
+    }
+    if (status === 'cancelled') {
+      return '自动准备：已取消，已记录状态。';
+    }
+    return '自动准备：尚未运行';
+  }
+
   function runNotebookWorkspaceContinue() {
     var runbook = state.notebookWorkspace && state.notebookWorkspace.runbook ? state.notebookWorkspace.runbook : {};
     var action = runbook.continueAction || {};
@@ -2257,16 +2275,53 @@
     runNotebookWorkspaceAction(action);
   }
 
-  function runNotebookWorkspaceAutoActionSequence(actions, index) {
+  function recordNotebookRunbookPreflight(status, plan, runId, extra, done) {
+    plan = plan || {};
+    extra = extra || {};
+    var workspace = state.notebookWorkspace || {};
+    var payload = Object.assign({
+      status: status || 'running',
+      event: extra.event || status || 'updated',
+      runId: runId || '',
+      documentTitle: workspace.documentTitle || '',
+      mnObject: workspace.focusObject || {},
+      actions: plan.actions || [],
+      actionCount: (plan.actions || []).length,
+      completedCount: extra.completedCount || 0,
+      failedCount: extra.failedCount || 0,
+      source: 'notebook-runbook-preflight'
+    }, extra.payload || {});
+    postCompanion('notebook_runbook_preflight_record', payload, function(result) {
+      result = result || {};
+      if (result.preflightRun && state.notebookWorkspace && state.notebookWorkspace.runbook) {
+        state.notebookWorkspace.runbook.autoPlan = state.notebookWorkspace.runbook.autoPlan || {};
+        state.notebookWorkspace.runbook.autoPlan.latestRun = result.preflightRun;
+        renderNotebookWorkspaceRunbook(state.notebookWorkspace.runbook);
+      }
+      if (done) done(result);
+    }, {showReply: false});
+  }
+
+  function runNotebookWorkspaceAutoActionSequence(actions, index, runId, plan) {
     actions = actions || [];
+    plan = plan || {};
     index = index || 0;
     if (index >= actions.length) {
-      refreshNotebookWorkspace(false);
+      recordNotebookRunbookPreflight('completed', plan, runId, {event: 'completed', completedCount: actions.length}, function() {
+        refreshNotebookWorkspace(false);
+      });
       return;
     }
     runNotebookWorkspaceAction(actions[index], function() {
+      var result = arguments.length ? arguments[0] || {} : {};
+      if (result && result.ok === false) {
+        recordNotebookRunbookPreflight('failed', plan, runId, {event: 'failed', completedCount: index, failedCount: 1}, function() {
+          refreshNotebookWorkspace(false);
+        });
+        return;
+      }
       window.setTimeout(function() {
-        runNotebookWorkspaceAutoActionSequence(actions, index + 1);
+        runNotebookWorkspaceAutoActionSequence(actions, index + 1, runId, plan);
       }, 250);
     });
   }
@@ -2279,8 +2334,15 @@
       addFailureMessage('Notebook Runbook 暂无可自动准备步骤', {ok: false, message: '当前 runbook 没有可自动执行的安全预检动作。'});
       return;
     }
-    addMessage('assistant', 'Notebook Runbook 将自动准备 ' + actions.length + ' 个安全预检步骤，不会直接写入 MarginNote。');
-    runNotebookWorkspaceAutoActionSequence(actions, 0);
+    recordNotebookRunbookPreflight('running', plan, '', {event: 'started'}, function(result) {
+      if (!result || result.ok === false) {
+        addFailureMessage('Notebook Runbook 预检记录失败', result || {});
+        return;
+      }
+      var runId = result.preflightRun && result.preflightRun.runId ? result.preflightRun.runId : '';
+      addMessage('assistant', 'Notebook Runbook 将自动准备 ' + actions.length + ' 个安全预检步骤，不会直接写入 MarginNote；运行证据会进入 Operation Ledger。');
+      runNotebookWorkspaceAutoActionSequence(actions, 0, runId, plan);
+    });
   }
 
   function renderNotebookWorkspaceRunbook(runbook) {
@@ -2290,6 +2352,7 @@
     var list = byId('notebookWorkspaceRunbookList');
     var autoButton = byId('notebookWorkspaceRunbookAutoButton');
     var continueButton = byId('notebookWorkspaceRunbookContinueButton');
+    var autoStatus = byId('notebookWorkspaceRunbookAutoStatus');
     if (!panel || !summaryNode || !list) return;
     var counts = runbook.summary || {};
     var status = String(runbook.status || 'idle');
@@ -2303,6 +2366,11 @@
         ' / 等待 ' + (counts.pending || 0)
     );
     var autoPlan = runbook.autoPlan || {};
+    var latestRun = autoPlan.latestRun || {};
+    if (autoStatus) {
+      autoStatus.className = 'notebook-runbook-auto-status ' + String(latestRun.status || 'idle');
+      autoStatus.textContent = notebookRunbookPreflightStatusText(latestRun);
+    }
     if (autoButton) {
       if (autoPlan.canRun && autoPlan.actions && autoPlan.actions.length) {
         autoButton.classList.remove('hidden');

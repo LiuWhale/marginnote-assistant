@@ -107,6 +107,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "notebookWorkspaceRunbook",
             "notebookWorkspaceRunbookSummary",
             "notebookWorkspaceRunbookAutoButton",
+            "notebookWorkspaceRunbookAutoStatus",
             "notebookWorkspaceRunbookContinueButton",
             "notebookWorkspaceRunbookList",
             "commandPanePanel",

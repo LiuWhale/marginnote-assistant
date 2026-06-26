@@ -82,6 +82,7 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 MINDMAP_TARGETS_PATH = CONTROL_DIR / "mindmap-targets.json"
 MINDMAP_TREES_DIR = CONTROL_DIR / "mindmap-trees"
+NOTEBOOK_RUNBOOK_PREFLIGHT_RUNS_PATH = CONTROL_DIR / "notebook-runbook-preflight-runs.json"
 OBJECT_GRAPH_RELATIONS_PATH = ROOT / "object-graph-relations.json"
 MN_OBJECT_REGISTRY_PATH = ROOT / "mn-object-registry.json"
 REVIEW_QUEUE_PATH = ROOT / "review-queue.json"
@@ -89,7 +90,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.35"
+CURRENT_PLUGIN_VERSION = "0.4.36"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1733,7 +1734,193 @@ def notebook_runbook_continue_action(step: dict[str, Any] | None) -> dict[str, A
     }
 
 
-def notebook_runbook_auto_plan(steps: list[dict[str, Any]]) -> dict[str, Any]:
+def clean_notebook_runbook_preflight_actions(actions: Any) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    source_actions = actions if isinstance(actions, list) else []
+    for index, item in enumerate(source_actions):
+        if not isinstance(item, dict):
+            continue
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        cleaned.append(
+            {
+                "schema": "codex.mn.notebookRunbookPreflightAction.v1",
+                "order": int(item.get("order") or index + 1),
+                "stepId": str(item.get("stepId") or ""),
+                "stepTitle": str(item.get("stepTitle") or item.get("label") or ""),
+                "label": str(item.get("label") or item.get("stepTitle") or ""),
+                "action": str(item.get("action") or ""),
+                "payload": payload,
+                "surface": str(item.get("surface") or ""),
+                "detail": str(item.get("detail") or ""),
+                "tone": str(item.get("tone") or "primary"),
+            }
+        )
+    return cleaned
+
+
+def notebook_runbook_preflight_store() -> dict[str, Any]:
+    store = read_json_file(NOTEBOOK_RUNBOOK_PREFLIGHT_RUNS_PATH, {})
+    if not isinstance(store, dict):
+        store = {}
+    runs = store.get("runs") if isinstance(store.get("runs"), list) else []
+    return {
+        "schema": "codex.mn.notebookRunbookPreflightStore.v1",
+        "runs": [item for item in runs if isinstance(item, dict)],
+    }
+
+
+def save_notebook_runbook_preflight_store(store: dict[str, Any]) -> None:
+    runs = store.get("runs") if isinstance(store.get("runs"), list) else []
+    runs = [item for item in runs if isinstance(item, dict)]
+    runs.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    write_json_file(
+        NOTEBOOK_RUNBOOK_PREFLIGHT_RUNS_PATH,
+        {
+            "schema": "codex.mn.notebookRunbookPreflightStore.v1",
+            "runs": runs[:200],
+        },
+    )
+
+
+def notebook_runbook_preflight_summary(run: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(run, dict) or not run:
+        return {
+            "schema": "codex.mn.notebookRunbookPreflightRun.v1",
+            "runId": "",
+            "status": "idle",
+            "writePolicy": "no_write_preflight",
+            "mode": "safe_preflight",
+            "actionCount": 0,
+            "completedCount": 0,
+            "failedCount": 0,
+            "actions": [],
+            "updatedAt": "",
+        }
+    actions = clean_notebook_runbook_preflight_actions(run.get("actions"))
+    return {
+        "schema": "codex.mn.notebookRunbookPreflightRun.v1",
+        "runId": str(run.get("runId") or ""),
+        "status": str(run.get("status") or "unknown"),
+        "event": str(run.get("event") or ""),
+        "writePolicy": str(run.get("writePolicy") or "no_write_preflight"),
+        "mode": str(run.get("mode") or "safe_preflight"),
+        "topicid": str(run.get("topicid") or ""),
+        "bookmd5": str(run.get("bookmd5") or ""),
+        "documentTitle": str(run.get("documentTitle") or ""),
+        "objectRef": run.get("objectRef") if isinstance(run.get("objectRef"), dict) else {},
+        "actionCount": int(run.get("actionCount") or len(actions)),
+        "completedCount": int(run.get("completedCount") or 0),
+        "failedCount": int(run.get("failedCount") or 0),
+        "actions": actions,
+        "createdAt": str(run.get("createdAt") or ""),
+        "updatedAt": str(run.get("updatedAt") or run.get("createdAt") or ""),
+        "completedAt": str(run.get("completedAt") or ""),
+    }
+
+
+def notebook_runbook_preflight_runs_for_payload(payload: dict[str, Any], requested_object_id: str = "") -> list[dict[str, Any]]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    runs: list[dict[str, Any]] = []
+    for run in notebook_runbook_preflight_store().get("runs", []):
+        if not isinstance(run, dict):
+            continue
+        if topic_id and str(run.get("topicid") or "") != topic_id:
+            continue
+        if book_md5 and str(run.get("bookmd5") or "") != book_md5:
+            continue
+        object_ref = run.get("objectRef") if isinstance(run.get("objectRef"), dict) else {}
+        if requested_object_id and str(object_ref.get("objectId") or "") != requested_object_id:
+            continue
+        runs.append(run)
+    runs.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    return runs
+
+
+def notebook_runbook_preflight_run_by_id(run_id: str) -> dict[str, Any]:
+    clean_id = str(run_id or "").strip()
+    if not clean_id:
+        return {}
+    for run in notebook_runbook_preflight_store().get("runs", []):
+        if isinstance(run, dict) and str(run.get("runId") or "") == clean_id:
+            return run
+    return {}
+
+
+def latest_notebook_runbook_preflight_run(payload: dict[str, Any]) -> dict[str, Any]:
+    runs = notebook_runbook_preflight_runs_for_payload(payload)
+    return notebook_runbook_preflight_summary(runs[0]) if runs else notebook_runbook_preflight_summary({})
+
+
+def notebook_runbook_preflight_record(payload: dict[str, Any]) -> dict[str, Any]:
+    store = notebook_runbook_preflight_store()
+    runs = store.get("runs") if isinstance(store.get("runs"), list) else []
+    run_id = str(payload.get("runId") or payload.get("id") or "").strip()
+    if not run_id:
+        run_id = f"runbook-preflight-{uuid.uuid4().hex[:12]}"
+    existing = next((item for item in runs if isinstance(item, dict) and str(item.get("runId") or "") == run_id), {})
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    status = str(payload.get("status") or existing.get("status") or "running").strip() or "running"
+    if status not in {"running", "completed", "failed", "cancelled"}:
+        status = "running"
+    event = str(payload.get("event") or status or "updated").strip() or "updated"
+    actions = clean_notebook_runbook_preflight_actions(payload.get("actions"))
+    if not actions:
+        actions = clean_notebook_runbook_preflight_actions(existing.get("actions"))
+    object_ref = object_ref_from_mapping(payload)
+    if not object_ref_has_identity(object_ref):
+        object_ref = existing.get("objectRef") if isinstance(existing.get("objectRef"), dict) else {}
+    action_count = int(payload.get("actionCount") or len(actions) or existing.get("actionCount") or 0)
+    completed_count = int(payload.get("completedCount") or existing.get("completedCount") or (action_count if status == "completed" else 0))
+    failed_count = int(payload.get("failedCount") or existing.get("failedCount") or (1 if status == "failed" else 0))
+    history = existing.get("events") if isinstance(existing.get("events"), list) else []
+    history = [item for item in history if isinstance(item, dict)]
+    history.append(
+        {
+            "schema": "codex.mn.notebookRunbookPreflightEvent.v1",
+            "event": event,
+            "status": status,
+            "ts": now,
+            "completedCount": completed_count,
+            "failedCount": failed_count,
+        }
+    )
+    run = {
+        "schema": "codex.mn.notebookRunbookPreflightRun.v1",
+        "runId": run_id,
+        "status": status,
+        "event": event,
+        "writePolicy": "no_write_preflight",
+        "mode": "safe_preflight",
+        "topicid": normalize_topic_id(payload) or str(existing.get("topicid") or ""),
+        "bookmd5": normalize_book_md5(payload) or str(existing.get("bookmd5") or ""),
+        "documentTitle": str(payload.get("documentTitle") or existing.get("documentTitle") or ""),
+        "objectRef": object_ref if object_ref_has_identity(object_ref) else {},
+        "actionCount": action_count,
+        "completedCount": completed_count,
+        "failedCount": failed_count,
+        "actions": actions,
+        "events": history[-40:],
+        "createdAt": str(existing.get("createdAt") or now),
+        "updatedAt": now,
+    }
+    if status == "completed":
+        run["completedAt"] = str(existing.get("completedAt") or now)
+    elif existing.get("completedAt"):
+        run["completedAt"] = str(existing.get("completedAt") or "")
+    runs = [item for item in runs if not (isinstance(item, dict) and str(item.get("runId") or "") == run_id)]
+    runs.append(run)
+    store["runs"] = runs
+    save_notebook_runbook_preflight_store(store)
+    summary = notebook_runbook_preflight_summary(run)
+    return {
+        "ok": True,
+        "message": f"Notebook Runbook 预检已记录：{summary['status']}。",
+        "preflightRun": summary,
+    }
+
+
+def notebook_runbook_auto_plan(steps: list[dict[str, Any]], latest_run: dict[str, Any] | None = None) -> dict[str, Any]:
     safe_step_ids = ["scan_objects", "mindmap_baseline", "operation_plan"]
     actions: list[dict[str, Any]] = []
     blocked: list[dict[str, str]] = []
@@ -1761,6 +1948,7 @@ def notebook_runbook_auto_plan(steps: list[dict[str, Any]]) -> dict[str, Any]:
         "canRun": bool(actions),
         "actions": actions,
         "blocked": blocked,
+        "latestRun": latest_run if isinstance(latest_run, dict) and latest_run else notebook_runbook_preflight_summary({}),
         "detail": "顺序执行安全预检动作：扫描 MN 对象、读取脑图基线、生成操作计划；不直接写入 MarginNote。",
     }
 
@@ -1856,7 +2044,7 @@ def notebook_workspace_runbook(
         "steps": steps,
         "nextStep": next_step if isinstance(next_step, dict) else {},
         "continueAction": notebook_runbook_continue_action(next_step),
-        "autoPlan": notebook_runbook_auto_plan(steps),
+        "autoPlan": notebook_runbook_auto_plan(steps, latest_notebook_runbook_preflight_run(summary)),
     }
 
 
@@ -4551,7 +4739,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.35-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.36-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -5736,6 +5924,32 @@ def manual_relation_operation_ledger_entry(event: dict[str, Any]) -> dict[str, A
     )
 
 
+def notebook_runbook_preflight_operation_ledger_entry(run: dict[str, Any]) -> dict[str, Any]:
+    summary = notebook_runbook_preflight_summary(run)
+    object_ref = summary.get("objectRef") if isinstance(summary.get("objectRef"), dict) else {}
+    return operation_ledger_entry(
+        ledger_id=operation_ledger_id("runbook_preflight", summary.get("runId")),
+        entry_type="notebook_runbook_preflight",
+        source_id=str(summary.get("runId") or ""),
+        title=str(summary.get("documentTitle") or "Notebook Runbook 预检"),
+        status=str(summary.get("status") or "unknown"),
+        summary=(
+            f"预检动作 {summary.get('completedCount') or 0}/{summary.get('actionCount') or 0}；"
+            f"写入策略：{summary.get('writePolicy') or 'no_write_preflight'}"
+        ),
+        topicid=str(summary.get("topicid") or ""),
+        bookmd5=str(summary.get("bookmd5") or ""),
+        object_ref=object_ref,
+        created_at=str(summary.get("createdAt") or summary.get("updatedAt") or ""),
+        updated_at=str(summary.get("updatedAt") or summary.get("createdAt") or ""),
+        counts={
+            "actions": int(summary.get("actionCount") or 0),
+            "completed": int(summary.get("completedCount") or 0),
+            "failed": int(summary.get("failedCount") or 0),
+        },
+    )
+
+
 def manual_relation_events_for_object(payload: dict[str, Any], requested_object_id: str = "") -> list[dict[str, Any]]:
     requested_topic = normalize_topic_id(payload)
     requested_book = normalize_book_md5(payload)
@@ -5829,6 +6043,12 @@ def operation_ledger_list(payload: dict[str, Any]) -> dict[str, Any]:
 
     for event in manual_relation_events_for_object(payload, requested_object_id):
         entry = manual_relation_operation_ledger_entry(event)
+        entry_object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+        object_ref = merge_object_ref(object_ref, entry_object_ref)
+        entries.append(entry)
+
+    for run in notebook_runbook_preflight_runs_for_payload(payload, requested_object_id):
+        entry = notebook_runbook_preflight_operation_ledger_entry(run)
         entry_object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
         object_ref = merge_object_ref(object_ref, entry_object_ref)
         entries.append(entry)
@@ -6066,6 +6286,29 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
                     "evidenceType": "manual_relation",
                     "createdAt": str(record.get("createdAt") or ""),
                     "updatedAt": str(record.get("updatedAt") or ""),
+                },
+            }
+        )
+    elif prefix == "runbook_preflight":
+        record = notebook_runbook_preflight_run_by_id(source_id)
+        if not record:
+            return {"ok": False, "message": "读取 Operation Ledger 失败：Notebook Runbook 预检记录不存在。", "ledgerId": ledger_id}
+        summary = notebook_runbook_preflight_summary(record)
+        entry = notebook_runbook_preflight_operation_ledger_entry(record)
+        evidence.update(
+            {
+                "entryType": "notebook_runbook_preflight",
+                "status": str(summary.get("status") or "unknown"),
+                "summary": str(entry.get("summary") or ""),
+                "preflightRun": summary,
+                "verification": {
+                    "schema": "codex.mn.notebookRunbookPreflightVerification.v1",
+                    "status": "pass" if summary.get("status") == "completed" else str(summary.get("status") or "unknown"),
+                    "writePolicy": str(summary.get("writePolicy") or "no_write_preflight"),
+                    "writesAllowed": False,
+                    "actionCount": int(summary.get("actionCount") or 0),
+                    "completedCount": int(summary.get("completedCount") or 0),
+                    "failedCount": int(summary.get("failedCount") or 0),
                 },
             }
         )
@@ -11394,6 +11637,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         }
     if action == "notebook_workspace":
         return notebook_workspace(payload)
+    if action == "notebook_runbook_preflight_record":
+        return notebook_runbook_preflight_record(payload)
     if action == "agent_plan":
         return agent_plan(payload)
     if action == "operation_plan_preview":

@@ -11,9 +11,9 @@ Codex Companion is a local-first AI assistant plugin for MarginNote 4. It connec
 
 It is not limited to academic papers. Papers, book chapters, course material, project documents, meeting notes, and any document that MarginNote can expose through its APIs can be used as context.
 
-The public 0.4.x line is still a preview and should not be mistaken for the end-state product. Its current chat panel, answer buttons, settings, queue, logs, and first Agent Workspace are migration scaffolding. The long-term target is **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, and operation evidence.
+The public 0.4.x line is still a preview and should not be mistaken for the end-state product. Its current chat panel, answer buttons, settings, queue, logs, and first Agent Workspace are migration scaffolding. The long-term target is **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
 
-The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS: it opens into a Notebook Workspace, not a blank chat box. `Chat Mode` remains useful for quick reading questions and intent capture, but it becomes a command pane next to Object Browser, Mindmap Studio, Card Factory, Knowledge Graph, Workflow Builder, and Operation Ledger Explorer. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces.
+The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS: it opens into a Notebook Workspace, not a blank chat box. `Chat Mode` remains useful for quick reading questions and intent capture, but it becomes a command pane next to Object Browser, Mindmap Studio, Card Factory, Knowledge Graph, Workflow Builder, and Operation Ledger Explorer. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
 
 > This project is not affiliated with MarginNote, OpenAI, or Apple.
 
@@ -23,7 +23,7 @@ The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Compa
 - Switch between `Chat Mode` for lightweight reading conversation and `Agent Workspace` for object, operation, knowledge, and workflow work.
 - Use the `Workspace Navigator` in Agent Workspace to jump directly to `Knowledge Console`, `Mindmap Studio`, `Card Factory`, `Operation Ledger`, `Knowledge Graph`, `Workflow Builder`, and `Skill Center`.
 - Open into a first-stage `Notebook Workspace` overview instead of a blank chat page. The overview aggregates the current focus object, object counts, mind-map cache, review queue, workflow runs, and Operation Ledger counts, then exposes direct actions to scan MarginNote objects, read the current mind-map tree, plan the next operation, inspect review cards, workflows, and ledger evidence.
-- Use the first `Notebook Runbook` in the workspace. It turns the notebook overview into an executable checklist for context, native object scan, mind-map baseline, operation plan, workflow runtime, and ledger evidence, with a status, evidence line, action button for each step, a single `Continue next step` button, and an `Auto prepare` preflight plan that runs safe setup actions without writing to MarginNote.
+- Use the first `Notebook Runbook` in the workspace. It turns the notebook overview into an executable checklist for context, native object scan, mind-map baseline, operation plan, workflow runtime, and ledger evidence, with a status, evidence line, action button for each step, a single `Continue next step` button, and an `Auto prepare` preflight plan that runs safe setup actions without writing to MarginNote. Each AutoPlan run now records a `notebook_runbook_preflight` ledger entry and shows the latest preflight status in the Runbook panel.
 - Use a dedicated `Command Pane` instead of a dialog tab inside the workbench. Workspace mode keeps the prompt/send controls visible but collapses the conversation history by default; Chat Mode expands the full conversation when you want a built-in-AI-style reading chat.
 - Choose the context scope explicitly: auto, selection/node only, or full document.
 - See the first Operation Compiler surface in Agent Workspace. `agent_plan` now exposes a structured `operationPlan`, `verificationPlan`, compiler checks, and per-operation dry-run evidence so write-capable actions show planned steps, write count, native capability status, note-level blocking reasons, confirmation requirements, and verification obligations before they are treated as real MarginNote edits.
@@ -286,20 +286,20 @@ curl http://127.0.0.1:48761/status
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.35
+python3 package_release.py 0.4.36
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.35-latest-dist.zip --mnaddon release/CodexCompanion-0.4.35-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.35-latest-dist.zip --mnaddon release/CodexCompanion-0.4.35-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.36-latest-dist.zip --mnaddon release/CodexCompanion-0.4.36-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.36-latest-dist.zip --mnaddon release/CodexCompanion-0.4.36-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.35-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.36-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

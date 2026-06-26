@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260627-runbook-autoplan-v1">
+  <link rel="stylesheet" href="app.css?v=20260627-runbook-preflight-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
@@ -101,6 +101,7 @@
             <button id="notebookWorkspaceRunbookContinueButton" class="small-button notebook-runbook-continue hidden" type="button">继续下一步</button>
           </div>
         </div>
+        <div id="notebookWorkspaceRunbookAutoStatus" class="notebook-runbook-auto-status idle">自动准备：尚未运行</div>
         <div id="notebookWorkspaceRunbookList" class="notebook-runbook-list">
           <div class="notebook-runbook-step empty">上下文、MN 对象、脑图基线、操作计划、workflow 和账本证据会在这里排成可执行步骤。</div>
         </div>
@@ -287,6 +288,7 @@
                 <option value="ai_edit_transaction">事务</option>
                 <option value="external_gateway_request">外部</option>
                 <option value="object_graph_manual_relation">关系</option>
+                <option value="notebook_runbook_preflight">Runbook 预检</option>
               </select>
             </label>
             <label class="operation-ledger-filter-field">
@@ -679,6 +681,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260627-runbook-autoplan-v1"></script>
+  <script src="app.js?v=20260627-runbook-preflight-v1"></script>
 </body>
 </html>

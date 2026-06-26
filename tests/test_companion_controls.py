@@ -3825,6 +3825,94 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(workspace["workflowWorkspace"]["schema"], "codex.mn.workflowWorkspace.v1")
             self.assertEqual(workspace["mindmapTreeCache"]["schema"], "codex.mn.mindmapTreeCache.v1")
 
+    def test_notebook_runbook_preflight_record_is_visible_in_workspace_and_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Runbook Paper",
+                    "selectionText": "Runbook selection",
+                }
+            )
+            self.assertTrue(workspace["ok"], workspace)
+            auto_plan = workspace["notebookWorkspace"]["runbook"]["autoPlan"]
+            self.assertTrue(auto_plan["canRun"], auto_plan)
+
+            started = companion.handle_action(
+                {
+                    "action": "notebook_runbook_preflight_record",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Runbook Paper",
+                    "status": "running",
+                    "event": "started",
+                    "actions": auto_plan["actions"],
+                }
+            )
+
+            self.assertTrue(started["ok"], started)
+            run = started["preflightRun"]
+            self.assertEqual(run["schema"], "codex.mn.notebookRunbookPreflightRun.v1")
+            self.assertEqual(run["status"], "running")
+            self.assertEqual(run["writePolicy"], "no_write_preflight")
+            self.assertEqual(run["actionCount"], len(auto_plan["actions"]))
+            self.assertEqual(run["actions"][0]["stepId"], "scan_objects")
+            self.assertTrue(run["runId"])
+
+            completed = companion.handle_action(
+                {
+                    "action": "notebook_runbook_preflight_record",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Runbook Paper",
+                    "runId": run["runId"],
+                    "status": "completed",
+                    "event": "completed",
+                    "actions": auto_plan["actions"],
+                    "completedCount": len(auto_plan["actions"]),
+                }
+            )
+            self.assertTrue(completed["ok"], completed)
+            self.assertEqual(completed["preflightRun"]["runId"], run["runId"])
+            self.assertEqual(completed["preflightRun"]["status"], "completed")
+            self.assertEqual(completed["preflightRun"]["completedCount"], len(auto_plan["actions"]))
+
+            refreshed = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Runbook Paper",
+                }
+            )
+            latest_run = refreshed["notebookWorkspace"]["runbook"]["autoPlan"]["latestRun"]
+            self.assertEqual(latest_run["schema"], "codex.mn.notebookRunbookPreflightRun.v1")
+            self.assertEqual(latest_run["runId"], run["runId"])
+            self.assertEqual(latest_run["status"], "completed")
+
+            ledger = companion.handle_action(
+                {
+                    "action": "operation_ledger_list",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "entryTypeFilter": "notebook_runbook_preflight",
+                }
+            )
+            self.assertTrue(ledger["ok"], ledger)
+            self.assertGreaterEqual(ledger["counts"]["total"], 1)
+            entry = ledger["entries"][0]
+            self.assertEqual(entry["entryType"], "notebook_runbook_preflight")
+            self.assertEqual(entry["sourceId"], run["runId"])
+            self.assertEqual(entry["status"], "completed")
+            detail = companion.handle_action({"action": "operation_ledger_get", "ledgerId": entry["ledgerId"]})
+            self.assertTrue(detail["ok"], detail)
+            self.assertEqual(detail["record"]["runId"], run["runId"])
+            self.assertEqual(detail["evidence"]["preflightRun"]["writePolicy"], "no_write_preflight")
+
     def test_agent_plan_combines_current_object_workflow_and_write_gate_without_queueing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

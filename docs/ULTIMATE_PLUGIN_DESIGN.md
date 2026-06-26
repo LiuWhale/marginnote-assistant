@@ -29,7 +29,7 @@ v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
 
 0.4.x 已经开始执行这个迁移：聊天流不再是 Agent Workspace 里的同级工作台 tab，而是独立 `Command Pane`。Workspace 模式默认收起对话历史，只保留输入和发送入口；Chat Mode 才展开完整对话。这一步能让用户第一眼看到 notebook/object 工作台，而不是看到一个更复杂的聊天页。但它仍只是信息架构迁移的开始，不等于完整 v3.0。
 
-0.4.35 继续把 `Notebook Workspace` 从“单步执行入口”推进到“安全预检入口”：`Notebook Runbook` 不只显示上下文、MN 原生对象扫描、脑图基线、操作计划、workflow runtime 和账本证据，还会暴露 `继续下一步` 与 `自动准备`。后端根据真实缺口生成 `nextStep` 和 `autoPlan`；`autoPlan` 只顺序执行扫描 MN 对象、读取脑图基线、生成操作计划这类安全预检动作，不直接写入 MarginNote。对象扫描是否完成仍看 `native_object_scan` 证据，而不是把脑图缓存导入的 Registry 对象误当成原生扫描。它仍不是终局 Knowledge OS，因为它还不能像 Finder 一样实时浏览整个 notebook，也不能完整原地编辑和证明所有真实 MN 对象；但它建立了终局需要的用户路径：先看 notebook 状态和缺口，再由 runbook 带着用户进入对象、脑图、工作流和账本，而不是先问一句话再找回答下方按钮。
+0.4.36 继续把 `Notebook Workspace` 从“单步执行入口”推进到“有证据的安全预检入口”：`Notebook Runbook` 不只显示上下文、MN 原生对象扫描、脑图基线、操作计划、workflow runtime 和账本证据，还会暴露 `继续下一步` 与 `自动准备`。后端根据真实缺口生成 `nextStep` 和 `autoPlan`；`autoPlan` 只顺序执行扫描 MN 对象、读取脑图基线、生成操作计划这类安全预检动作，不直接写入 MarginNote。每次自动准备都会写入 `codex.mn.notebookRunbookPreflightRun.v1`，带 `writePolicy=no_write_preflight`、动作列表、完成/失败计数和事件时间线，并作为 `notebook_runbook_preflight` 进入 Operation Ledger。对象扫描是否完成仍看 `native_object_scan` 证据，而不是把脑图缓存导入的 Registry 对象误当成原生扫描。它仍不是终局 Knowledge OS，因为它还不能像 Finder 一样实时浏览整个 notebook，也不能完整原地编辑和证明所有真实 MN 对象；但它建立了终局需要的用户路径：先看 notebook 状态和缺口，再由 runbook 带着用户进入对象、脑图、工作流和账本，而不是先问一句话再找回答下方按钮。
 
 ### 0.1 终局选择：B + C，而不是 A
 
@@ -49,6 +49,80 @@ Chat Mode 仍然保留，但它不是终局主产品。Chat Mode 只负责快速
 一句话定义：
 
 > Codex Companion v3.0 是 MarginNote 里的 Notebook Knowledge OS：把文档、摘录、高亮、卡片、脑图、概念、复习、外部文件和自动化请求统一成可浏览、可编辑、可验证、可回滚的知识对象系统。
+
+### 0.2 真正断代：v3 必须让当前 UI 变成兼容层
+
+如果终局仍然可以被用户概括成“现在这些按钮更稳定、更强、更快”，设计就是失败的。v3.0 的差异必须大到用户第一眼就知道它不是当前 0.4.x 的继续堆叠：
+
+| 维度 | 当前 0.4.x | 真正 v3.0 | 验收问题 |
+| --- | --- | --- | --- |
+| 主入口 | 打开面板后仍能看到聊天输入、回答流和一组动作按钮 | 打开后首先看到 notebook 状态、对象树、目标脑图、复习覆盖、workflow 和待确认编辑 | 不输入任何 prompt，能不能看懂这个 notebook 缺什么 |
+| 主对象 | 当前消息、当前回答、当前选区 | 持久 MNObject、noteId、mindmap node、card、excerpt、workflow run、ledger item | 能不能点开任意对象，看来源、关系、历史、权限和下一步 |
+| 脑图 | 生成一棵树或把回答转成树 | 读取现有真实脑图，做 create/update/merge/move/link/delete_suggest Diff | 会不会默认新建重复脑图 |
+| 卡片 | 把回答拆成多张卡 | 按学习目标和知识覆盖生成、去重、合并、排程和复习 | 能不能回答“这篇材料还缺哪些卡” |
+| 长任务 | 队列、目标、运行状态 | 可保存、可暂停、可恢复、可验收 workflow run | 中断后能不能从具体步骤继续 |
+| 写入 | 草稿、接受/拒绝、回滚尝试 | Operation transaction：plan -> dry-run -> native apply -> verify -> accept/reject -> rollback -> residual proof | 拒绝后能不能证明实体对象没有残留 |
+| 知识层 | 当前文档上下文、历史、索引 | 跨 notebook 概念图谱，带授权范围、引用、来源回链和可删除索引 | 跨文档回答能不能列 noteId/page/quote |
+| 自动化 | 外部接口能触发动作 | 外部调用只能创建 workflow/agentOperation，不能绕过权限、确认和 ledger | 外部脚本能不能偷偷写 MN |
+| 扩展 | 自定义 prompt 和按钮 | 有 manifest、schema、UI、权限、回滚、验收和迁移的技能包 | 一个技能能不能被安装、审计、升级、禁用 |
+
+这意味着很多当前看起来重要的界面，在终局里反而应该降级：
+
+- 回答下方按钮只保留为 `Command Pane` 的轻量快捷入口，不能承担主要写入入口。
+- 发送按钮仍常驻，但只负责表达意图；写入意图必须进入 Operation Compiler。
+- 队列只作为 Workflow Runtime 的底层调度，不能继续作为用户理解长任务的主要模型。
+- 设置页只放低频系统配置；文件路径、缓存、上传材料应进入 `Source Registry`。
+- 日志不再是调试窗口，而是 `Operation Ledger Explorer` 的原始证据来源。
+- 自定义按钮不再是扩展生态；只有能声明输入/输出/权限/回滚/验收的技能包才算 v3 扩展。
+
+一个简单判断标准：v3.0 必须支持 **zero-message workflow**。用户不问任何问题，只打开一个 notebook，系统就能展示对象状态、材料覆盖、脑图缺口、卡片缺口、最近失败事务、可执行 workflow 和待确认写入。如果仍然需要先打一段 prompt 才知道下一步做什么，那它还停在 v1.x / v2.x 之间。
+
+### 0.3 现在完全没有的终局内核
+
+当前 0.4.x 已经有不少“名字相似”的面板，但多数只是第一阶段壳层。真正 v3.0 必须补齐这些内核；缺一项都不能叫 Knowledge OS：
+
+1. **Live MN Object Kernel**
+   负责从 MarginNote 原生运行态、URL API、缓存、导入文件和历史 ledger 里建立统一对象库。它不是“当前选区 payload”，而是可持续同步的对象内核。每个对象必须有稳定 `objectId`、原生 identifiers、sourceRef、权限边界、关系和最近事件。
+
+2. **Transactional Native Editor**
+   负责把所有写入变成可审计事务。它必须支持真实 MN 对象读写、存在性 probe、逐对象 Diff、原生 apply、验证、回滚和残留证明。没有这个内核，脑图拒绝后“删了结构但卡片还在”这类问题会反复出现。
+
+3. **Study Program Engine**
+   负责把材料变成学习计划，而不是一次性生成内容。它必须维护学习目标、章节覆盖、概念覆盖、卡型覆盖、复习队列、过期复习和知识缺口。用户问“这篇文章还差什么”时，系统应从对象和覆盖率回答，而不是重新总结全文。
+
+4. **Source Registry**
+   统一管理 MN 文档、PDF 缓存、OneDrive/iCloud 路径、上传文件、网页、外部数据和手工绑定。它必须解决“当前文档为什么找不到 PDF”这类问题，并把每个来源的可读性、权限、缓存时间和哈希写成对象证据。
+
+5. **Workflow Runtime + Scheduler**
+   不是 pending 队列，而是运行时系统。它负责 workflow 定义、步骤状态、暂停/恢复、确认点、模型调用、MN 原生动作、外部回调、失败恢复、验收报告和可重放记录。
+
+6. **Connector / URL Automation Gateway**
+   借鉴 MarginNote URL API、x-callback-url、快捷指令、本地脚本和外部 agent。所有外部入口都只能提交结构化 `agentOperation` 或 workflow run，不能直接绕过插件写 MN。
+
+7. **Skill Runtime**
+   把“自定义 prompt”升级为可发布技能。技能必须声明 manifest、输入对象、输出 schema、UI、权限、是否可写、是否可删、dry-run、rollback、验收和版本迁移。用户安装技能时应该像安装一个小应用，而不是复制一段 prompt。
+
+8. **Verification Agent**
+   每次写入后做程序化验收：对象是否存在、父子关系是否正确、来源是否可追溯、卡片是否过长、重复是否出现、拒绝后残留是否清理。它必须能给出 PASS/FAIL/UNKNOWN，而不是一句“已完成”。
+
+当前已有控件只能算这些内核的 UI 草图。v3.0 的开发顺序也必须按内核推进，而不是继续给聊天页加入口。
+
+### 0.4 最小 v3 体验样例
+
+一个真正区别于当前插件的 v3 首次体验应该是：
+
+1. 用户打开 MN4 notebook，Codex Companion 默认进入 `Notebook Workspace`。
+2. 左侧自动列出 notebook、文档、脑图根、最近选区、卡片、工作流和失败事务。
+3. 中间显示当前文档的知识覆盖：章节结构、已有脑图覆盖、卡片覆盖、复习队列、缺来源节点、过长卡和重复卡。
+4. 用户选择 `精读并整理到当前脑图` workflow。
+5. 系统先展示 operation plan 和目标脑图，不生成任何新节点。
+6. Mindmap Studio 读取真实 noteId 树，显示节点级 Diff。
+7. Card Factory 显示预计新增卡片类型、来源和复习安排。
+8. 用户批量接受一组变更，系统写入 MN 原生对象。
+9. Verification Agent 检查新对象、关系、来源、复习队列和残留。
+10. Operation Ledger 生成可展开报告：改了哪些 noteId，哪些未写入，哪些需要人工确认，如何回滚。
+
+这个流程里聊天只是可选命令入口。用户甚至可以一句话都不问，就完成一轮可审计的知识整理。只有达到这种体验，才能说“终极形态和现在不是一个东西”。
 
 ## 1. 四个不同产品，不允许混淆
 
