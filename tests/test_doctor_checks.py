@@ -124,6 +124,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "agentWorkbenchBar",
             "mindmapDiffWorkbench",
             "aiEditTransactionCenter",
+            "aiEditTransactionResidualProof",
             "promptInput",
             "sendButton",
             "stopButton",

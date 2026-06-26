@@ -4394,6 +4394,59 @@
     }, {showReply: false});
   }
 
+  function renderAiEditTransactionResidualProof(proof) {
+    var container = byId('aiEditTransactionResidualProof');
+    if (!container) return;
+    proof = proof || {};
+    var schema = String(proof.schema || '');
+    var status = String(proof.status || 'idle');
+    var objects = Array.isArray(proof.objects) ? proof.objects : [];
+    var rows = [];
+    container.className = 'ai-edit-residual-proof ' + (status === 'pass' ? 'pass' : (status === 'block' ? 'block' : 'pending'));
+    if (schema !== 'codex.mn.residualProof.v1' || !objects.length) {
+      var empty = document.createElement('div');
+      empty.className = 'ai-edit-residual-object empty';
+      empty.textContent = proof.summary || '逐对象残留证明：暂无可验证对象。';
+      replaceElementChildren(container, [empty]);
+      return;
+    }
+    var title = document.createElement('div');
+    title.className = 'ai-edit-residual-title';
+    title.textContent =
+      '逐对象残留证明：' +
+      (proof.remainingCount || 0) + '/' + objects.length + ' 残留' +
+      (proof.sourceFields && proof.sourceFields.length ? (' / 来源 ' + proof.sourceFields.join('、')) : '');
+    rows.push(title);
+    for (var i = 0; i < objects.length && i < 10; i++) {
+      var item = objects[i] || {};
+      var row = document.createElement('div');
+      var residual = !!item.residual;
+      row.className = 'ai-edit-residual-object ' + (residual ? 'residual' : 'clear');
+      row.setAttribute('data-note-id', String(item.noteId || ''));
+      row.setAttribute('data-actual-state', String(item.actualState || ''));
+      row.setAttribute('data-expected-state', String(item.expectedState || ''));
+      row.setAttribute('data-verification-level', String(item.verificationLevel || ''));
+      var state = document.createElement('strong');
+      state.textContent = residual ? '残留' : '已处理';
+      var body = document.createElement('span');
+      body.textContent =
+        'noteId ' + (item.noteId || '未知') +
+        ' / 期望 ' + (item.expectedState || 'unknown') +
+        ' / 实际 ' + (item.actualState || 'unknown') +
+        ' / 证据 ' + (item.verificationLevel || 'unknown');
+      row.appendChild(state);
+      row.appendChild(body);
+      rows.push(row);
+    }
+    if (objects.length > 10) {
+      var more = document.createElement('div');
+      more.className = 'ai-edit-residual-object empty';
+      more.textContent = '还有 ' + (objects.length - 10) + ' 个对象未展开。';
+      rows.push(more);
+    }
+    replaceElementChildren(container, rows);
+  }
+
   function renderAiEditTransactionCenter(status) {
     if (arguments.length) state.aiEditTransactionStatus = status || {};
     status = state.aiEditTransactionStatus || {};
@@ -4412,6 +4465,7 @@
       empty.className = 'ai-edit-transaction-note empty';
       empty.textContent = '接受或拒绝 AI 编辑后，这里会显示回滚状态、残留 noteId 和最近事务摘要。';
       replaceElementChildren(notes, [empty]);
+      renderAiEditTransactionResidualProof({});
       renderAiEditTransactionActions({}, {});
       renderMindmapStudioPanel();
       return;
@@ -4474,6 +4528,7 @@
       rows.push(more);
     }
     replaceElementChildren(notes, rows);
+    renderAiEditTransactionResidualProof(verification.residualProof || {});
     renderAiEditTransactionActions(latest, verification);
     renderMindmapStudioPanel();
   }

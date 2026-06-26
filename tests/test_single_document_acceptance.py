@@ -70,6 +70,7 @@ CURRENT_WEB_CONTROLS = ",".join(
         "agentWorkbenchBar",
         "mindmapDiffWorkbench",
         "aiEditTransactionCenter",
+        "aiEditTransactionResidualProof",
         "promptInput",
         "sendButton",
         "stopButton",

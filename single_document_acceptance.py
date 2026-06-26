@@ -227,6 +227,7 @@ def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookm
         "agentWorkbenchBar",
         "mindmapDiffWorkbench",
         "aiEditTransactionCenter",
+        "aiEditTransactionResidualProof",
         "promptInput",
         "sendButton",
         "stopButton",

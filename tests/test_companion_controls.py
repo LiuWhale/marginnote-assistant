@@ -4159,6 +4159,9 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(chain["rollback"]["status"], "pending_confirmation")
             self.assertEqual(chain["residual"]["remainingCount"], 1)
             self.assertEqual(chain["residual"]["remainingNoteIds"], [])
+            self.assertEqual(chain["residual"]["residualProof"]["schema"], "codex.mn.residualProof.v1")
+            self.assertEqual(chain["residual"]["residualProof"]["objects"][0]["noteId"], "N-LEDGER")
+            self.assertEqual(chain["residual"]["residualProof"]["objects"][0]["actualState"], "created_pending_user_decision")
 
     def test_object_graph_links_current_object_to_operations_and_activity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6490,6 +6493,14 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(verified["verification"]["schema"], "codex.mn.aiEditVerification.v1")
             self.assertEqual(verified["verification"]["status"], "pass")
             self.assertEqual(verified["verification"]["objectRef"]["objectId"], "mnobj:selection:tx123")
+            self.assertEqual(verified["verification"]["residualProof"]["schema"], "codex.mn.residualProof.v1")
+            self.assertEqual(verified["verification"]["residualProof"]["status"], "pass")
+            self.assertEqual(verified["verification"]["residualProof"]["remainingCount"], 0)
+            self.assertEqual(
+                [item["actualState"] for item in verified["verification"]["residualProof"]["objects"]],
+                ["deleted_reported", "deleted_reported"],
+            )
+            self.assertFalse(any(item["residual"] for item in verified["verification"]["residualProof"]["objects"]))
             self.assertIn("回滚验证", verified["reply"])
 
     def test_status_exposes_latest_ai_edit_transaction_verification(self) -> None:
@@ -6543,6 +6554,24 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(tx_status["verification"]["status"], "block")
             self.assertEqual(tx_status["verification"]["objectRef"]["kind"], "note")
             self.assertEqual(tx_status["verification"]["remainingNoteIds"], ["N2", "N3"])
+            proof = tx_status["verification"]["residualProof"]
+            self.assertEqual(proof["schema"], "codex.mn.residualProof.v1")
+            self.assertEqual(proof["status"], "block")
+            self.assertEqual(proof["createdCount"], 3)
+            self.assertEqual(proof["deletedCount"], 1)
+            self.assertEqual(proof["remainingCount"], 2)
+            self.assertEqual(proof["sourceFields"], ["createdNoteIds", "deletedCount", "failedCount", "failures"])
+            by_note = {item["noteId"]: item for item in proof["objects"]}
+            self.assertEqual(by_note["N1"]["expectedState"], "deleted_after_rollback")
+            self.assertEqual(by_note["N1"]["actualState"], "deleted_reported")
+            self.assertEqual(by_note["N1"]["verificationLevel"], "count_inferred")
+            self.assertFalse(by_note["N1"]["residual"])
+            self.assertEqual(by_note["N2"]["actualState"], "remaining_reported")
+            self.assertEqual(by_note["N2"]["verificationLevel"], "native_failure")
+            self.assertTrue(by_note["N2"]["residual"])
+            self.assertIn("still-exists", by_note["N2"]["evidence"]["failureReason"])
+            self.assertEqual(by_note["N3"]["actualState"], "remaining_reported")
+            self.assertTrue(by_note["N3"]["residual"])
             self.assertIn("仍可能残留", tx_status["summary"])
 
 

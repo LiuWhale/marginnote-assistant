@@ -164,6 +164,7 @@ REQUIRED_WEB_CONTROL_IDS = [
     "aiEditTransactionTitle",
     "aiEditTransactionSummary",
     "aiEditTransactionNotes",
+    "aiEditTransactionResidualProof",
     "promptInput",
     "sendButton",
     "stopButton",

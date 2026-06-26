@@ -2199,6 +2199,75 @@ h1 {
   color: var(--muted) !important;
 }
 
+.ai-edit-residual-proof {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ai-edit-residual-proof.pass {
+  border-color: #b7dfcf;
+  background: #f3fbf8;
+}
+
+.ai-edit-residual-proof.block {
+  border-color: #f1b7b2;
+  background: #fff7f6;
+}
+
+.ai-edit-residual-proof.pending {
+  border-color: #ecd99b;
+  background: #fffbeb;
+}
+
+.ai-edit-residual-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.ai-edit-residual-object {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ai-edit-residual-object strong {
+  flex: 0 0 auto;
+  min-width: 42px;
+}
+
+.ai-edit-residual-object.clear {
+  border-color: #c7e3d8;
+}
+
+.ai-edit-residual-object.clear strong {
+  color: #0c7b5d;
+}
+
+.ai-edit-residual-object.residual {
+  border-color: #efaaa5;
+}
+
+.ai-edit-residual-object.residual strong {
+  color: #b42318;
+}
+
+.ai-edit-residual-object.empty {
+  color: var(--muted);
+  background: var(--soft);
+}
+
 .icon-button,
 .small-button,
 .goal-toggle-button,

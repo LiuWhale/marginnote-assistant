@@ -22,6 +22,7 @@ _TRACKED_EVENTS = {
     "mindmapDeleteSuggestionDismissed",
 }
 VERIFICATION_SCHEMA = "codex.mn.aiEditVerification.v1"
+RESIDUAL_PROOF_SCHEMA = "codex.mn.residualProof.v1"
 TRANSACTION_STATUS_SCHEMA = "codex.mn.aiEditTransactionStatus.v1"
 
 
@@ -423,6 +424,165 @@ def rollback_remaining_note_ids(
     return remaining
 
 
+def residual_proof_source_fields(
+    *,
+    created_note_ids: list[str],
+    target_note_ids: list[str],
+    deleted_count: int,
+    failed_count: int,
+    failures: list[dict[str, Any]],
+    status: str,
+) -> list[str]:
+    fields: list[str] = []
+    if status.startswith("delete") and target_note_ids:
+        fields.append("targetNoteIds")
+    if created_note_ids:
+        fields.append("createdNoteIds")
+    if status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"} or deleted_count:
+        fields.append("deletedCount")
+    if status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"} or failed_count:
+        fields.append("failedCount")
+    if failures:
+        fields.append("failures")
+    return fields
+
+
+def residual_expected_state(status: str, delete_mode: bool) -> str:
+    if delete_mode:
+        if status == "delete_pending_confirmation":
+            return "pending_delete_confirmation"
+        if status == "delete_dismissed":
+            return "retained_after_dismiss"
+        return "deleted_after_delete_confirmation"
+    if status == "accepted":
+        return "retained_after_accept"
+    if status in {"rolled_back", "rollback_failed"}:
+        return "deleted_after_rollback"
+    if status in {"ready", "started", "pending_confirmation", "apply_failed"}:
+        return "pending_user_decision"
+    return "unknown"
+
+
+def residual_actual_state_for_note(
+    *,
+    note_id: str,
+    index: int,
+    status: str,
+    delete_mode: bool,
+    deleted_count: int,
+    rollback_complete: bool,
+    remaining_note_ids: list[str],
+    failures_by_note: dict[str, dict[str, Any]],
+) -> tuple[str, bool, str]:
+    if delete_mode and status == "delete_pending_confirmation":
+        return "existing_pending_confirmation", False, "transaction_state"
+    if delete_mode and status == "delete_dismissed":
+        return "retained_by_user", False, "transaction_state"
+    if status == "accepted":
+        return "retained_by_user", False, "transaction_state"
+    if note_id in failures_by_note:
+        return "remaining_reported", True, "native_failure"
+    if note_id in set(remaining_note_ids):
+        return "remaining_reported", True, "remaining_inferred"
+    if status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"}:
+        if rollback_complete or index < max(deleted_count, 0):
+            return "deleted_reported", False, "count_inferred"
+        return "unknown_after_native_event", True, "count_inferred"
+    if status in {"ready", "started", "pending_confirmation", "apply_failed"}:
+        return "created_pending_user_decision", False, "transaction_state"
+    return "unknown", False, "transaction_state"
+
+
+def residual_proof(
+    *,
+    transaction: dict[str, Any],
+    report_status: str,
+    created_note_ids: list[str],
+    created_count: int,
+    deleted_count: int,
+    failed_count: int,
+    remaining_note_ids: list[str],
+    failures: list[dict[str, Any]],
+    rollback_complete: bool,
+    target_note_ids: list[str],
+    summary: str,
+) -> dict[str, Any]:
+    status = str(transaction.get("status") or "")
+    transaction_id = str(transaction.get("transactionId") or "")
+    delete_mode = status.startswith("delete_")
+    note_ids = target_note_ids if delete_mode and target_note_ids else created_note_ids
+    expected_state = residual_expected_state(status, delete_mode)
+    object_type = "mindmap_node" if bool(transaction.get("hasMindmap")) or delete_mode else "note"
+    failures_by_note = {
+        str(item.get("noteId") or ""): item
+        for item in failures
+        if isinstance(item, dict) and str(item.get("noteId") or "")
+    }
+    objects: list[dict[str, Any]] = []
+    for index, note_id in enumerate(note_ids):
+        actual_state, residual, verification_level = residual_actual_state_for_note(
+            note_id=note_id,
+            index=index,
+            status=status,
+            delete_mode=delete_mode,
+            deleted_count=deleted_count,
+            rollback_complete=rollback_complete,
+            remaining_note_ids=remaining_note_ids,
+            failures_by_note=failures_by_note,
+        )
+        failure = failures_by_note.get(note_id, {})
+        objects.append(
+            {
+                "objectId": f"mnobj:note:{note_id}",
+                "objectType": object_type,
+                "noteId": note_id,
+                "expectedState": expected_state,
+                "actualState": actual_state,
+                "residual": bool(residual),
+                "verificationLevel": verification_level,
+                "evidence": {
+                    "source": "ai_edit_transaction_native_event",
+                    "transactionStatus": status,
+                    "deletedCount": deleted_count,
+                    "failedCount": failed_count,
+                    "failureReason": str(failure.get("reason") or ""),
+                    "failureMethod": str(failure.get("method") or ""),
+                },
+            }
+        )
+    residual_count = sum(1 for item in objects if item.get("residual"))
+    source_fields = residual_proof_source_fields(
+        created_note_ids=created_note_ids,
+        target_note_ids=target_note_ids,
+        deleted_count=deleted_count,
+        failed_count=failed_count,
+        failures=failures,
+        status=status,
+    )
+    if residual_count:
+        proof_summary = f"逐对象残留证明：{residual_count}/{len(objects)} 个对象仍可能残留。"
+    elif objects:
+        proof_summary = "逐对象残留证明：未发现异常残留；逐对象状态来自事务事件和删除计数。"
+    else:
+        proof_summary = "逐对象残留证明：本事务没有可验证的 noteId。"
+    return {
+        "schema": RESIDUAL_PROOF_SCHEMA,
+        "transactionId": transaction_id,
+        "status": report_status,
+        "summary": proof_summary,
+        "verificationSummary": summary,
+        "createdCount": created_count,
+        "deletedCount": deleted_count,
+        "failedCount": failed_count,
+        "remainingCount": residual_count,
+        "createdNoteIds": created_note_ids,
+        "remainingNoteIds": [item["noteId"] for item in objects if item.get("residual")],
+        "targetNoteIds": target_note_ids,
+        "sourceFields": source_fields,
+        "objects": objects,
+    }
+
+
 def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     created_note_ids = unique_strings(transaction.get("createdNoteIds"))
     created_count = safe_int(transaction.get("createdCount"), len(created_note_ids))
@@ -520,6 +680,20 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    proof = residual_proof(
+        transaction=transaction,
+        report_status=report_status,
+        created_note_ids=created_note_ids,
+        created_count=created_count,
+        deleted_count=deleted_count,
+        failed_count=failed_count,
+        remaining_note_ids=remaining_note_ids,
+        failures=failures,
+        rollback_complete=rollback_complete,
+        target_note_ids=target_note_ids,
+        summary=summary,
+    )
+
     return {
         "schema": VERIFICATION_SCHEMA,
         "transactionId": transaction_id,
@@ -541,6 +715,7 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         "deleteSuggestion": delete_suggestion,
         "requiresConfirmation": requires_confirmation,
         "availableActions": transaction_available_actions(transaction),
+        "residualProof": proof,
         "summary": summary,
         "nextActions": next_actions,
     }

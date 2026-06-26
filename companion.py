@@ -5470,6 +5470,7 @@ def transaction_operation_chain_evidence(record: dict[str, Any], verification: d
             "remainingNoteIds": verification.get("remainingNoteIds") if isinstance(verification.get("remainingNoteIds"), list) else [],
             "createdNoteIds": created_note_ids,
             "targetNoteIds": verification.get("targetNoteIds") if isinstance(verification.get("targetNoteIds"), list) else [],
+            "residualProof": verification.get("residualProof") if isinstance(verification.get("residualProof"), dict) else {},
         },
     }
 
