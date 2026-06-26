@@ -245,6 +245,75 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(relisted["conversation_count"], 1)
             self.assertEqual(relisted["conversations"][0]["title"], "第二轮问题")
 
+    def test_conversation_history_is_filterable_by_mn_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            selection_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:history1",
+                "kind": "selection",
+                "title": "PDF 选区",
+                "sourceRef": {"page": 3, "quote": "selection source"},
+            }
+            note_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:history2",
+                "kind": "note",
+                "title": "已有卡片",
+                "sourceRef": {"page": 4, "quote": "note source"},
+            }
+
+            first = companion.handle_action({**base, "mnObject": selection_object, "action": "conversation_new"})
+            second = companion.handle_action({**base, "mnObject": note_object, "action": "conversation_new"})
+
+            self.assertEqual(first["conversation"]["objectRef"]["objectId"], "mnobj:selection:history1")
+            self.assertEqual(second["conversation"]["objectRef"]["kind"], "note")
+
+            companion.append_history(
+                {
+                    **base,
+                    "mnObject": selection_object,
+                    "conversationId": first["conversation"]["conversationId"],
+                },
+                "解释这个选区",
+                "选区回答",
+            )
+            companion.append_history(
+                {
+                    **base,
+                    "mnObject": note_object,
+                    "conversationId": second["conversation"]["conversationId"],
+                },
+                "解释这张卡片",
+                "卡片回答",
+            )
+
+            all_conversations = companion.handle_action({**base, "action": "conversation_list"})
+            self.assertEqual(all_conversations["conversation_count"], 2)
+            self.assertEqual(
+                sorted(item["objectRef"]["objectId"] for item in all_conversations["conversations"]),
+                ["mnobj:note:history2", "mnobj:selection:history1"],
+            )
+
+            filtered = companion.handle_action(
+                {**base, "action": "conversation_list", "mnObjectId": "mnobj:selection:history1"}
+            )
+            self.assertEqual(filtered["conversation_count"], 1)
+            self.assertEqual(filtered["conversations"][0]["title"], "解释这个选区")
+            self.assertEqual(filtered["conversations"][0]["objectRef"]["sourceRef"]["quote"], "selection source")
+
+            blocked = companion.handle_action(
+                {
+                    **base,
+                    "action": "conversation_load",
+                    "sessionId": filtered["conversations"][0]["sessionId"],
+                    "mnObjectId": "mnobj:note:history2",
+                }
+            )
+            self.assertFalse(blocked["ok"])
+            self.assertIn("当前对象", blocked["message"])
+
     def test_diagnostic_logs_record_action_lifecycle_without_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -271,6 +340,142 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("settings_update", blob)
             self.assertIn("[redacted]", blob)
             self.assertNotIn("sk-test-secret-value", blob)
+
+    def test_diagnostic_action_logs_promote_mn_object_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:log123",
+                "kind": "selection",
+                "title": "PDF 选区",
+                "sourceRef": {"page": 9, "quote": "log source"},
+            }
+
+            result = companion.handle_action_logged(
+                {
+                    "action": "settings_update",
+                    "source": "unittest",
+                    "mnObject": mn_object,
+                    "settings": {"model": "gpt-5.5"},
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            logs = [
+                item
+                for item in companion.read_recent_diagnostic_logs(20)
+                if item.get("requestId") == result["requestId"]
+            ]
+            self.assertEqual([item.get("event") for item in logs], ["action.start", "action.end"])
+            for item in logs:
+                self.assertEqual(item["objectRef"]["objectId"], "mnobj:selection:log123")
+                self.assertEqual(item["objectRef"]["kind"], "selection")
+                self.assertEqual(item["objectRef"]["sourceRef"]["quote"], "log source")
+
+    def test_object_activity_aggregates_history_workflows_transactions_and_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:activity1",
+                "kind": "selection",
+                "title": "PDF 选区",
+                "sourceRef": {"page": 7, "quote": "activity source"},
+            }
+            other_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:activity2",
+                "kind": "note",
+                "title": "其他卡片",
+                "sourceRef": {"page": 8, "quote": "other source"},
+            }
+
+            conversation = companion.handle_action({**base, "mnObject": mn_object, "action": "conversation_new"})["conversation"]
+            companion.append_history(
+                {**base, "mnObject": mn_object, "conversationId": conversation["conversationId"]},
+                "对象问题",
+                "对象回答",
+            )
+            other_conversation = companion.handle_action(
+                {**base, "mnObject": other_object, "action": "conversation_new"}
+            )["conversation"]
+            companion.append_history(
+                {**base, "mnObject": other_object, "conversationId": other_conversation["conversationId"]},
+                "其他问题",
+                "其他回答",
+            )
+
+            workflow = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "workflow_start",
+                    "prompt": "解释并制卡",
+                    "workflowId": "selection_to_cards",
+                    "selectionText": "activity source",
+                }
+            )
+            self.assertTrue(workflow["ok"])
+
+            companion.append_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "activity-tx",
+                        "draftId": "activity-draft",
+                        "createdNoteIds": ["N-ACT"],
+                        "createdCount": 1,
+                        "mnObjectId": "mnobj:selection:activity1",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "PDF 选区",
+                        "mnObjectSourceRef": {"page": 7, "quote": "activity source"},
+                    },
+                }
+            )
+            companion.handle_action_logged(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "settings_update",
+                    "settings": {"model": "gpt-5.5"},
+                }
+            )
+            companion.handle_action_logged(
+                {
+                    **base,
+                    "mnObject": other_object,
+                    "action": "settings_update",
+                    "settings": {"model": "gpt-5.5"},
+                }
+            )
+
+            activity = companion.handle_action({**base, "action": "object_activity", "mnObjectId": "mnobj:selection:activity1"})
+
+            self.assertTrue(activity["ok"])
+            self.assertEqual(activity["objectRef"]["objectId"], "mnobj:selection:activity1")
+            self.assertEqual(activity["counts"]["conversations"], 1)
+            self.assertEqual(activity["counts"]["workflowRuns"], 1)
+            self.assertEqual(activity["counts"]["transactions"], 1)
+            self.assertGreaterEqual(activity["counts"]["logs"], 2)
+            self.assertEqual(activity["conversations"][0]["title"], "对象问题")
+            self.assertEqual(activity["workflowRuns"][0]["mnObjectId"], "mnobj:selection:activity1")
+            self.assertEqual(activity["transactions"][0]["transactionId"], "activity-tx")
+            self.assertEqual(activity["conversations"][0]["activityAction"]["action"], "conversation_load")
+            self.assertEqual(activity["conversations"][0]["activityAction"]["payload"]["sessionId"], conversation["sessionId"])
+            self.assertEqual(activity["workflowRuns"][0]["activityAction"]["action"], "workflow_status")
+            self.assertEqual(activity["workflowRuns"][0]["activityAction"]["payload"]["workflowRunId"], workflow["summary"]["id"])
+            self.assertEqual(activity["transactions"][0]["activityAction"]["action"], "ai_edit_transaction_get")
+            self.assertEqual(activity["transactions"][0]["activityAction"]["payload"]["transactionId"], "activity-tx")
+            self.assertTrue(all(item["activityAction"]["action"] == "log_detail" for item in activity["logs"]))
+            self.assertTrue(all(item["objectRef"]["objectId"] == "mnobj:selection:activity1" for item in activity["logs"]))
+            blob = json.dumps(activity, ensure_ascii=False)
+            self.assertIn("activity source", blob)
+            self.assertNotIn("其他问题", blob)
+            self.assertNotIn("mnobj:note:activity2", blob)
 
     def test_diagnostic_logs_recent_and_clear_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -467,7 +672,7 @@ class CompanionControlsTests(unittest.TestCase):
                 "message": "ready",
                 "reply": "preview text",
                 "cards": [{"title": "T", "body": "B"}],
-                "mindmap": {"title": "Root", "children": []},
+                "mindmap": {"title": "Root", "children": [{"title": "Child", "children": []}]},
             }
 
             saved = companion.save_draft(
@@ -483,10 +688,67 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(saved["ok"])
             self.assertEqual(saved["draft"]["card_count"], 1)
             self.assertTrue(saved["draft"]["has_mindmap"])
+            self.assertEqual(saved["draft"]["operation_manifest"]["operationCount"], 3)
+            self.assertEqual(saved["draft"]["operation_manifest"]["createCards"], 1)
+            self.assertEqual(saved["draft"]["operation_manifest"]["createMindmapNodes"], 2)
+            self.assertIn(saved["draft"]["operation_manifest"]["dryRun"]["status"], {"ready", "unknown"})
+            self.assertEqual(
+                saved["draft"]["operation_manifest"]["operationPlan"]["schema"],
+                "codex.mn.operationPlan.v1",
+            )
+            self.assertEqual(
+                [item["op"] for item in saved["draft"]["operation_manifest"]["operationPlan"]["operations"]],
+                ["create_note", "create_mindmap_node", "create_mindmap_node"],
+            )
             loaded = companion.load_draft(saved["draft"]["id"])
             self.assertTrue(loaded["ok"])
             self.assertEqual(loaded["cards"][0]["title"], "T")
             self.assertEqual(loaded["mindmap"]["title"], "Root")
+            self.assertEqual(loaded["operationManifest"]["operationCount"], 3)
+
+            preview = companion.handle_action(
+                {
+                    "action": "operation_plan_preview",
+                    "draftId": saved["draft"]["id"],
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+            self.assertTrue(preview["ok"], preview)
+            self.assertEqual(preview["operationPlan"]["operationCount"], 3)
+            self.assertIn(preview["dryRun"]["status"], {"ready", "unknown"})
+            self.assertIn("Operation dry-run", preview["reply"])
+
+    def test_draft_summary_exposes_card_factory_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            saved = companion.save_draft(
+                {
+                    "action": "draft_save",
+                    "originalAction": "generate_card",
+                    "draft": {
+                        "ok": True,
+                        "message": "ready",
+                        "reply": "preview text",
+                        "cards": [
+                            {"title": "Same", "body": "长正文。" * 260, "type": "concept"},
+                            {"title": "Same", "body": "有来源。\nSource: p.4 quote", "cardType": "evidence"},
+                        ],
+                    },
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(saved["ok"])
+            quality = saved["draft"]["card_quality"]
+            self.assertEqual(quality["schema"], "codex.mn.cardQuality.v1")
+            self.assertEqual(quality["cardCount"], 2)
+            self.assertEqual(quality["longCardCount"], 1)
+            self.assertEqual(quality["duplicateTitleCount"], 1)
+            self.assertEqual(quality["missingSourceCount"], 1)
+            self.assertEqual(quality["status"], "warn")
 
     def test_draft_update_rewrites_cards_from_editable_text_before_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -517,6 +779,89 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("New body line 2", loaded["cards"][0]["body"])
             self.assertEqual(loaded["cards"][1]["title"], "Second")
             self.assertIn("## New card", loaded["draft"]["edit_text"])
+
+    def test_draft_update_can_exclude_selected_mindmap_diff_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            saved = companion.save_draft(
+                {
+                    "action": "draft_save",
+                    "originalAction": "generate_mindmap",
+                    "draft": {
+                        "ok": True,
+                        "message": "ready",
+                        "mindmap": {
+                            "title": "Root",
+                            "children": [
+                                {"title": "Keep A", "children": []},
+                                {"title": "Drop B", "children": []},
+                                {
+                                    "title": "Keep C",
+                                    "children": [
+                                        {"title": "Drop C child", "children": []},
+                                        {"title": "Keep C child", "children": []},
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                }
+            )
+
+            updated = companion.update_draft(
+                {
+                    "id": saved["draft"]["id"],
+                    "excludedMindmapPaths": ["0.2", "0.3.1"],
+                }
+            )
+
+            self.assertTrue(updated["ok"], updated)
+            loaded = companion.load_draft(saved["draft"]["id"])
+            self.assertEqual([child["title"] for child in loaded["mindmap"]["children"]], ["Keep A", "Keep C"])
+            self.assertEqual([child["title"] for child in loaded["mindmap"]["children"][1]["children"]], ["Keep C child"])
+            self.assertEqual(loaded["operationManifest"]["createMindmapNodes"], 4)
+            self.assertEqual(loaded["excludedMindmapPaths"], ["0.2", "0.3.1"])
+
+    def test_draft_update_can_edit_selected_mindmap_diff_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            saved = companion.save_draft(
+                {
+                    "action": "draft_save",
+                    "originalAction": "generate_mindmap",
+                    "draft": {
+                        "ok": True,
+                        "message": "ready",
+                        "mindmap": {
+                            "title": "Root",
+                            "children": [
+                                {"title": "Keep A", "body": "A body", "children": []},
+                                {"title": "Old B", "body": "B body", "children": []},
+                                {"title": "Keep C", "children": [{"title": "Old child", "children": []}]},
+                            ],
+                        },
+                    },
+                }
+            )
+
+            updated = companion.update_draft(
+                {
+                    "id": saved["draft"]["id"],
+                    "mindmapNodeEdits": [
+                        {"proposedPath": "0.2", "title": "Edited B", "body": "Edited B body"},
+                        {"path": "0.3.1", "body": "Edited child body"},
+                    ],
+                }
+            )
+
+            self.assertTrue(updated["ok"], updated)
+            loaded = companion.load_draft(saved["draft"]["id"])
+            self.assertEqual(loaded["mindmap"]["children"][1]["title"], "Edited B")
+            self.assertEqual(loaded["mindmap"]["children"][1]["body"], "Edited B body")
+            self.assertEqual(loaded["mindmap"]["children"][2]["children"][0]["title"], "Old child")
+            self.assertEqual(loaded["mindmap"]["children"][2]["children"][0]["body"], "Edited child body")
+            self.assertEqual(loaded["operationManifest"]["createMindmapNodes"], 5)
+            self.assertEqual(loaded["mindmapNodeEdits"][0]["proposedPath"], "0.2")
 
     def test_run_state_is_visible_in_queue_status_and_expires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1560,6 +1905,11 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["backend"], "codex-cli")
             self.assertIn("cards", result)
             self.assertGreaterEqual(len(result["cards"]), 3)
+            self.assertEqual(result["cardFactory"]["schema"], "codex.mn.cardFactory.v1")
+            self.assertEqual(result["cardFactory"]["cardCount"], len(result["cards"]))
+            self.assertEqual(result["cardQuality"]["schema"], "codex.mn.cardQuality.v1")
+            self.assertTrue(all(card.get("cardType") for card in result["cards"]))
+            self.assertTrue(all(card.get("reviewPrompt") for card in result["cards"]))
             self.assertEqual([child["title"] for child in result["mindmap"]["children"]], ["主线", "方法", "Defense"])
             self.assertNotEqual(result["mindmap"]["title"], "Codex Companion：KNOWS 完整精读")
             self.assertNotIn("local:park-knows-template", result["backend"])
@@ -1735,6 +2085,9 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["writeTarget"]["rootTitle"], "Paper · Codex 脑图")
             self.assertEqual(result["mindmap"]["writeTarget"]["mode"], "document_root")
             self.assertEqual(result["mindmap"]["codexId"], result["writeTarget"]["codexId"])
+            self.assertEqual(result["mnObject"]["schema"], "codex.mn.mnObject.v1")
+            self.assertEqual(result["mnObject"]["kind"], "document")
+            self.assertEqual(result["mnObject"]["identifiers"]["bookmd5"], "book-abc")
 
     def test_generate_mindmap_uses_selected_target_from_top_selector_without_append_words(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1765,6 +2118,44 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["writeTarget"]["mode"], "merge_children_into_selected_node")
             self.assertEqual(result["writeTarget"]["selectedNoteId"], "note-7")
             self.assertEqual(result["mindmap"]["writeTarget"]["selectedNoteTitle"], "已有脑图根")
+
+    def test_generated_cards_and_mindmaps_return_mn_object_for_draft_transactions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                if task == "generate_card":
+                    return "## 核心概念\n解释。", "codex-cli"
+                return "## 根节点\n说明。\n### 子节点\n细节。", "codex-cli"
+
+            companion.generate_reply = fake_generate_reply
+
+            card = companion.generate_card(
+                {
+                    "prompt": "把选区制卡",
+                    "selectionText": "selected evidence",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Paper.pdf",
+                    "pageNumber": 6,
+                }
+            )
+            mindmap = companion.generate_mindmap(
+                {
+                    "prompt": "生成脑图",
+                    "selectedNoteId": "N-root",
+                    "selectedNoteTitle": "当前根节点",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(card["ok"], card)
+            self.assertEqual(card["mnObject"]["kind"], "selection")
+            self.assertEqual(card["mnObject"]["sourceRef"]["quote"], "selected evidence")
+            self.assertTrue(mindmap["ok"], mindmap)
+            self.assertEqual(mindmap["mnObject"]["kind"], "note")
+            self.assertEqual(mindmap["mnObject"]["identifiers"]["noteId"], "N-root")
 
     def test_park_append_mindmap_request_uses_model_not_knows_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2045,6 +2436,143 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(result["cards"][0]["title"], "Codex短卡 01：目标")
             self.assertEqual(result["cards"][1]["title"], "Codex短卡 02：方法")
+
+    def test_generate_card_returns_typed_card_factory_objects_with_sources_and_review_prompts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                return (
+                    "## 概念定位\n"
+                    "解释 attention-guided safety filter 的核心概念。\n\n"
+                    "## 公式拆解\n"
+                    "说明 M_i mask 和 patch score 的计算关系。\n\n"
+                    "## 实验证据\n"
+                    "第 6 页显示真实机器人任务中失败动作被过滤。",
+                    "codex-cli",
+                )
+
+            companion.generate_reply = fake_generate_reply
+
+            result = companion.generate_card(
+                {
+                    "prompt": "把选区做成复习卡片",
+                    "selectionText": "attention-guided safety filter uses image masks to reject risky actions",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Park et al. 2026.pdf",
+                    "pageNumber": 6,
+                    "selectedNoteId": "note-source",
+                    "selectedNoteTitle": "Safety Filter",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["cardFactory"]["schema"], "codex.mn.cardFactory.v1")
+            self.assertEqual(result["cardFactory"]["cardCount"], len(result["cards"]))
+            self.assertEqual(result["cardFactory"]["sourceRef"]["page"], 6)
+            self.assertEqual(result["cardFactory"]["sourceRef"]["noteId"], "note-source")
+            self.assertEqual(result["cardQuality"]["schema"], "codex.mn.cardQuality.v1")
+            self.assertEqual(result["cardQuality"]["missingSourceCount"], 0)
+
+            card_types = {card["cardType"] for card in result["cards"]}
+            self.assertIn("concept", card_types)
+            self.assertIn("formula", card_types)
+            self.assertIn("evidence", card_types)
+            for card in result["cards"]:
+                self.assertEqual(card["source"]["page"], 6)
+                self.assertEqual(card["source"]["noteId"], "note-source")
+                self.assertIn("quote", card["source"])
+                self.assertTrue(card["reviewPrompt"])
+                self.assertTrue(card["learningGoal"])
+                self.assertEqual(card["factory"]["schema"], "codex.mn.cardFactoryCard.v1")
+
+            saved = companion.save_draft(
+                {
+                    "originalAction": "generate_card",
+                    "draft": result,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+            self.assertEqual(saved["draft"]["card_factory"]["schema"], "codex.mn.cardFactory.v1")
+            self.assertEqual(saved["draft"]["card_factory"]["cardCount"], len(result["cards"]))
+            self.assertEqual(saved["draft"]["card_factory"]["sourceRef"]["noteId"], "note-source")
+
+    def test_review_queue_adds_card_factory_draft_cards_once_and_lists_object_scoped_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                return (
+                    "## 概念卡\n解释核心概念。\n\n"
+                    "## 公式卡\n拆解 M_i mask 公式。\n\n"
+                    "## 证据卡\n第 6 页实验结果支持该结论。",
+                    "codex-cli",
+                )
+
+            companion.generate_reply = fake_generate_reply
+            result = companion.generate_card(
+                {
+                    "prompt": "加入复习",
+                    "selectionText": "attention mask evidence",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "selectedNoteId": "note-source",
+                    "selectedNoteTitle": "Safety Filter",
+                    "pageNumber": 6,
+                }
+            )
+            saved = companion.save_draft(
+                {
+                    "originalAction": "generate_card",
+                    "draft": result,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            added = companion.handle_action(
+                {
+                    "action": "review_queue_add",
+                    "draftId": saved["draft"]["id"],
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mnObject": result["mnObject"],
+                }
+            )
+            duplicate = companion.handle_action(
+                {
+                    "action": "review_queue_add",
+                    "draftId": saved["draft"]["id"],
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mnObject": result["mnObject"],
+                }
+            )
+            listed = companion.handle_action(
+                {
+                    "action": "review_queue_list",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mnObject": result["mnObject"],
+                }
+            )
+
+            self.assertTrue(added["ok"], added)
+            self.assertEqual(added["reviewQueue"]["schema"], "codex.mn.reviewQueue.v1")
+            self.assertEqual(added["addedCount"], len(result["cards"]))
+            self.assertEqual(duplicate["addedCount"], 0)
+            self.assertEqual(duplicate["duplicateCount"], len(result["cards"]))
+            self.assertEqual(listed["reviewQueue"]["schema"], "codex.mn.reviewQueue.v1")
+            self.assertEqual(listed["summary"]["totalCount"], len(result["cards"]))
+            self.assertEqual(listed["summary"]["dueCount"], len(result["cards"]))
+            self.assertEqual({item["cardType"] for item in listed["items"]}, {card["cardType"] for card in result["cards"]})
+            for item in listed["items"]:
+                self.assertEqual(item["mnObjectId"], result["mnObject"]["objectId"])
+                self.assertEqual(item["source"]["noteId"], "note-source")
+                self.assertTrue(item["reviewPrompt"])
+                self.assertEqual(item["state"], "new")
 
     def test_goal_run_returns_executable_goal_queue_from_goal_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2529,6 +3057,2093 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(settings_result["settings"]["aiBackend"], "codex_cli")
             self.assertEqual(settings_result["goal"]["title"], "读懂 KNOWS")
             self.assertEqual(len(settings_result["files"]), 1)
+
+    def test_margin_note_url_api_settings_status_and_request_preview_hide_secret(self) -> None:
+        old_secret = os.environ.get("MN_URL_API_SECRET")
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                companion = load_companion(Path(tmp))
+
+                updated = companion.handle_action(
+                    {
+                        "action": "settings_update",
+                        "settings": {
+                            "mnApiBackend": "url_api",
+                            "mnUrlApiSecret": "mnsec_test_secret_123",
+                        },
+                    }
+                )
+
+                self.assertTrue(updated["ok"])
+                self.assertEqual(updated["settings"]["mnApiBackend"], "url_api")
+                self.assertTrue(updated["mn_url_api_configured"])
+                self.assertIn("URL API：已配置", updated["reply"])
+                self.assertNotIn("mnsec_test_secret_123", json.dumps(updated, ensure_ascii=False))
+
+                status = companion.status_payload()
+                self.assertEqual(status["mn_api_backend"], "url_api")
+                self.assertTrue(status["mn_url_api_configured"])
+                self.assertNotIn("mnsec_test_secret_123", json.dumps(status, ensure_ascii=False))
+
+                request_preview = companion.handle_action(
+                    {
+                        "action": "mn_url_api_build_request",
+                        "urlApiAction": "tree",
+                        "urlPayload": {"path": "@current", "depth": 2},
+                        "requestId": "req_preview",
+                    }
+                )
+
+                self.assertTrue(request_preview["ok"])
+                self.assertEqual(request_preview["request"]["action"], "tree")
+                self.assertIn("secret=[REDACTED]", request_preview["request"]["redactedUrl"])
+                self.assertNotIn("mnsec_test_secret_123", json.dumps(request_preview, ensure_ascii=False))
+
+                cleared = companion.handle_action(
+                    {"action": "settings_update", "settings": {"clearMnUrlApiSecret": True}}
+                )
+                self.assertFalse(cleared["mn_url_api_configured"])
+        finally:
+            if old_secret is None:
+                os.environ.pop("MN_URL_API_SECRET", None)
+            else:
+                os.environ["MN_URL_API_SECRET"] = old_secret
+
+    def test_workflow_templates_and_preview_are_exposed_as_read_only_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            templates = companion.handle_action({"action": "workflow_templates"})
+            self.assertTrue(templates["ok"])
+            self.assertIn("paper_deep_reading", [item["id"] for item in templates["workflowTemplates"]])
+
+            preview = companion.handle_action(
+                {
+                    "action": "workflow_preview",
+                    "prompt": "重组当前脑图结构，保留原来的卡片",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(preview["ok"], preview)
+            self.assertEqual(preview["workflow"]["id"], "mindmap_reorganize")
+            self.assertIn("reorganize_mindmap", [item["action"] for item in preview["workflow"]["steps"]])
+            self.assertIn("工作流：当前脑图重组工作流", preview["reply"])
+
+    def test_skill_marketplace_lists_and_installs_permission_declared_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            status = companion.handle_action({"action": "skill_marketplace_status"})
+            self.assertTrue(status["ok"])
+            self.assertGreaterEqual(status["skillCount"], 2)
+            self.assertIn("knowledge.related_context", [item["id"] for item in status["skills"]])
+            write_skill = next(item for item in status["skills"] if item["id"] == "workflow.deep_reading_writer")
+            self.assertEqual(write_skill["permission"], "notes")
+            self.assertEqual(write_skill["rollback"]["strategy"], "ai_edit_transaction")
+            self.assertTrue(write_skill["acceptanceRules"])
+
+            installed = companion.handle_action({"action": "skill_install", "skillId": "workflow.deep_reading_writer"})
+            self.assertTrue(installed["ok"], installed)
+            self.assertTrue(installed["skill"]["installed"])
+            self.assertIn("workflow.deep_reading_writer", installed["installedSkillIds"])
+
+            uninstalled = companion.handle_action({"action": "skill_uninstall", "skillId": "workflow.deep_reading_writer"})
+            self.assertTrue(uninstalled["ok"], uninstalled)
+            self.assertNotIn("workflow.deep_reading_writer", uninstalled["installedSkillIds"])
+
+    def test_mindmap_diff_preview_reports_structured_changes_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.handle_action(
+                {
+                    "action": "mindmap_diff_preview",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "currentMindmap": {
+                        "title": "Paper",
+                        "children": [{"title": "Problem", "body": "old", "children": []}],
+                    },
+                    "proposedMindmap": {
+                        "title": "Paper",
+                        "children": [
+                            {"title": "Problem", "body": "old", "children": []},
+                            {"title": "Method", "body": "new", "children": []},
+                        ],
+                    },
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["mindmapDiff"]["schema"], "codex.mn.mindmapDiff.v1")
+            self.assertEqual(result["mindmapDiffOperationPlan"]["schema"], "codex.mn.mindmapDiffOperationPlan.v1")
+            self.assertEqual(result["mindmapDiff"]["summary"]["createCount"], 1)
+            self.assertEqual(result["mindmapDiff"]["summary"]["mergeCount"], 2)
+            self.assertEqual(result["mindmapDiffOperationPlan"]["operationCount"], 3)
+            self.assertEqual(result["mindmapDiffOperationPlan"]["applyBoundary"]["localApplyStatus"], "preview_only")
+            self.assertEqual(result["mindmapDiffOperationPlan"]["applyBoundary"]["currentApplyPath"], "draft_tree_write")
+            self.assertIn("nativeMindmap", result["mindmapDiffOperationPlan"]["requiredCapabilities"])
+            self.assertIn("新增 1", result["reply"])
+            self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
+
+    def test_request_mindmap_diff_apply_queues_create_only_local_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operationCount": 1,
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:1",
+                        "op": "create_mindmap_node",
+                        "diffOp": "create",
+                        "mutation": "create",
+                        "kind": "mindmap",
+                        "title": "New Node",
+                        "proposedPath": "0.1",
+                        "targetParent": "Root",
+                        "requires": ["nativeMindmap"],
+                        "proposedRef": {"codexId": "new-node"},
+                    }
+                ],
+                "requiredCapabilities": ["nativeMindmap"],
+                "applyBoundary": {"localApplyStatus": "ready", "currentApplyPath": "local_operation_queue"},
+            }
+
+            result = companion.handle_action(
+                {
+                    "action": "request_mindmap_diff_apply",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapDiffOperationPlan": plan,
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["applyPlan"]["operationCount"], 1)
+            self.assertEqual(result["applyPlan"]["applyBoundary"]["localApplyStatus"], "queued")
+            commands = companion.poll_commands("T1", "B1")["commands"]
+            self.assertEqual(commands[0]["nativeAction"], "apply_mindmap_diff_operations")
+            self.assertTrue(commands[0]["transactionId"].startswith("mindmap-diff-"))
+            self.assertEqual(commands[0]["draftId"], "")
+            self.assertEqual(commands[0]["mindmapDiffOperationPlan"]["operations"][0]["op"], "create_mindmap_node")
+            self.assertEqual(result["applyPlan"]["transactionId"], commands[0]["transactionId"])
+
+    def test_request_mindmap_diff_apply_filters_delete_suggestions_from_native_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operationCount": 2,
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:create",
+                        "op": "create_mindmap_node",
+                        "mutation": "create",
+                        "title": "New Node",
+                        "targetParent": "Root",
+                        "requires": ["nativeMindmap"],
+                    },
+                    {
+                        "opId": "mindmap-diff:delete",
+                        "op": "suggest_delete_mindmap_node",
+                        "mutation": "delete_suggest",
+                        "title": "Old Node",
+                        "currentRef": {"noteId": "N-old"},
+                        "requires": ["nativeMindmapDelete"],
+                        "confirmationRequired": True,
+                    },
+                ],
+                "requiredCapabilities": ["nativeMindmap", "nativeMindmapDelete"],
+                "applyBoundary": {
+                    "localApplyStatus": "ready",
+                    "currentApplyPath": "local_operation_queue",
+                    "deleteSuggestCount": 1,
+                },
+            }
+
+            result = companion.handle_action(
+                {
+                    "action": "request_mindmap_diff_apply",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapDiffOperationPlan": plan,
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["applyPlan"]["operationCount"], 1)
+            self.assertEqual(result["applyPlan"]["skippedDeleteSuggestionCount"], 1)
+            self.assertEqual(result["applyPlan"]["applyBoundary"]["skippedDeleteSuggestionCount"], 1)
+            commands = companion.poll_commands("T1", "B1")["commands"]
+            queued_plan = commands[0]["mindmapDiffOperationPlan"]
+            self.assertEqual(len(queued_plan["operations"]), 1)
+            self.assertEqual(queued_plan["operations"][0]["mutation"], "create")
+            self.assertNotIn("delete_suggest", {item.get("mutation") for item in queued_plan["operations"]})
+
+    def test_request_mindmap_diff_apply_blocks_update_without_native_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operationCount": 1,
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:1",
+                        "op": "update_mindmap_node",
+                        "diffOp": "update",
+                        "mutation": "update",
+                        "kind": "mindmap",
+                        "title": "Existing Node",
+                        "existingPath": "0.2",
+                        "currentRef": {"noteId": "N-existing"},
+                        "requires": ["nativeMindmapUpdate"],
+                    }
+                ],
+                "requiredCapabilities": ["nativeMindmapUpdate"],
+            }
+
+            result = companion.handle_action(
+                {
+                    "action": "request_mindmap_diff_apply",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapDiffOperationPlan": plan,
+                }
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result["applyPlan"]["applyBoundary"]["localApplyStatus"], "blocked")
+            self.assertEqual(result["blockedOperations"][0]["reason"], "unverified-note-update-api")
+            self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
+
+    def test_request_mindmap_diff_apply_queues_update_merge_move_when_capabilities_are_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "canCreateNote": True,
+                        "canUpdateMindmapNode": True,
+                        "canMergeMindmapNode": True,
+                        "canMoveMindmapNode": True,
+                    },
+                }
+            )
+            plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operationCount": 3,
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:update",
+                        "op": "update_mindmap_node",
+                        "mutation": "update",
+                        "title": "Updated Existing",
+                        "currentRef": {"noteId": "N-existing"},
+                        "requires": ["nativeMindmapUpdate"],
+                    },
+                    {
+                        "opId": "mindmap-diff:merge",
+                        "op": "merge_mindmap_node",
+                        "mutation": "merge",
+                        "title": "Duplicate Existing",
+                        "currentRef": {"noteId": "N-duplicate"},
+                        "requires": ["nativeMindmapMerge"],
+                    },
+                    {
+                        "opId": "mindmap-diff:move",
+                        "op": "move_mindmap_node",
+                        "mutation": "move",
+                        "title": "Move Existing",
+                        "currentRef": {"noteId": "N-child"},
+                        "targetParentRef": {"noteId": "N-parent"},
+                        "requires": ["nativeMindmapMove"],
+                    },
+                ],
+                "requiredCapabilities": ["nativeMindmapUpdate", "nativeMindmapMerge", "nativeMindmapMove"],
+                "applyBoundary": {"localApplyStatus": "preview_only", "currentApplyPath": "draft_tree_write"},
+            }
+
+            result = companion.handle_action(
+                {
+                    "action": "request_mindmap_diff_apply",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapDiffOperationPlan": plan,
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["applyPlan"]["operationCount"], 3)
+            self.assertEqual(result["applyPlan"]["applyBoundary"]["localApplyStatus"], "queued")
+            self.assertEqual(result["applyPlan"]["applyBoundary"]["blockedOperationCount"], 0)
+            commands = companion.poll_commands("T1", "B1")["commands"]
+            self.assertEqual(commands[0]["nativeAction"], "apply_mindmap_diff_operations")
+            self.assertTrue(commands[0]["transactionId"].startswith("mindmap-diff-"))
+            queued_ops = commands[0]["mindmapDiffOperationPlan"]["operations"]
+            self.assertEqual([item["mutation"] for item in queued_ops], ["update", "merge", "move"])
+            self.assertEqual(queued_ops[2]["targetParentRef"]["noteId"], "N-parent")
+
+    def test_mindmap_diff_apply_finished_event_persists_transaction_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "mindmap-diff-tx-1",
+                        "draftId": "draft-mm",
+                        "createdNoteIds": ["N-created"],
+                        "appliedOperations": [
+                            {"opId": "mindmap-diff:1", "mutation": "create", "noteId": "N-created"}
+                        ],
+                        "appliedCount": 1,
+                        "failedCount": 0,
+                        "verification": {
+                            "schema": "codex.mn.mindmapDiffApplyVerification.v1",
+                            "status": "pass",
+                            "summary": "脑图 Diff 验证：通过 1，失败 0。",
+                            "operationVerification": [
+                                {"opId": "mindmap-diff:1", "noteId": "N-created", "ok": True}
+                            ],
+                        },
+                    },
+                }
+            )
+
+            status = companion.status_payload()
+            tx_status = status["aiEditTransactionStatus"]
+            self.assertEqual(tx_status["latest"]["transactionId"], "mindmap-diff-tx-1")
+            self.assertEqual(tx_status["latest"]["status"], "pending_confirmation")
+            self.assertEqual(tx_status["latest"]["createdNoteIds"], ["N-created"])
+            self.assertTrue(tx_status["latest"]["requiresConfirmation"])
+            self.assertIn("retain", tx_status["latest"]["availableActions"])
+            self.assertIn("rollback", tx_status["latest"]["availableActions"])
+            self.assertEqual(tx_status["verification"]["status"], "pass")
+            self.assertTrue(tx_status["verification"]["requiresConfirmation"])
+            self.assertIn("脑图 Diff", tx_status["verification"]["summary"])
+
+    def test_request_mindmap_diff_apply_respects_read_only_permission(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:1",
+                        "op": "create_mindmap_node",
+                        "mutation": "create",
+                        "title": "Blocked Node",
+                        "requires": ["nativeMindmap"],
+                    }
+                ],
+            }
+
+            result = companion.handle_action(
+                {
+                    "action": "request_mindmap_diff_apply",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapDiffOperationPlan": plan,
+                }
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("read_only", result["message"])
+            self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
+
+    def test_request_mindmap_delete_confirmation_records_pending_transaction_without_native_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:delete",
+                        "op": "suggest_delete_mindmap_node",
+                        "mutation": "delete_suggest",
+                        "title": "Obsolete",
+                        "currentRef": {"noteId": "N-old"},
+                        "requires": ["nativeMindmapDelete"],
+                        "confirmationRequired": True,
+                        "confirmationType": "delete_existing_mindmap_node",
+                    }
+                ],
+            }
+
+            result = companion.handle_action(
+                {
+                    "action": "request_mindmap_delete_confirmation",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapDiffOperationPlan": plan,
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["transactionId"].startswith("mindmap-delete-"))
+            self.assertEqual(result["deleteConfirmation"]["targetNoteIds"], ["N-old"])
+            self.assertEqual(result["deleteConfirmation"]["status"], "delete_pending_confirmation")
+            self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
+            status = companion.status_payload()
+            tx_status = status["aiEditTransactionStatus"]
+            self.assertEqual(tx_status["latest"]["status"], "delete_pending_confirmation")
+            self.assertIn("confirm_delete", tx_status["latest"]["availableActions"])
+            self.assertIn("dismiss", tx_status["latest"]["availableActions"])
+
+    def test_status_exposes_latest_mindmap_diff_apply_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "appliedCount": 2,
+                        "failedCount": 1,
+                        "verification": {
+                            "schema": "codex.mn.mindmapDiffApplyVerification.v1",
+                            "status": "block",
+                            "summary": "脑图 Diff 验证：通过 2，失败 1。",
+                            "verifiedCount": 2,
+                            "failedVerificationCount": 1,
+                            "operationVerification": [
+                                {"opId": "op-1", "ok": True, "noteId": "N1"},
+                                {"opId": "op-2", "ok": False, "noteId": "N2"},
+                            ],
+                        },
+                    },
+                }
+            )
+
+            status = companion.status_payload()
+
+            self.assertEqual(status["mindmapDiffApply"]["schema"], "codex.mn.mindmapDiffApplyStatus.v1")
+            self.assertEqual(status["mindmapDiffApply"]["status"], "block")
+            self.assertEqual(status["mindmapDiffApply"]["appliedCount"], 2)
+            self.assertEqual(status["mindmapDiffApply"]["failedCount"], 1)
+            self.assertEqual(status["mindmapDiffApply"]["verification"]["failedVerificationCount"], 1)
+            self.assertIn("脑图 Diff 验证", status["mindmapDiffApply"]["summary"])
+
+    def test_native_capability_matrix_exposes_mindmap_local_mutation_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "canCreateNote": True,
+                        "canUpdateMindmapNode": True,
+                        "canMergeMindmapNode": True,
+                        "canMoveMindmapNode": True,
+                        "canDeleteMindmapNode": False,
+                    },
+                }
+            )
+
+            matrix = companion.latest_native_api_capabilities("T1", "B1")["capabilityMatrix"]
+
+            self.assertTrue(matrix["nativeMindmapUpdate"]["ready"])
+            self.assertTrue(matrix["nativeMindmapMerge"]["ready"])
+            self.assertTrue(matrix["nativeMindmapMove"]["ready"])
+            self.assertFalse(matrix["nativeMindmapDelete"]["ready"])
+            self.assertEqual(matrix["nativeMindmapUpdate"]["nativeAction"], "apply_mindmap_diff_operations")
+
+    def test_mindmap_reorganize_workflow_queues_native_tree_read_before_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            started = companion.handle_action(
+                {
+                    "action": "workflow_start",
+                    "workflowId": "mindmap_reorganize",
+                    "prompt": "重组当前脑图结构",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "selectedNoteId": "N-root",
+                    "selectedNoteTitle": "现有脑图根",
+                }
+            )
+
+            self.assertTrue(started["ok"], started)
+            self.assertEqual(started["workflowRun"]["steps"][0]["status"], "queued")
+            self.assertEqual(started["workflowRun"]["steps"][0]["action"], "mn_read_tree")
+            commands = companion.poll_commands("T1", "B1")["commands"]
+            self.assertEqual(commands[0]["nativeAction"], "read_mindmap_tree")
+            self.assertEqual(commands[0]["selectedNoteId"], "N-root")
+            self.assertEqual(commands[1]["rawAction"], "reorganize_mindmap")
+            self.assertEqual(started["summary"]["queuedCount"], 2)
+
+    def test_mindmap_diff_preview_uses_latest_native_tree_read_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "mindmapTreeReadFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "currentMindmap": {
+                            "title": "Paper",
+                            "children": [{"title": "Problem", "body": "old", "children": []}],
+                        },
+                        "nodeCount": 2,
+                    },
+                }
+            )
+
+            result = companion.handle_action(
+                {
+                    "action": "mindmap_diff_preview",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "proposedMindmap": {
+                        "title": "Paper",
+                        "children": [
+                            {"title": "Problem", "body": "old", "children": []},
+                            {"title": "Method", "body": "new", "children": []},
+                        ],
+                    },
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["mindmapDiff"]["summary"]["currentCount"], 2)
+            self.assertEqual(result["mindmapDiff"]["summary"]["createCount"], 1)
+            self.assertEqual(result["mindmapTreeCache"]["sourceEvent"], "mindmapTreeReadFinished")
+
+    def test_status_exposes_latest_native_mindmap_tree_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "mindmapTreeReadFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "selectedNoteId": "N-root",
+                        "selectedNoteTitle": "Paper Map",
+                        "currentMindmap": {
+                            "noteId": "N-root",
+                            "title": "Paper Map",
+                            "children": [
+                                {
+                                    "noteId": "N1",
+                                    "title": "Problem",
+                                    "children": [{"noteId": "N1a", "title": "Motivation", "children": []}],
+                                },
+                                {"noteId": "N2", "title": "Method", "children": []},
+                            ],
+                        },
+                        "nodeCount": 4,
+                        "truncatedCount": 0,
+                    },
+                }
+            )
+
+            status = companion.status_payload()
+
+            self.assertEqual(status["mindmapTreeCache"]["schema"], "codex.mn.mindmapTreeCache.v1")
+            self.assertTrue(status["mindmapTreeCache"]["available"])
+            self.assertEqual(status["mindmapTreeCache"]["nodeCount"], 4)
+            self.assertEqual(status["mindmapTreeCache"]["selectedNoteId"], "N-root")
+            self.assertEqual(status["mindmapTreeCache"]["rootTitle"], "Paper Map")
+            self.assertEqual(status["mindmapTreeCache"]["treePreview"][0]["title"], "Paper Map")
+            self.assertEqual(status["mindmapTreeCache"]["treePreview"][1]["depth"], 1)
+            self.assertEqual(status["mindmapTreeCache"]["treePreview"][2]["title"], "Motivation")
+            self.assertEqual(status["mindmapTreeCache"]["treePreviewCount"], 4)
+
+    def test_agent_plan_combines_current_object_workflow_and_write_gate_without_queueing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action(
+                {
+                    "action": "knowledge_index_ingest_context",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "title": "已有 VLA 笔记",
+                    "text": "Previous VLA safety note.",
+                    "source": "unittest",
+                }
+            )
+
+            planned = companion.handle_action(
+                {
+                    "action": "agent_plan",
+                    "prompt": "把这个选区做成短卡，并关联之前的内容",
+                    "selectionText": "selected evidence",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(planned["ok"], planned)
+            operation = planned["agentOperation"]
+            self.assertEqual(operation["schema"], "codex.mn.agentOperation.v1")
+            self.assertEqual(operation["mnObject"]["schema"], "codex.mn.mnObject.v1")
+            self.assertEqual(operation["mnObject"]["kind"], "selection")
+            self.assertTrue(operation["mnObject"]["objectId"].startswith("mnobj:selection:"))
+            self.assertEqual(operation["mnObject"]["sourceRef"]["quote"], "selected evidence")
+            self.assertEqual(operation["object"]["mnObjectId"], operation["mnObject"]["objectId"])
+            self.assertEqual(operation["object"]["kind"], "selection")
+            self.assertEqual(operation["workflow"]["id"], "selection_to_cards")
+            self.assertTrue(operation["knowledge"]["enabled"])
+            self.assertEqual(operation["knowledge"]["count"], 1)
+            self.assertEqual(operation["operationPolicy"]["risk"]["status"], "write_pending_confirmation")
+            self.assertIn("review_operation_plan", [item["id"] for item in operation["nextActions"]])
+            self.assertEqual(companion.poll_commands("T1", "B1")["commands"], [])
+
+    def test_workflow_start_enqueues_safe_steps_and_pauses_at_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+
+            started = companion.handle_action(
+                {
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "把当前选区解释并做成短卡",
+                    "selectionText": "selected text",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(started["ok"], started)
+            self.assertEqual(started["workflowRun"]["workflowId"], "selection_to_cards")
+            self.assertEqual(started["workflowRun"]["mnObject"]["schema"], "codex.mn.mnObject.v1")
+            self.assertTrue(started["workflowRun"]["mnObject"]["objectId"].startswith("mnobj:selection:"))
+            self.assertEqual(started["workflowRun"]["objectRef"]["objectId"], started["workflowRun"]["mnObject"]["objectId"])
+            self.assertEqual(started["summary"]["mnObjectId"], started["workflowRun"]["mnObject"]["objectId"])
+            self.assertEqual(started["summary"]["mnObjectKind"], "selection")
+            self.assertEqual(started["summary"]["queuedCount"], 2)
+            self.assertEqual(started["summary"]["waitingConfirmationCount"], 1)
+            self.assertIn("写入类步骤不会自动执行", started["reply"])
+            commands = companion.poll_commands("T1", "B1")["commands"]
+            queued_actions = [item["rawAction"] for item in commands]
+            self.assertEqual(queued_actions, ["chat", "generate_card"])
+            self.assertTrue(all(item["mnObjectId"] == started["workflowRun"]["mnObject"]["objectId"] for item in commands))
+
+            status = companion.handle_action({"action": "workflow_status", "workflowRunId": started["summary"]["id"]})
+            self.assertTrue(status["ok"])
+            self.assertEqual(status["summary"]["queuedCount"], 2)
+            self.assertEqual(status["summary"]["mnObjectId"], started["workflowRun"]["mnObject"]["objectId"])
+            inspector = status["runInspector"]
+            self.assertEqual(inspector["schema"], "codex.mn.workflowRunInspector.v1")
+            self.assertEqual(inspector["workflowRunId"], started["summary"]["id"])
+            self.assertEqual(inspector["stepCounts"]["queued"], 2)
+            self.assertEqual(inspector["stepCounts"]["waitingConfirmation"], 1)
+            self.assertEqual(inspector["confirmations"][0]["stepId"], "write")
+            self.assertEqual([step["nextAction"] for step in inspector["steps"]], ["watch_queue", "watch_queue", "review_dry_run", "confirm_or_reject"])
+            self.assertEqual(inspector["steps"][-1]["statusTone"], "warn")
+
+            listed = companion.handle_action({"action": "workflow_list", "topicid": "T1", "bookmd5": "B1"})
+            self.assertEqual(len(listed["workflowRuns"]), 1)
+            self.assertEqual(listed["workflowRuns"][0]["mnObjectId"], started["workflowRun"]["mnObject"]["objectId"])
+            self.assertGreaterEqual(listed["runCount"], 1)
+            self.assertEqual(listed["latestStatus"], listed["workflowRuns"][0]["status"])
+            self.assertGreaterEqual(len(listed["workflowTemplates"]), 3)
+            self.assertIn("selection_to_cards", [item["id"] for item in listed["workflowTemplates"]])
+
+            cancelled = companion.handle_action({"action": "workflow_cancel", "workflowRunId": started["summary"]["id"]})
+            self.assertEqual(cancelled["summary"]["status"], "cancelled")
+
+    def test_workflow_start_respects_read_only_permission_before_queueing_note_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+
+            started = companion.handle_action(
+                {
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "把当前选区做成短卡",
+                    "selectionText": "selected text",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(started["ok"], started)
+            self.assertEqual(started["summary"]["queuedCount"], 1)
+            self.assertEqual(started["workflowRun"]["status"], "partial")
+            blocked = [step for step in started["workflowRun"]["steps"] if step["status"] == "blocked"]
+            self.assertEqual([step["action"] for step in blocked], ["generate_card"])
+            self.assertEqual(companion.poll_commands("T1", "B1")["commands"][0]["rawAction"], "chat")
+
+    def test_workflow_retry_step_requeues_recoverable_blocked_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            started = companion.handle_action(
+                {
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "把当前选区做成短卡",
+                    "selectionText": "selected text",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+            status = companion.handle_action({"action": "workflow_status", "workflowRunId": started["summary"]["id"]})
+            blocked_steps = [step for step in status["runInspector"]["steps"] if step["status"] == "blocked"]
+            self.assertEqual([step["stepId"] for step in blocked_steps], ["cards"])
+            self.assertTrue(blocked_steps[0]["retryable"])
+            self.assertEqual(blocked_steps[0]["nextAction"], "retry_step")
+
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            retried = companion.handle_action(
+                {
+                    "action": "workflow_retry_step",
+                    "workflowRunId": started["summary"]["id"],
+                    "workflowStepId": "cards",
+                }
+            )
+
+            self.assertTrue(retried["ok"], retried)
+            self.assertEqual(retried["retriedStep"]["stepId"], "cards")
+            self.assertEqual(retried["retriedStep"]["status"], "queued")
+            self.assertEqual(retried["summary"]["queuedCount"], 2)
+            commands = companion.poll_commands("T1", "B1")["commands"]
+            self.assertEqual([item["rawAction"] for item in commands], ["chat", "generate_card"])
+            retried_cards = [step for step in retried["runInspector"]["steps"] if step["stepId"] == "cards"][0]
+            self.assertFalse(retried_cards["retryable"])
+            self.assertEqual(retried_cards["nextAction"], "watch_queue")
+
+            write_retry = companion.handle_action(
+                {
+                    "action": "workflow_retry_step",
+                    "workflowRunId": started["summary"]["id"],
+                    "workflowStepId": "write",
+                }
+            )
+            self.assertFalse(write_retry["ok"])
+            self.assertIn("确认", write_retry["message"])
+
+    def test_external_gateway_start_workflow_records_request_ledger_and_reuses_permissions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+
+            started = companion.handle_action(
+                {
+                    "action": "external_gateway_start_workflow",
+                    "requestId": "REQ_EXT_1",
+                    "caller": "shortcuts",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "把当前选区解释并做成短卡",
+                    "selectionText": "selected text",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "callbackBaseUrl": "http://127.0.0.1:48761/external/callback",
+                }
+            )
+
+            self.assertTrue(started["ok"], started)
+            self.assertEqual(started["externalGateway"]["schema"], "codex.mn.externalGatewayRequest.v1")
+            self.assertEqual(started["externalGateway"]["requestId"], "REQ_EXT_1")
+            self.assertEqual(started["externalGateway"]["caller"], "shortcuts")
+            self.assertEqual(started["externalGateway"]["permission"], "read_only")
+            self.assertEqual(started["externalGateway"]["requestedAction"], "workflow_start")
+            self.assertEqual(
+                started["externalGateway"]["callback"]["success"],
+                "http://127.0.0.1:48761/external/callback/success",
+            )
+            self.assertEqual(started["workflowRun"]["externalRequest"]["requestId"], "REQ_EXT_1")
+            self.assertEqual(started["workflowRun"]["externalRequest"]["caller"], "shortcuts")
+            self.assertEqual(started["summary"]["queuedCount"], 1)
+            self.assertEqual(started["workflowRun"]["status"], "partial")
+            blocked = [step for step in started["workflowRun"]["steps"] if step["status"] == "blocked"]
+            self.assertEqual([step["action"] for step in blocked], ["generate_card"])
+
+            status = companion.handle_action({"action": "external_gateway_request_status", "requestId": "REQ_EXT_1"})
+            self.assertTrue(status["ok"], status)
+            self.assertEqual(status["externalGateway"]["requestId"], "REQ_EXT_1")
+            self.assertEqual(status["externalGateway"]["workflowRunId"], started["summary"]["id"])
+            self.assertEqual(status["externalGateway"]["stage"], "workflow_started")
+            self.assertEqual(status["externalGateway"]["result"]["workflowStatus"], "partial")
+            self.assertEqual(status["externalGateway"]["callback"]["status"], "pending")
+
+            callback = companion.handle_action(
+                {
+                    "action": "external_gateway_callback",
+                    "requestId": "REQ_EXT_1",
+                    "callbackStatus": "success",
+                    "payload": {"mnResult": "ok", "updatedNotes": 2},
+                }
+            )
+            self.assertTrue(callback["ok"], callback)
+            self.assertEqual(callback["externalGateway"]["stage"], "callback_success")
+            self.assertEqual(callback["externalGateway"]["callback"]["status"], "success")
+            self.assertEqual(callback["externalGateway"]["callback"]["payload"]["updatedNotes"], 2)
+            self.assertEqual(callback["externalGateway"]["callback"]["receivedCount"], 1)
+
+            after_callback = companion.handle_action({"action": "external_gateway_request_status", "requestId": "REQ_EXT_1"})
+            self.assertEqual(after_callback["externalGateway"]["callback"]["status"], "success")
+            self.assertEqual(after_callback["externalGateway"]["callback"]["history"][0]["status"], "success")
+
+    def test_external_gateway_http_route_maps_to_workflow_start_action(self) -> None:
+        source = COMPANION_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('self.path == "/external/workflow/start"', source)
+        self.assertIn('"action": "external_gateway_start_workflow"', source)
+        self.assertIn('self.path in {"/external/callback/success", "/external/callback/error"}', source)
+        self.assertIn('"action": "external_gateway_callback"', source)
+        self.assertLess(
+            source.index('self.path == "/external/workflow/start"'),
+            source.index('if self.path != "/marginnote/action"'),
+        )
+
+    def test_operation_ledger_lists_and_loads_object_scoped_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:ledger1",
+                "kind": "selection",
+                "title": "Ledger 选区",
+                "sourceRef": {"page": 12, "quote": "ledger source"},
+            }
+            other_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:other-ledger",
+                "kind": "selection",
+                "title": "其他选区",
+                "sourceRef": {"page": 13, "quote": "other source"},
+            }
+
+            workflow = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "解释并制卡",
+                    "selectionText": "ledger source",
+                }
+            )
+            self.assertTrue(workflow["ok"], workflow)
+
+            operation_plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operationCount": 1,
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:ledger-create",
+                        "op": "create_mindmap_node",
+                        "mutation": "create",
+                        "title": "Ledger Node",
+                        "requires": ["nativeMindmap"],
+                    }
+                ],
+                "requiredCapabilities": ["nativeMindmap"],
+                "applyBoundary": {
+                    "localApplyStatus": "queued",
+                    "currentApplyPath": "local_operation_queue",
+                },
+            }
+            queued_apply = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "request_mindmap_diff_apply",
+                    "transactionId": "ledger-tx",
+                    "draftId": "ledger-draft",
+                    "mindmapDiffOperationPlan": operation_plan,
+                }
+            )
+            self.assertTrue(queued_apply["ok"], queued_apply)
+            queue_id = queued_apply["queued"]["id"]
+            self.assertEqual(queued_apply["queued"]["command"]["nativeAction"], "apply_mindmap_diff_operations")
+            self.assertEqual(queued_apply["queued"]["command"]["transactionId"], "ledger-tx")
+
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyRequested",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ledger-tx",
+                        "draftId": "ledger-draft",
+                        "mindmapTitle": "Ledger Diff",
+                        "mindmapDiffOperationPlan": operation_plan,
+                        "nativeAction": "apply_mindmap_diff_operations",
+                        "queueId": queue_id,
+                        "mnObjectId": "mnobj:selection:ledger1",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "Ledger 选区",
+                        "mnObjectSourceRef": {"page": 12, "quote": "ledger source"},
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ledger-tx",
+                        "draftId": "ledger-draft",
+                        "nativeAction": "apply_mindmap_diff_operations",
+                        "queueId": queue_id,
+                        "createdNoteIds": ["N-LEDGER"],
+                        "createdCount": 1,
+                        "appliedOperations": [
+                            {
+                                "opId": "mindmap-diff:ledger-create",
+                                "mutation": "create",
+                                "noteId": "N-LEDGER",
+                            }
+                        ],
+                        "appliedCount": 1,
+                        "failedCount": 0,
+                        "mindmapDiffOperationPlan": operation_plan,
+                        "verification": {
+                            "schema": "codex.mn.mindmapDiffApplyVerification.v1",
+                            "status": "pass",
+                            "summary": "Ledger Diff 验证通过。",
+                            "operationVerification": [
+                                {"opId": "mindmap-diff:ledger-create", "noteId": "N-LEDGER", "ok": True}
+                            ],
+                        },
+                        "mnObjectId": "mnobj:selection:ledger1",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "Ledger 选区",
+                        "mnObjectSourceRef": {"page": 12, "quote": "ledger source"},
+                    },
+                }
+            )
+            companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "external_gateway_start_workflow",
+                    "requestId": "REQ_LEDGER",
+                    "caller": "shortcuts",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "外部解释并制卡",
+                    "selectionText": "ledger source",
+                    "callbackBaseUrl": "http://127.0.0.1:48761/external/callback",
+                }
+            )
+            companion.handle_action(
+                {
+                    **base,
+                    "mnObject": other_object,
+                    "action": "external_gateway_start_workflow",
+                    "requestId": "REQ_OTHER_LEDGER",
+                    "caller": "shortcuts",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "其他对象",
+                    "selectionText": "other source",
+                }
+            )
+
+            ledger = companion.handle_action({**base, "action": "operation_ledger_list", "mnObjectId": "mnobj:selection:ledger1"})
+
+            self.assertTrue(ledger["ok"], ledger)
+            self.assertEqual(ledger["schema"], "codex.mn.operationLedger.v1")
+            self.assertEqual(ledger["objectRef"]["objectId"], "mnobj:selection:ledger1")
+            self.assertGreaterEqual(ledger["counts"]["total"], 3)
+            entry_types = {item["entryType"] for item in ledger["entries"]}
+            self.assertIn("workflow_run", entry_types)
+            self.assertIn("ai_edit_transaction", entry_types)
+            self.assertIn("external_gateway_request", entry_types)
+            self.assertNotIn("REQ_OTHER_LEDGER", json.dumps(ledger, ensure_ascii=False))
+            self.assertTrue(all(item["objectRef"]["objectId"] == "mnobj:selection:ledger1" for item in ledger["entries"]))
+            self.assertTrue(all(item["ledgerAction"]["action"] == "operation_ledger_get" for item in ledger["entries"]))
+
+            external_entry = next(item for item in ledger["entries"] if item["entryType"] == "external_gateway_request")
+            detail = companion.handle_action({"action": "operation_ledger_get", "ledgerId": external_entry["ledgerId"]})
+
+            self.assertTrue(detail["ok"], detail)
+            self.assertEqual(detail["schema"], "codex.mn.operationLedgerEntryDetail.v1")
+            self.assertEqual(detail["entry"]["ledgerId"], external_entry["ledgerId"])
+            self.assertEqual(detail["entry"]["entryType"], "external_gateway_request")
+            self.assertEqual(detail["record"]["requestId"], "REQ_LEDGER")
+            self.assertEqual(detail["record"]["objectRef"]["objectId"], "mnobj:selection:ledger1")
+
+            transaction_entry = next(item for item in ledger["entries"] if item["entryType"] == "ai_edit_transaction")
+            transaction_detail = companion.handle_action({"action": "operation_ledger_get", "ledgerId": transaction_entry["ledgerId"]})
+
+            self.assertTrue(transaction_detail["ok"], transaction_detail)
+            self.assertEqual(transaction_detail["evidence"]["schema"], "codex.mn.operationLedgerEvidence.v1")
+            self.assertEqual(transaction_detail["evidence"]["ledgerId"], transaction_entry["ledgerId"])
+            self.assertEqual(transaction_detail["evidence"]["status"], "pass")
+            self.assertEqual(transaction_detail["evidence"]["verification"]["schema"], "codex.mn.aiEditVerification.v1")
+            self.assertEqual(transaction_detail["evidence"]["verification"]["transactionId"], "ledger-tx")
+            self.assertEqual(transaction_detail["evidence"]["verification"]["remainingCount"], 1)
+            chain = transaction_detail["evidence"]["operationChain"]
+            self.assertEqual(chain["schema"], "codex.mn.operationChainEvidence.v1")
+            self.assertEqual(chain["operationPlan"]["schema"], "codex.mn.mindmapDiffOperationPlan.v1")
+            self.assertEqual(chain["operationPlan"]["operationCount"], 1)
+            self.assertEqual(chain["dryRun"]["status"], "queued")
+            self.assertEqual(chain["nativeApply"]["nativeAction"], "apply_mindmap_diff_operations")
+            self.assertEqual(chain["nativeApply"]["appliedCount"], 1)
+            self.assertEqual(chain["nativeApply"]["createdNoteIds"], ["N-LEDGER"])
+            self.assertEqual(chain["nativeCommand"]["nativeAction"], "apply_mindmap_diff_operations")
+            self.assertEqual(chain["nativeCommand"]["queueId"], queue_id)
+            self.assertEqual(chain["nativeCommand"]["operationCount"], 1)
+            self.assertEqual(
+                [item["event"] for item in chain["nativeEventTimeline"]],
+                ["mindmapDiffApplyRequested", "mindmapDiffApplyFinished"],
+            )
+            self.assertTrue(all(item["queueId"] == queue_id for item in chain["nativeEventTimeline"]))
+            self.assertEqual(chain["rollback"]["status"], "pending_confirmation")
+            self.assertEqual(chain["residual"]["remainingCount"], 1)
+            self.assertEqual(chain["residual"]["remainingNoteIds"], [])
+
+    def test_object_graph_links_current_object_to_operations_and_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:graph1",
+                "kind": "selection",
+                "title": "Graph 选区",
+                "sourceRef": {"page": 7, "quote": "graph source"},
+            }
+
+            companion.append_history(
+                {**base, "mnObject": mn_object, "conversationId": "CONV_GRAPH"},
+                "解释这个对象",
+                "这是对象图谱测试回答。",
+            )
+            workflow = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "解释并制卡",
+                    "selectionText": "graph source",
+                }
+            )
+            self.assertTrue(workflow["ok"], workflow)
+
+            operation_plan = {
+                "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                "operationCount": 1,
+                "operations": [
+                    {
+                        "opId": "mindmap-diff:graph-create",
+                        "op": "create_mindmap_node",
+                        "mutation": "create",
+                        "title": "Graph Node",
+                    }
+                ],
+            }
+            queued_apply = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "request_mindmap_diff_apply",
+                    "transactionId": "graph-tx",
+                    "draftId": "graph-draft",
+                    "mindmapDiffOperationPlan": operation_plan,
+                }
+            )
+            self.assertTrue(queued_apply["ok"], queued_apply)
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "graph-tx",
+                        "draftId": "graph-draft",
+                        "createdNoteIds": ["N-GRAPH"],
+                        "createdCount": 1,
+                        "appliedCount": 1,
+                        "failedCount": 0,
+                        "mindmapDiffOperationPlan": operation_plan,
+                        "mnObjectId": "mnobj:selection:graph1",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "Graph 选区",
+                        "mnObjectSourceRef": {"page": 7, "quote": "graph source"},
+                    },
+                }
+            )
+            external = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "external_gateway_start_workflow",
+                    "requestId": "REQ_GRAPH",
+                    "caller": "shortcuts",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "外部解释并制卡",
+                    "selectionText": "graph source",
+                }
+            )
+            self.assertTrue(external["ok"], external)
+
+            graph = companion.handle_action({**base, "action": "object_graph", "mnObjectId": "mnobj:selection:graph1"})
+
+            self.assertTrue(graph["ok"], graph)
+            self.assertEqual(graph["schema"], "codex.mn.objectGraph.v1")
+            self.assertEqual(graph["root"]["objectId"], "mnobj:selection:graph1")
+            self.assertEqual(graph["root"]["kind"], "selection")
+            self.assertGreaterEqual(graph["counts"]["nodes"], 5)
+            self.assertGreaterEqual(graph["counts"]["edges"], 4)
+            node_types = {item["nodeType"] for item in graph["nodes"]}
+            self.assertIn("mn_object", node_types)
+            self.assertIn("conversation", node_types)
+            self.assertIn("workflow_run", node_types)
+            self.assertIn("ai_edit_transaction", node_types)
+            self.assertIn("external_gateway_request", node_types)
+            self.assertTrue(all(edge["from"] == "mnobj:selection:graph1" or edge["to"] == "mnobj:selection:graph1" for edge in graph["edges"]))
+            actionable_nodes = [item for item in graph["nodes"] if item["nodeType"] != "mn_object"]
+            self.assertTrue(all(item["graphAction"]["schema"] == "codex.mn.objectGraphAction.v1" for item in actionable_nodes))
+            self.assertTrue(all(item["objectRef"]["objectId"] == "mnobj:selection:graph1" for item in actionable_nodes))
+
+    def test_object_graph_links_current_object_to_knowledge_entities_and_relations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:knowledge-graph1",
+                "kind": "selection",
+                "title": "Patch mask graph source",
+                "sourceRef": {"page": 5, "quote": "mask over image patches identifies unsafe attended regions"},
+            }
+
+            ingested = companion.handle_action(
+                {
+                    **base,
+                    "action": "knowledge_index_ingest_context",
+                    "documentTitle": "Safety Filter Paper",
+                    "entities": [
+                        {
+                            "entityType": "mindmap_node",
+                            "title": "Patch mask mechanism",
+                            "body": "The mask over image patches identifies unsafe attended regions in the graph source.",
+                            "noteId": "NODE-GRAPH-KNOWLEDGE",
+                            "page": 5,
+                            "quote": "mask over image patches",
+                            "relations": [
+                                {"type": "supports", "targetNoteId": "CARD-GRAPH-KNOWLEDGE", "label": "evidence card"}
+                            ],
+                        },
+                        {
+                            "entityType": "card",
+                            "title": "Unsafe region evidence",
+                            "text": "Unsafe attended regions are rejected using patch-level overlap evidence.",
+                            "noteId": "CARD-GRAPH-KNOWLEDGE",
+                            "source": {"page": 5, "quote": "unsafe attended regions"},
+                        },
+                    ],
+                }
+            )
+            self.assertTrue(ingested["ok"], ingested)
+
+            graph = companion.handle_action({**base, "mnObject": mn_object, "action": "object_graph", "limit": 12})
+
+            self.assertTrue(graph["ok"], graph)
+            self.assertEqual(graph["schema"], "codex.mn.objectGraph.v1")
+            self.assertGreaterEqual(graph["counts"]["knowledge_entity"], 2)
+            knowledge_nodes = [item for item in graph["nodes"] if item["nodeType"] == "knowledge_entity"]
+            self.assertGreaterEqual(len(knowledge_nodes), 2)
+            note_ids = {item["noteId"] for item in knowledge_nodes}
+            self.assertIn("NODE-GRAPH-KNOWLEDGE", note_ids)
+            self.assertIn("CARD-GRAPH-KNOWLEDGE", note_ids)
+            node = next(item for item in knowledge_nodes if item["noteId"] == "NODE-GRAPH-KNOWLEDGE")
+            self.assertEqual(node["entityType"], "mindmap_node")
+            self.assertEqual(node["sourceRef"]["page"], 5)
+            self.assertEqual(node["graphAction"]["action"], "knowledge_index_search")
+            root_edges = [edge for edge in graph["edges"] if edge["from"] == "mnobj:selection:knowledge-graph1"]
+            self.assertTrue(any(edge["relation"] == "mentions_knowledge" and edge["evidenceType"] == "knowledge_index" for edge in root_edges))
+            relation_edges = [edge for edge in graph["edges"] if edge["relation"] == "supports"]
+            self.assertTrue(relation_edges, graph["edges"])
+            self.assertEqual(relation_edges[0]["evidenceType"], "knowledge_relation")
+            self.assertIn("NODE-GRAPH-KNOWLEDGE", relation_edges[0]["from"])
+            self.assertIn("CARD-GRAPH-KNOWLEDGE", relation_edges[0]["to"])
+
+    def test_object_graph_links_current_object_to_native_mindmap_tree_relationships(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            companion.append_event(
+                {
+                    "event": "mindmapTreeReadFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "selectedNoteId": "N-root",
+                        "selectedNoteTitle": "Paper Map",
+                        "currentMindmap": {
+                            "noteId": "N-root",
+                            "title": "Paper Map",
+                            "body": "root body",
+                            "children": [
+                                {
+                                    "noteId": "N-problem",
+                                    "title": "Problem",
+                                    "body": "problem body",
+                                    "children": [
+                                        {
+                                            "noteId": "N-motivation",
+                                            "title": "Motivation",
+                                            "body": "motivation body",
+                                            "children": [],
+                                        }
+                                    ],
+                                },
+                                {"noteId": "N-method", "title": "Method", "body": "method body", "children": []},
+                            ],
+                        },
+                        "nodeCount": 4,
+                        "truncatedCount": 0,
+                    },
+                }
+            )
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:N-root",
+                "kind": "mindmap_node",
+                "title": "Paper Map",
+                "sourceRef": {"noteId": "N-root", "documentTitle": "Paper"},
+            }
+
+            graph = companion.handle_action({**base, "mnObject": mn_object, "action": "object_graph", "limit": 12})
+
+            self.assertTrue(graph["ok"], graph)
+            self.assertEqual(graph["mindmapTree"]["schema"], "codex.mn.nativeMindmapTreeEvidence.v1")
+            self.assertEqual(graph["mindmapTree"]["nodeCount"], 4)
+            self.assertEqual(graph["counts"]["mn_note"], 4)
+            note_nodes = [item for item in graph["nodes"] if item["nodeType"] == "mn_note"]
+            note_ids = {item["noteId"] for item in note_nodes}
+            self.assertEqual({"N-root", "N-problem", "N-motivation", "N-method"}, note_ids)
+            root_note = next(item for item in note_nodes if item["noteId"] == "N-root")
+            self.assertEqual(root_note["sourceRef"]["noteId"], "N-root")
+            self.assertEqual(root_note["depth"], 0)
+            child_edges = [edge for edge in graph["edges"] if edge["relation"] == "contains" and edge["evidenceType"] == "mindmap_tree_cache"]
+            self.assertTrue(any(edge["from"].endswith("N-root") and edge["to"].endswith("N-problem") for edge in child_edges))
+            self.assertTrue(any(edge["from"].endswith("N-problem") and edge["to"].endswith("N-motivation") for edge in child_edges))
+            focus_edges = [edge for edge in graph["edges"] if edge["relation"] == "focuses_mn_note"]
+            self.assertTrue(any(edge["to"].endswith("N-root") for edge in focus_edges))
+
+    def test_object_graph_persists_user_editable_relationship_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:manual-rel-source",
+                "kind": "selection",
+                "title": "Unsafe attention source",
+                "sourceRef": {"page": 9, "quote": "unsafe attended region"},
+            }
+            target_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:manual-rel-target",
+                "kind": "mindmap_node",
+                "title": "Safety mask node",
+                "sourceRef": {"noteId": "manual-rel-target", "documentTitle": "Paper"},
+            }
+
+            saved = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_object,
+                    "relation": "supports",
+                    "label": "selection supports safety mask",
+                    "note": "Manual graph edge created by the user from the object workspace.",
+                }
+            )
+
+            self.assertTrue(saved["ok"], saved)
+            self.assertEqual(saved["schema"], "codex.mn.objectGraphManualRelation.v1")
+            self.assertEqual(saved["relation"]["fromObjectId"], "mnobj:selection:manual-rel-source")
+            self.assertEqual(saved["relation"]["toObjectId"], "mnobj:note:manual-rel-target")
+            self.assertEqual(saved["relation"]["relation"], "supports")
+            self.assertEqual(saved["relation"]["evidenceType"], "manual_relation")
+
+            graph = companion.handle_action({**base, "mnObject": mn_object, "action": "object_graph", "limit": 12})
+
+            self.assertTrue(graph["ok"], graph)
+            self.assertEqual(graph["manualRelations"]["schema"], "codex.mn.objectGraphManualRelations.v1")
+            self.assertEqual(graph["manualRelations"]["count"], 1)
+            manual_nodes = [item for item in graph["nodes"] if item["nodeType"] == "manual_mn_object"]
+            self.assertEqual(len(manual_nodes), 1)
+            self.assertEqual(manual_nodes[0]["objectRef"]["objectId"], "mnobj:note:manual-rel-target")
+            self.assertEqual(manual_nodes[0]["graphAction"]["action"], "object_graph_relation_delete")
+            manual_edges = [edge for edge in graph["edges"] if edge["evidenceType"] == "manual_relation"]
+            self.assertEqual(len(manual_edges), 1)
+            self.assertEqual(manual_edges[0]["from"], "mnobj:selection:manual-rel-source")
+            self.assertEqual(manual_edges[0]["to"], "mnobj:note:manual-rel-target")
+            self.assertEqual(manual_edges[0]["relation"], "supports")
+            self.assertEqual(manual_edges[0]["label"], "selection supports safety mask")
+            self.assertEqual(graph["counts"]["manual_mn_object"], 1)
+            self.assertEqual(graph["counts"]["manual_relation"], 1)
+
+            deleted = companion.handle_action(
+                {**base, "action": "object_graph_relation_delete", "relationId": saved["relation"]["relationId"]}
+            )
+            self.assertTrue(deleted["ok"], deleted)
+            graph_after_delete = companion.handle_action({**base, "mnObject": mn_object, "action": "object_graph", "limit": 12})
+            self.assertEqual(graph_after_delete["manualRelations"]["count"], 0)
+            self.assertFalse([edge for edge in graph_after_delete["edges"] if edge["evidenceType"] == "manual_relation"])
+
+    def test_manual_object_graph_relationships_enter_operation_ledger_and_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:manual-rel-ledger",
+                "kind": "selection",
+                "title": "Attention evidence",
+                "sourceRef": {"page": 11, "quote": "attention mask evidence"},
+            }
+            target_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:manual-rel-ledger-target",
+                "kind": "card",
+                "title": "Safety card",
+                "sourceRef": {"noteId": "manual-rel-ledger-target", "documentTitle": "Paper"},
+            }
+
+            saved = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_object,
+                    "relation": "supports",
+                    "label": "supports card",
+                    "note": "Manual relationship should be auditable.",
+                }
+            )
+            self.assertTrue(saved["ok"], saved)
+
+            ledger = companion.handle_action(
+                {**base, "action": "operation_ledger_list", "mnObjectId": "mnobj:selection:manual-rel-ledger"}
+            )
+
+            self.assertTrue(ledger["ok"], ledger)
+            self.assertEqual(ledger["counts"]["object_graph_manual_relation"], 1)
+            manual_entry = next(item for item in ledger["entries"] if item["entryType"] == "object_graph_manual_relation")
+            self.assertEqual(manual_entry["status"], "saved")
+            self.assertEqual(manual_entry["objectRef"]["objectId"], "mnobj:selection:manual-rel-ledger")
+            self.assertEqual(manual_entry["counts"]["manualRelations"], 1)
+            self.assertEqual(manual_entry["ledgerAction"]["action"], "operation_ledger_get")
+
+            detail = companion.handle_action({"action": "operation_ledger_get", "ledgerId": manual_entry["ledgerId"]})
+
+            self.assertTrue(detail["ok"], detail)
+            self.assertEqual(detail["entry"]["entryType"], "object_graph_manual_relation")
+            self.assertEqual(detail["evidence"]["entryType"], "object_graph_manual_relation")
+            self.assertEqual(detail["evidence"]["status"], "saved")
+            self.assertEqual(detail["evidence"]["manualRelation"]["relationId"], saved["relation"]["relationId"])
+            self.assertEqual(detail["evidence"]["manualRelation"]["fromObjectId"], "mnobj:selection:manual-rel-ledger")
+            self.assertEqual(detail["evidence"]["manualRelation"]["toObjectId"], "mnobj:note:manual-rel-ledger-target")
+            self.assertEqual(detail["evidence"]["manualRelation"]["relation"], "supports")
+            self.assertEqual(detail["evidence"]["manualRelation"]["note"], "Manual relationship should be auditable.")
+
+            activity = companion.handle_action(
+                {**base, "action": "object_activity", "mnObjectId": "mnobj:selection:manual-rel-ledger"}
+            )
+
+            self.assertTrue(activity["ok"], activity)
+            self.assertEqual(activity["counts"]["manualRelations"], 1)
+            self.assertEqual(activity["manualRelations"][0]["activityKind"], "manual_relation")
+            self.assertEqual(activity["manualRelations"][0]["activityAction"]["action"], "operation_ledger_get")
+
+            deleted = companion.handle_action(
+                {**base, "action": "object_graph_relation_delete", "relationId": saved["relation"]["relationId"]}
+            )
+            self.assertTrue(deleted["ok"], deleted)
+            ledger_after_delete = companion.handle_action(
+                {**base, "action": "operation_ledger_list", "mnObjectId": "mnobj:selection:manual-rel-ledger"}
+            )
+            statuses = [item["status"] for item in ledger_after_delete["entries"] if item["entryType"] == "object_graph_manual_relation"]
+            self.assertIn("deleted", statuses)
+
+    def test_operation_ledger_filters_by_type_status_and_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:ledger-filter",
+                "kind": "selection",
+                "title": "Ledger filter source",
+                "sourceRef": {"page": 18, "quote": "ledger filter quote"},
+            }
+            target_a = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:ledger-filter-a",
+                "kind": "card",
+                "title": "Filtered safety card",
+                "sourceRef": {"noteId": "ledger-filter-a", "documentTitle": "Paper"},
+            }
+            target_b = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:ledger-filter-b",
+                "kind": "card",
+                "title": "Other obsolete card",
+                "sourceRef": {"noteId": "ledger-filter-b", "documentTitle": "Paper"},
+            }
+
+            saved_a = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_a,
+                    "relation": "supports",
+                    "label": "Filtered safety relation",
+                    "note": "This saved relation should survive ledger filtering.",
+                }
+            )
+            saved_b = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_b,
+                    "relation": "related_to",
+                    "label": "Other obsolete relation",
+                    "note": "This relation should be filtered out.",
+                }
+            )
+            self.assertTrue(saved_a["ok"], saved_a)
+            self.assertTrue(saved_b["ok"], saved_b)
+            deleted_b = companion.handle_action(
+                {**base, "action": "object_graph_relation_delete", "relationId": saved_b["relation"]["relationId"]}
+            )
+            self.assertTrue(deleted_b["ok"], deleted_b)
+
+            unfiltered = companion.handle_action(
+                {**base, "action": "operation_ledger_list", "mnObjectId": "mnobj:selection:ledger-filter"}
+            )
+            filtered = companion.handle_action(
+                {
+                    **base,
+                    "action": "operation_ledger_list",
+                    "mnObjectId": "mnobj:selection:ledger-filter",
+                    "entryTypeFilter": "object_graph_manual_relation",
+                    "statusFilter": "saved",
+                    "query": "Filtered safety",
+                }
+            )
+
+            self.assertTrue(unfiltered["ok"], unfiltered)
+            self.assertGreaterEqual(unfiltered["counts"]["total"], 3)
+            self.assertTrue(filtered["ok"], filtered)
+            self.assertEqual(filtered["filters"]["entryTypeFilter"], "object_graph_manual_relation")
+            self.assertEqual(filtered["filters"]["statusFilter"], "saved")
+            self.assertEqual(filtered["filters"]["query"], "Filtered safety")
+            self.assertGreater(filtered["counts"]["unfilteredTotal"], filtered["counts"]["filteredTotal"])
+            self.assertEqual(filtered["counts"]["filteredTotal"], 1)
+            self.assertEqual(filtered["counts"]["total"], 1)
+            self.assertEqual(len(filtered["entries"]), 1)
+            self.assertEqual(filtered["entries"][0]["entryType"], "object_graph_manual_relation")
+            self.assertEqual(filtered["entries"][0]["status"], "saved")
+            self.assertEqual(filtered["entries"][0]["title"], "Filtered safety relation")
+            self.assertIn("Filtered safety card", filtered["entries"][0]["summary"])
+
+    def test_object_browser_collects_focus_graph_activity_and_ledger_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:browser-source",
+                "kind": "selection",
+                "title": "Browser source selection",
+                "sourceRef": {"page": 7, "quote": "browser source quote"},
+            }
+            target_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:browser-target",
+                "kind": "mindmap_node",
+                "title": "Browser target node",
+                "sourceRef": {"noteId": "browser-target", "documentTitle": "Paper"},
+            }
+            saved = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_object,
+                    "relation": "supports",
+                    "label": "browser relation",
+                    "note": "Object Browser should expose this relation as an auditable object.",
+                }
+            )
+            self.assertTrue(saved["ok"], saved)
+
+            browser = companion.handle_action(
+                {**base, "action": "object_browser", "mnObject": mn_object, "limit": 12}
+            )
+
+            self.assertTrue(browser["ok"], browser)
+            self.assertEqual(browser["schema"], "codex.mn.objectBrowser.v1")
+            self.assertEqual(browser["rootObject"]["objectId"], "mnobj:selection:browser-source")
+            self.assertGreaterEqual(browser["counts"]["total"], 3)
+            self.assertGreaterEqual(browser["counts"]["object_graph"], 1)
+            self.assertGreaterEqual(browser["counts"]["object_activity"], 1)
+            self.assertGreaterEqual(browser["counts"]["operation_ledger"], 1)
+            self.assertEqual(browser["groups"][0]["groupId"], "focus")
+            self.assertTrue(any(group["groupId"] == "object_graph" for group in browser["groups"]))
+            self.assertTrue(any(group["groupId"] == "operation_ledger" for group in browser["groups"]))
+
+            focus_item = next(item for item in browser["objects"] if item["objectType"] == "focus")
+            self.assertEqual(focus_item["objectRef"]["objectId"], "mnobj:selection:browser-source")
+            self.assertTrue(any(action["action"] == "object_graph" for action in focus_item["availableActions"]))
+
+            graph_items = [item for item in browser["objects"] if item["objectType"] == "object_graph"]
+            self.assertTrue(any(item["kind"] == "manual_mn_object" for item in graph_items), browser["objects"])
+            self.assertTrue(any(item["objectRef"]["objectId"] == "mnobj:note:browser-target" for item in graph_items))
+
+            ledger_items = [item for item in browser["objects"] if item["objectType"] == "operation_ledger"]
+            self.assertTrue(any(item["kind"] == "object_graph_manual_relation" for item in ledger_items), browser["objects"])
+            ledger_item = next(item for item in ledger_items if item["kind"] == "object_graph_manual_relation")
+            self.assertEqual(ledger_item["availableActions"][0]["action"], "operation_ledger_get")
+            self.assertIn("manualRelation", ledger_item["evidence"])
+
+    def test_object_browser_filters_by_object_type_kind_and_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:browser-filter-source",
+                "kind": "selection",
+                "title": "Browser filter source selection",
+                "sourceRef": {"page": 11, "quote": "filter source quote"},
+            }
+            target_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:browser-filter-target",
+                "kind": "mindmap_node",
+                "title": "Filtered target concept",
+                "sourceRef": {"noteId": "browser-filter-target", "documentTitle": "Filter Paper"},
+            }
+            saved = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_object,
+                    "relation": "supports",
+                    "label": "filter relation",
+                    "note": "Object Browser filters should find this target only.",
+                }
+            )
+            self.assertTrue(saved["ok"], saved)
+
+            browser = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_browser",
+                    "mnObject": mn_object,
+                    "limit": 12,
+                    "objectTypeFilter": "registry",
+                    "kindFilter": "mindmap_node",
+                    "query": "Filtered target",
+                }
+            )
+
+            self.assertTrue(browser["ok"], browser)
+            self.assertEqual(browser["filters"]["objectType"], "registry")
+            self.assertEqual(browser["filters"]["kind"], "mindmap_node")
+            self.assertEqual(browser["filters"]["query"], "Filtered target")
+            self.assertGreater(browser["counts"]["unfilteredTotal"], browser["counts"]["filteredTotal"])
+            self.assertEqual(browser["counts"]["total"], browser["counts"]["filteredTotal"])
+            self.assertGreaterEqual(browser["counts"]["filteredTotal"], 1)
+            self.assertTrue(browser["objects"], browser)
+            self.assertTrue(all(item["objectType"] == "registry" for item in browser["objects"]))
+            self.assertTrue(all(item["kind"] == "mindmap_node" for item in browser["objects"]))
+            self.assertEqual(browser["objects"][0]["objectRef"]["objectId"], "mnobj:note:browser-filter-target")
+
+    def test_mn_object_registry_persists_objects_seen_by_object_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:registry-source",
+                "kind": "selection",
+                "title": "Registry source selection",
+                "sourceRef": {"page": 9, "quote": "registry source quote"},
+            }
+            target_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:registry-target",
+                "kind": "mindmap_node",
+                "title": "Registry target node",
+                "sourceRef": {"noteId": "registry-target", "documentTitle": "Registry Paper"},
+            }
+
+            saved = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_graph_relation_save",
+                    "mnObject": mn_object,
+                    "targetObject": target_object,
+                    "relation": "supports",
+                    "label": "registry relation",
+                    "note": "Registry should persist both relation endpoints.",
+                }
+            )
+            self.assertTrue(saved["ok"], saved)
+
+            registry = companion.handle_action({**base, "action": "mn_object_registry", "mnObject": mn_object})
+
+            self.assertTrue(registry["ok"], registry)
+            self.assertEqual(registry["schema"], "codex.mn.mnObjectRegistry.v1")
+            registry_ids = [item["objectRef"]["objectId"] for item in registry["objects"]]
+            self.assertIn("mnobj:selection:registry-source", registry_ids)
+            self.assertIn("mnobj:note:registry-target", registry_ids)
+            target_entry = next(
+                item for item in registry["objects"] if item["objectRef"]["objectId"] == "mnobj:note:registry-target"
+            )
+            self.assertGreaterEqual(target_entry["seenCount"], 1)
+            self.assertIn("manual_relation", target_entry["evidenceTypes"])
+
+            browser = companion.handle_action({**base, "action": "object_browser", "mnObject": mn_object, "limit": 12})
+
+            self.assertTrue(browser["ok"], browser)
+            self.assertGreaterEqual(browser["counts"]["registry"], 1)
+            self.assertTrue(any(group["groupId"] == "registry" for group in browser["groups"]))
+            registry_items = [item for item in browser["objects"] if item["objectType"] == "registry"]
+            self.assertTrue(
+                any(item["objectRef"]["objectId"] == "mnobj:note:registry-target" for item in registry_items),
+                browser["objects"],
+            )
+
+    def test_mn_object_registry_ingests_native_mindmap_tree_cache_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            companion.append_event(
+                {
+                    "event": "mindmapTreeReadFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "selectedNoteId": "N-root",
+                        "selectedNoteTitle": "Paper Map",
+                        "currentMindmap": {
+                            "noteId": "N-root",
+                            "title": "Paper Map",
+                            "body": "root body",
+                            "children": [
+                                {
+                                    "noteId": "N-problem",
+                                    "title": "Problem",
+                                    "body": "problem body",
+                                    "children": [
+                                        {
+                                            "noteId": "N-motivation",
+                                            "title": "Motivation",
+                                            "body": "motivation body",
+                                            "children": [],
+                                        }
+                                    ],
+                                },
+                                {"noteId": "N-method", "title": "Method", "body": "method body", "children": []},
+                            ],
+                        },
+                        "nodeCount": 4,
+                        "truncatedCount": 0,
+                    },
+                }
+            )
+
+            registry = companion.handle_action({**base, "action": "mn_object_registry"})
+
+            self.assertTrue(registry["ok"], registry)
+            registry_by_id = {item["objectRef"]["objectId"]: item for item in registry["objects"]}
+            for note_id in ["N-root", "N-problem", "N-motivation", "N-method"]:
+                object_id = f"mnobj:note:{note_id}"
+                self.assertIn(object_id, registry_by_id)
+                self.assertEqual(registry_by_id[object_id]["objectRef"]["sourceRef"]["noteId"], note_id)
+                self.assertIn("mindmap_tree_cache", registry_by_id[object_id]["evidenceTypes"])
+            self.assertEqual(registry_by_id["mnobj:note:N-problem"]["objectRef"]["sourceRef"]["parentNoteId"], "N-root")
+            self.assertEqual(registry["counts"]["kinds"]["mindmap_node"], 4)
+
+            browser = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_browser",
+                    "mnObject": {
+                        "schema": "codex.mn.mnObject.v1",
+                        "objectId": "mnobj:note:N-root",
+                        "kind": "mindmap_node",
+                        "title": "Paper Map",
+                        "sourceRef": {"noteId": "N-root", "documentTitle": "Paper Map"},
+                    },
+                    "limit": 12,
+                }
+            )
+
+            self.assertTrue(browser["ok"], browser)
+            registry_items = [item for item in browser["objects"] if item["objectType"] == "registry"]
+            self.assertTrue(any(item["objectRef"]["objectId"] == "mnobj:note:N-method" for item in registry_items))
+
+    def test_request_mn_object_registry_scan_enqueues_native_scan_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest", "limit": 80}
+
+            requested = companion.handle_action({**payload, "action": "request_mn_object_registry_scan"})
+
+            self.assertTrue(requested["ok"], requested)
+            polled = companion.poll_commands("T1", "B1")
+            self.assertTrue(polled["hasCommand"], polled)
+            self.assertEqual(polled["command"]["nativeAction"], "scan_mn_objects")
+            self.assertEqual(polled["command"]["limit"], 80)
+
+    def test_mn_object_registry_ingests_native_object_scan_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+
+            companion.append_event(
+                {
+                    "event": "mnObjectRegistryScanFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "scanId": "scan-001",
+                        "objectCount": 2,
+                        "objects": [
+                            {
+                                "objectId": "mnobj:note:scan-root",
+                                "kind": "mindmap_node",
+                                "title": "Scanned Root",
+                                "sourceRef": {
+                                    "noteId": "scan-root",
+                                    "documentTitle": "Scanned Paper",
+                                    "nodePath": "1",
+                                },
+                            },
+                            {
+                                "objectId": "mnobj:note:scan-child",
+                                "kind": "mindmap_node",
+                                "title": "Scanned Child",
+                                "sourceRef": {
+                                    "noteId": "scan-child",
+                                    "parentNoteId": "scan-root",
+                                    "documentTitle": "Scanned Paper",
+                                    "nodePath": "1.1",
+                                },
+                            },
+                        ],
+                    },
+                }
+            )
+
+            registry = companion.handle_action({**base, "action": "mn_object_registry", "limit": 20})
+
+            self.assertTrue(registry["ok"], registry)
+            by_id = {item["objectRef"]["objectId"]: item for item in registry["objects"]}
+            self.assertIn("mnobj:note:scan-root", by_id)
+            self.assertIn("mnobj:note:scan-child", by_id)
+            self.assertEqual(by_id["mnobj:note:scan-child"]["objectRef"]["sourceRef"]["parentNoteId"], "scan-root")
+            self.assertIn("native_object_scan", by_id["mnobj:note:scan-child"]["evidenceTypes"])
+            self.assertEqual(registry["counts"]["kinds"]["mindmap_node"], 2)
+
+            browser = companion.handle_action(
+                {
+                    **base,
+                    "action": "object_browser",
+                    "mnObject": {
+                        "schema": "codex.mn.mnObject.v1",
+                        "objectId": "mnobj:note:scan-root",
+                        "kind": "mindmap_node",
+                        "title": "Scanned Root",
+                        "sourceRef": {"noteId": "scan-root", "documentTitle": "Scanned Paper"},
+                    },
+                    "limit": 20,
+                }
+            )
+            scanned_child = next(
+                item
+                for item in browser["objects"]
+                if item["objectType"] == "registry" and item["objectRef"]["objectId"] == "mnobj:note:scan-child"
+            )
+            graph_action = next(action for action in scanned_child["availableActions"] if action["action"] == "object_graph")
+            self.assertEqual(graph_action["payload"]["mnObjectId"], "mnobj:note:scan-child")
+            self.assertEqual(graph_action["payload"]["mnObject"]["sourceRef"]["parentNoteId"], "scan-root")
+            self.assertIn("native_object_scan", graph_action["payload"]["evidenceTypes"])
+
+    def test_object_graph_links_native_object_scan_registry_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+
+            companion.append_event(
+                {
+                    "event": "mnObjectRegistryScanFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "scanId": "scan-graph-001",
+                        "objectCount": 2,
+                        "objects": [
+                            {
+                                "objectId": "mnobj:note:scan-root",
+                                "kind": "mindmap_node",
+                                "title": "Scanned Root",
+                                "summary": "Root summary",
+                                "sourceRef": {
+                                    "noteId": "scan-root",
+                                    "documentTitle": "Scanned Paper",
+                                    "nodePath": "1",
+                                },
+                            },
+                            {
+                                "objectId": "mnobj:note:scan-child",
+                                "kind": "mindmap_node",
+                                "title": "Scanned Child",
+                                "summary": "Child summary",
+                                "sourceRef": {
+                                    "noteId": "scan-child",
+                                    "parentNoteId": "scan-root",
+                                    "documentTitle": "Scanned Paper",
+                                    "nodePath": "1.1",
+                                },
+                            },
+                        ],
+                    },
+                }
+            )
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:note:scan-root",
+                "kind": "mindmap_node",
+                "title": "Scanned Root",
+                "sourceRef": {"noteId": "scan-root", "documentTitle": "Scanned Paper"},
+            }
+
+            graph = companion.handle_action({**base, "mnObject": mn_object, "action": "object_graph", "limit": 12})
+
+            self.assertTrue(graph["ok"], graph)
+            self.assertGreaterEqual(graph["counts"].get("mn_note", 0), 2)
+            self.assertGreaterEqual(graph["counts"].get("native_object_scan", 0), 1)
+            note_nodes = [item for item in graph["nodes"] if item["nodeType"] == "mn_note"]
+            note_ids = {item["noteId"] for item in note_nodes}
+            self.assertIn("scan-root", note_ids)
+            self.assertIn("scan-child", note_ids)
+            child = next(item for item in note_nodes if item["noteId"] == "scan-child")
+            self.assertEqual(child["sourceRef"]["parentNoteId"], "scan-root")
+            self.assertIn("native_object_scan", child["evidenceTypes"])
+            native_edges = [
+                edge
+                for edge in graph["edges"]
+                if edge["relation"] == "contains" and edge["evidenceType"] == "native_object_scan"
+            ]
+            self.assertTrue(
+                any(edge["from"].endswith("scan-root") and edge["to"].endswith("scan-child") for edge in native_edges),
+                graph["edges"],
+            )
+
+    def test_knowledge_index_ingests_searches_and_clears_current_context_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            ingested = companion.handle_action(
+                {
+                    "action": "knowledge_index_ingest_context",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "RobotManip Report",
+                    "selectionText": "Qwen RobotManip aligns VLA foundation models for manipulation.",
+                    "source": "unittest",
+                }
+            )
+            self.assertTrue(ingested["ok"], ingested)
+
+            status = companion.handle_action({"action": "knowledge_index_status", "topicid": "T1", "bookmd5": "B1"})
+            self.assertEqual(status["count"], 1)
+
+            found = companion.handle_action(
+                {"action": "knowledge_index_search", "query": "VLA manipulation", "topicid": "T1", "bookmd5": "B1"}
+            )
+            self.assertTrue(found["ok"])
+            self.assertEqual(len(found["matches"]), 1)
+            self.assertIn("RobotManip", found["matches"][0]["title"])
+
+            cleared = companion.handle_action({"action": "knowledge_index_clear", "topicid": "T1", "bookmd5": "B1"})
+            self.assertEqual(cleared["removed"], 1)
+
+    def test_knowledge_index_ingests_structured_marginnote_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            ingested = companion.handle_action(
+                {
+                    "action": "knowledge_index_ingest_context",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Safety Filter Paper",
+                    "source": "unittest",
+                    "entities": [
+                        {
+                            "entityType": "mindmap_node",
+                            "title": "Attention safety branch",
+                            "body": "Mindmap branch about attention-guided safety filters.",
+                            "noteId": "NODE-42",
+                            "page": 4,
+                            "quote": "attention-guided safety filters",
+                            "relations": [{"type": "contains", "targetNoteId": "CARD-42"}],
+                        },
+                        {
+                            "entityType": "card",
+                            "title": "Patch mask evidence",
+                            "text": "A mask over image patches identifies unsafe attended regions.",
+                            "noteId": "CARD-42",
+                            "source": {"page": 5, "quote": "mask over image patches"},
+                        },
+                    ],
+                }
+            )
+
+            self.assertTrue(ingested["ok"], ingested)
+            self.assertEqual(ingested["entityCount"], 2)
+            status = companion.handle_action({"action": "knowledge_index_status", "topicid": "T1", "bookmd5": "B1"})
+            self.assertEqual(status["entityTypes"]["mindmap_node"], 1)
+            self.assertEqual(status["entityTypes"]["card"], 1)
+
+            found = companion.handle_action(
+                {"action": "knowledge_index_search", "query": "unsafe attended regions", "topicid": "T1", "bookmd5": "B1"}
+            )
+            self.assertTrue(found["ok"])
+            self.assertEqual(found["matches"][0]["noteId"], "CARD-42")
+            self.assertEqual(found["matches"][0]["entityType"], "card")
+            self.assertEqual(found["matches"][0]["sourceRef"]["page"], 5)
+            self.assertIn("mask over image patches", found["reply"])
+
+    def test_model_context_includes_structured_knowledge_entity_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action(
+                {
+                    "action": "knowledge_index_ingest_context",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "unittest",
+                    "entities": [
+                        {
+                            "entityType": "card",
+                            "title": "Patch mask evidence",
+                            "text": "A mask over image patches identifies unsafe attended regions.",
+                            "noteId": "CARD-42",
+                            "source": {"page": 5, "quote": "mask over image patches"},
+                        }
+                    ],
+                }
+            )
+
+            model_input = companion.build_model_input(
+                {
+                    "prompt": "已有 unsafe attended regions 的来源是什么",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "includeKnowledgeIndex": True,
+                },
+                "chat",
+            )
+
+            self.assertIn("noteId=CARD-42", model_input)
+            self.assertIn("p.5", model_input)
+            self.assertIn("mask over image patches", model_input)
+
+    def test_model_input_uses_knowledge_index_only_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action(
+                {
+                    "action": "knowledge_index_ingest_context",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "title": "RobotManip 索引笔记",
+                    "text": "VLA manipulation alignment evidence from previous reading.",
+                    "source": "unittest",
+                }
+            )
+
+            plain = companion.build_model_input(
+                {
+                    "prompt": "解释当前选区",
+                    "selectionText": "current selection",
+                    "contextScope": "selection",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                },
+                "chat",
+            )
+            self.assertNotIn("本地知识索引检索片段", plain)
+
+            with_index = companion.build_model_input(
+                {
+                    "prompt": "之前关于 VLA manipulation 的已有笔记是什么",
+                    "contextScope": "selection",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                },
+                "chat",
+            )
+            self.assertIn("本地知识索引检索片段", with_index)
+            self.assertIn("RobotManip 索引笔记", with_index)
+
+    def test_knowledge_index_model_context_can_expand_to_current_notebook_not_global(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            for topicid, bookmd5, title, text in [
+                ("T1", "B1", "当前文档笔记", "safety alignment in the current paper"),
+                ("T1", "B2", "同 Notebook 另一篇", "safety comparison from another paper"),
+                ("T2", "B9", "其他 Notebook", "safety note from global unrelated notebook"),
+            ]:
+                companion.handle_action(
+                    {
+                        "action": "knowledge_index_ingest_context",
+                        "topicid": topicid,
+                        "bookmd5": bookmd5,
+                        "title": title,
+                        "text": text,
+                        "source": "unittest",
+                    }
+                )
+
+            model_input = companion.build_model_input(
+                {
+                    "prompt": "跨文档 notebook 里 safety 相关笔记",
+                    "contextScope": "selection",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                },
+                "chat",
+            )
+
+            self.assertIn("范围：notebook", model_input)
+            self.assertIn("当前文档笔记", model_input)
+            self.assertIn("同 Notebook 另一篇", model_input)
+            self.assertNotIn("其他 Notebook", model_input)
 
     def test_stop_current_clears_web_busy_and_acks_current_queue_item(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3168,6 +5783,13 @@ class CompanionControlsTests(unittest.TestCase):
                     "bookmd5": "BOOK1",
                     "draft": {
                         "ok": True,
+                        "mnObject": {
+                            "schema": "codex.mn.mnObject.v1",
+                            "objectId": "mnobj:selection:draft123",
+                            "kind": "selection",
+                            "title": "PDF 选区",
+                            "sourceRef": {"page": 4, "quote": "draft source"},
+                        },
                         "mindmap": {
                             "title": "验收根节点",
                             "mergeIntoSelected": True,
@@ -3190,13 +5812,50 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(result["queued"]["command"]["nativeAction"], "write_draft")
             self.assertEqual(result["queued"]["command"]["draftId"], saved["draft"]["id"])
+            self.assertEqual(result["queued"]["command"]["mnObjectId"], "mnobj:selection:draft123")
+            self.assertEqual(result["queued"]["command"]["mnObjectKind"], "selection")
+            self.assertEqual(result["queued"]["command"]["mnObjectSourceRef"]["quote"], "draft source")
             self.assertEqual(result["queue"]["pending"], 1)
+            self.assertIn(result["dryRun"]["status"], {"ready", "unknown"})
 
             polled = companion.poll_commands("TOPIC1", "BOOK1")
 
             self.assertEqual(polled["pending"], 1)
             self.assertEqual(polled["commands"][0]["nativeAction"], "write_draft")
             self.assertEqual(polled["commands"][0]["draftId"], saved["draft"]["id"])
+            self.assertEqual(polled["commands"][0]["mnObjectId"], "mnobj:selection:draft123")
+
+    def test_request_draft_write_blocks_read_only_permission_before_native_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            saved = companion.save_draft(
+                {
+                    "action": "draft_save",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "draft": {
+                        "ok": True,
+                        "cards": [{"title": "Blocked card", "body": "Should not be queued."}],
+                    },
+                }
+            )
+
+            result = companion.handle_action(
+                {
+                    "action": "request_draft_write",
+                    "draftId": saved["draft"]["id"],
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "source": "unit-test",
+                }
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["dryRun"]["status"], "blocked")
+            self.assertEqual(result["dryRun"]["checks"][0]["reason"], "read-only-permission")
+            self.assertIn("写入草稿已阻断", result["reply"])
+            self.assertEqual(companion.queue_status_payload("TOPIC1", "BOOK1")["pending"], 0)
 
     def test_request_native_capability_probe_queues_plugin_probe_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3699,6 +6358,140 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(calls, ["generate_mindmap"])
             self.assertTrue(companion.web_busy_status()["busy"])
+
+    def test_ai_edit_events_persist_transaction_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "aiEditTransactionStarted",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-integration",
+                        "draftId": "draft-integration",
+                        "cards": 1,
+                        "hasMindmap": True,
+                        "mnObjectId": "mnobj:selection:tx123",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "PDF 选区",
+                        "mnObjectSourceRef": {"page": 2, "quote": "selected source"},
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-integration",
+                        "draftId": "draft-integration",
+                        "createdNoteIds": ["N1", "N2"],
+                        "createdCount": 2,
+                        "card_count": 1,
+                        "has_mindmap": True,
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "aiEditTransactionRejected",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-integration",
+                        "ok": True,
+                        "deleted": 2,
+                        "failed": 0,
+                    },
+                }
+            )
+
+            status = companion.status_payload()
+            transactions = status["aiEditTransactions"]
+            self.assertEqual(transactions["count"], 1)
+            self.assertEqual(transactions["items"][0]["transactionId"], "ai-edit-integration")
+            self.assertEqual(transactions["items"][0]["status"], "rolled_back")
+            self.assertEqual(transactions["items"][0]["deletedCount"], 2)
+            self.assertEqual(transactions["items"][0]["objectRef"]["objectId"], "mnobj:selection:tx123")
+
+            listed = companion.handle_action(
+                {"action": "ai_edit_transaction_list", "topicid": "T1", "bookmd5": "B1"}
+            )
+            self.assertTrue(listed["ok"])
+            self.assertEqual(listed["transactions"]["count"], 1)
+            self.assertEqual(listed["transactions"]["items"][0]["objectRef"]["kind"], "selection")
+
+            loaded = companion.handle_action(
+                {"action": "ai_edit_transaction_get", "transactionId": "ai-edit-integration"}
+            )
+            self.assertTrue(loaded["ok"])
+            self.assertEqual(loaded["transaction"]["createdNoteIds"], ["N1", "N2"])
+            self.assertEqual(loaded["transaction"]["objectRef"]["sourceRef"]["quote"], "selected source")
+
+            verified = companion.handle_action(
+                {"action": "ai_edit_transaction_verify", "transactionId": "ai-edit-integration"}
+            )
+            self.assertTrue(verified["ok"])
+            self.assertEqual(verified["verification"]["schema"], "codex.mn.aiEditVerification.v1")
+            self.assertEqual(verified["verification"]["status"], "pass")
+            self.assertEqual(verified["verification"]["objectRef"]["objectId"], "mnobj:selection:tx123")
+            self.assertIn("回滚验证", verified["reply"])
+
+    def test_status_exposes_latest_ai_edit_transaction_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-latest",
+                        "draftId": "draft-latest",
+                        "createdNoteIds": ["N1", "N2", "N3"],
+                        "createdCount": 3,
+                        "card_count": 2,
+                        "has_mindmap": True,
+                        "mindmap_title": "目标脑图",
+                        "mnObjectId": "mnobj:note:latest123",
+                        "mnObjectKind": "note",
+                        "mnObjectTitle": "当前章节",
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "aiEditTransactionRejected",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-latest",
+                        "ok": False,
+                        "deleted": 1,
+                        "failed": 2,
+                        "failures": [
+                            {"noteId": "N2", "reason": "still-exists"},
+                            {"noteId": "N3", "reason": "still-exists"},
+                        ],
+                    },
+                }
+            )
+
+            status = companion.status_payload()
+            tx_status = status["aiEditTransactionStatus"]
+            self.assertEqual(tx_status["schema"], "codex.mn.aiEditTransactionStatus.v1")
+            self.assertTrue(tx_status["available"])
+            self.assertEqual(tx_status["latest"]["transactionId"], "ai-edit-latest")
+            self.assertEqual(tx_status["latest"]["createdNoteIds"], ["N1", "N2", "N3"])
+            self.assertEqual(tx_status["latest"]["objectRef"]["objectId"], "mnobj:note:latest123")
+            self.assertEqual(tx_status["verification"]["status"], "block")
+            self.assertEqual(tx_status["verification"]["objectRef"]["kind"], "note")
+            self.assertEqual(tx_status["verification"]["remainingNoteIds"], ["N2", "N3"])
+            self.assertIn("仍可能残留", tx_status["summary"])
 
 
 if __name__ == "__main__":

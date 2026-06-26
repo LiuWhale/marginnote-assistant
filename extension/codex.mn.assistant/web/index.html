@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260624-send-button-v1">
+  <link rel="stylesheet" href="app.css?v=20260627-mindmap-studio-v1">
 </head>
 <body>
-  <main id="aiChatShell" class="app-shell ai-chat-shell">
+  <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace">
     <section class="topbar">
       <div>
         <h1>Codex Companion</h1>
@@ -21,45 +21,412 @@
       </div>
     </section>
 
-    <section id="mindmapTargetBar" class="mindmap-target-bar" aria-label="目标脑图">
-      <span id="mindmapTargetLight" class="mindmap-target-light" aria-hidden="true"></span>
-      <label for="mindmapTargetSelect">目标脑图</label>
-      <select id="mindmapTargetSelect">
-        <option value="document_root">当前文档 · Codex 脑图</option>
-      </select>
-      <button id="mindmapTargetRefreshButton" class="small-button mindmap-target-refresh" type="button">刷新</button>
+    <section id="modeSwitchBar" class="mode-switch-bar" role="tablist" aria-label="产品模式">
+      <button id="chatModeButton" class="mode-switch-button" data-product-mode="chat" type="button">
+        <span class="mode-switch-title">Chat Mode</span>
+        <span class="mode-switch-subtitle">轻量对话</span>
+      </button>
+      <button id="agentWorkspaceModeButton" class="mode-switch-button active" data-product-mode="workspace" type="button">
+        <span class="mode-switch-title">Agent Workspace</span>
+        <span class="mode-switch-subtitle">对象工作台</span>
+      </button>
+      <div id="modeIntentLine" class="mode-intent-line">当前：Agent Workspace，围绕 MNObject、脑图、知识和工作流操作。</div>
     </section>
 
-    <section class="status-row ai-chat-status-row">
-      <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
-      <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
-    </section>
-
-    <section id="updateNotice" class="update-notice hidden">
-      <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
-      <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
-    </section>
-
-    <section id="liveHistory" class="history ai-chat-history" aria-live="polite">
-      <article class="message assistant">
-        <div class="message-role">Codex</div>
-        <div class="message-body">可以直接提问；如果在 MarginNote 里选中了内容，我会优先结合当前选区和节点回答。</div>
-      </article>
-    </section>
-
-    <section class="composer ai-chat-composer">
-      <div class="composer-input-row">
-        <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
-        <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">
-          <span class="send-button-main">发送</span>
-          <span class="send-button-sub">可排队</span>
+    <section id="workspaceNavigator" class="workspace-navigator" aria-label="Agent Workspace Navigator">
+      <div class="workspace-navigator-header">
+        <div>
+          <div class="workspace-navigator-kicker">Workspace Navigator</div>
+          <div id="workspaceNavigatorSummary" class="workspace-navigator-summary">Knowledge Console：当前对象、风险、关系和账本入口。</div>
+        </div>
+      </div>
+      <div class="workspace-nav-grid">
+        <button id="workspaceNavConsoleButton" class="workspace-nav-card active" data-workspace-surface="console" type="button">
+          <span class="workspace-nav-title">Knowledge Console</span>
+          <span class="workspace-nav-subtitle">对象、风险、证据</span>
+        </button>
+        <button id="workspaceNavMindmapStudioButton" class="workspace-nav-card" data-workspace-surface="mindmap_studio" type="button">
+          <span class="workspace-nav-title">Mindmap Studio</span>
+          <span class="workspace-nav-subtitle">Diff、目标、验证</span>
+        </button>
+        <button id="workspaceNavCardFactoryButton" class="workspace-nav-card" data-workspace-surface="card_factory" type="button">
+          <span class="workspace-nav-title">Card Factory</span>
+          <span class="workspace-nav-subtitle">卡型、复习队列</span>
+        </button>
+        <button id="workspaceNavLedgerExplorerButton" class="workspace-nav-card" data-workspace-surface="ledger_explorer" type="button">
+          <span class="workspace-nav-title">Operation Ledger</span>
+          <span class="workspace-nav-subtitle">证据、回滚、残留</span>
+        </button>
+        <button id="workspaceNavKnowledgeGraphButton" class="workspace-nav-card" data-workspace-surface="knowledge_graph" type="button">
+          <span class="workspace-nav-title">Knowledge Graph</span>
+          <span class="workspace-nav-subtitle">实体、关系、检索</span>
+        </button>
+        <button id="workspaceNavWorkflowBuilderButton" class="workspace-nav-card" data-workspace-surface="workflow_builder" type="button">
+          <span class="workspace-nav-title">Workflow Builder</span>
+          <span class="workspace-nav-subtitle">模板、run、确认点</span>
+        </button>
+        <button id="workspaceNavSkillCenterButton" class="workspace-nav-card" data-workspace-surface="skill_center" type="button">
+          <span class="workspace-nav-title">Skill Center</span>
+          <span class="workspace-nav-subtitle">权限、安装、验收</span>
         </button>
       </div>
-      <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
-        <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
-        <div id="pdfCacheBannerText" class="pdf-cache-banner-text">PDF缓存：等待当前文档</div>
-        <button id="pdfCacheFileBannerButton" class="small-button pdf-cache-action" type="button">选择PDF</button>
-      </div>
+    </section>
+
+    <section id="workbenchTabs" class="workbench-tabs" role="tablist" aria-label="工作台">
+      <button id="workbenchTabObject" class="workbench-tab active" data-workbench-pane="object" type="button">对象</button>
+      <button id="workbenchTabDialog" class="workbench-tab" data-workbench-pane="dialog" type="button">对话</button>
+      <button id="workbenchTabOperation" class="workbench-tab" data-workbench-pane="operation" type="button">操作</button>
+      <button id="workbenchTabKnowledge" class="workbench-tab" data-workbench-pane="knowledge" type="button">知识</button>
+      <button id="workbenchTabWorkflow" class="workbench-tab" data-workbench-pane="workflow" type="button">工作流</button>
+    </section>
+
+    <section id="workbenchLayout" class="workbench-layout" aria-label="MarginNote Agent 工作台">
+      <aside id="objectWorkspacePanel" class="workbench-panel object-workspace-panel active" data-workbench-pane="object" aria-label="对象">
+        <header class="workbench-panel-header">
+          <div>
+            <div class="workbench-panel-kicker">对象</div>
+            <h2 id="objectWorkspaceTitle">Knowledge Console</h2>
+          </div>
+          <span class="workbench-panel-badge">Focus</span>
+        </header>
+        <div id="objectWorkspaceMeta" class="workbench-panel-text">当前对象、关系、活动、账本和风险会在这里成为可操作入口。</div>
+        <div id="objectWorkspaceScope" class="workbench-panel-text muted">上下文范围：自动</div>
+        <div id="objectWorkspaceObjectId" class="workbench-object-line">MNObject：等待对象 ID</div>
+        <div id="objectWorkspaceSourceRef" class="workbench-object-line muted">来源：等待 sourceRef</div>
+        <section id="objectRiskPanel" class="object-risk-panel idle" aria-label="对象风险">
+          <div class="object-risk-header">
+            <div class="object-risk-kicker">风险</div>
+            <div id="objectRiskSummary" class="object-risk-summary">等待对象风险评估。</div>
+          </div>
+          <div id="objectRiskList" class="object-risk-list">
+            <div class="object-risk-row empty">权限、上下文、目标脑图、dry-run 和确认点会显示在这里。</div>
+          </div>
+        </section>
+        <div id="objectWorkspaceEvidence" class="workbench-evidence-list">
+          <div class="workbench-empty">等待当前对象证据</div>
+        </div>
+        <div id="objectWorkspaceActions" class="workbench-action-list" aria-label="对象动作"></div>
+        <section id="objectBrowserPanel" class="object-browser-panel idle" aria-label="Object Browser">
+          <div class="object-browser-header">
+            <div>
+              <div class="object-browser-kicker">Object Browser</div>
+              <div id="objectBrowserSummary" class="object-browser-summary">等待当前对象浏览器。</div>
+            </div>
+            <div class="object-browser-header-actions">
+              <button id="objectRegistryScanButton" class="small-button object-registry-scan" type="button">扫描 MN</button>
+              <button id="objectBrowserRefreshButton" class="small-button object-browser-refresh" type="button">刷新</button>
+            </div>
+          </div>
+          <div id="objectBrowserFilters" class="object-browser-filters" aria-label="对象浏览器筛选">
+            <label class="object-browser-filter-field">
+              <span>类型</span>
+              <select id="objectBrowserTypeFilterSelect">
+                <option value="">全部</option>
+                <option value="focus">当前</option>
+                <option value="registry">Registry</option>
+                <option value="object_graph">图谱</option>
+                <option value="object_activity">活动</option>
+                <option value="operation_ledger">账本</option>
+              </select>
+            </label>
+            <label class="object-browser-filter-field">
+              <span>Kind</span>
+              <input id="objectBrowserKindFilterInput" type="text" placeholder="mindmap_node" autocomplete="off">
+            </label>
+            <label class="object-browser-filter-field object-browser-search">
+              <span>关键词</span>
+              <input id="objectBrowserSearchInput" type="search" placeholder="对象 ID / 标题 / 来源">
+            </label>
+            <button id="objectBrowserFilterButton" class="small-button object-browser-filter" type="button">筛选</button>
+          </div>
+          <div id="objectBrowserList" class="object-browser-list">
+            <div class="object-browser-row empty">当前对象、图谱节点、活动和账本项会汇总成可浏览对象。</div>
+          </div>
+        </section>
+        <section id="objectGraphPanel" class="object-graph-panel idle" aria-label="Object Graph">
+          <div class="object-graph-header">
+            <div>
+              <div class="object-graph-kicker">Object Graph</div>
+              <div id="objectGraphSummary" class="object-graph-summary">等待当前对象图谱。</div>
+            </div>
+            <div class="object-graph-header-actions">
+              <button id="objectGraphRelationAddButton" class="small-button object-graph-relation-add" type="button">添加关系</button>
+              <button id="objectGraphRefreshButton" class="small-button object-graph-refresh" type="button">刷新</button>
+            </div>
+          </div>
+          <section id="objectGraphRelationEditor" class="object-graph-relation-editor hidden" aria-label="添加对象关系">
+            <label class="object-graph-relation-field">
+              <span>目标对象 ID</span>
+              <input id="objectGraphRelationTargetInput" type="text" placeholder="mnobj:note:..." autocomplete="off" />
+            </label>
+            <label class="object-graph-relation-field">
+              <span>关系类型</span>
+              <input id="objectGraphRelationTypeInput" type="text" value="related_to" autocomplete="off" />
+            </label>
+            <label class="object-graph-relation-field">
+              <span>标签</span>
+              <input id="objectGraphRelationLabelInput" type="text" placeholder="例如：支持 / 包含 / 反驳" autocomplete="off" />
+            </label>
+            <label class="object-graph-relation-field">
+              <span>说明</span>
+              <textarea id="objectGraphRelationNoteInput" rows="2" placeholder="这条关系的依据或用途"></textarea>
+            </label>
+            <div class="object-graph-relation-actions">
+              <button id="objectGraphRelationSaveButton" class="small-button" type="button">保存关系</button>
+              <button id="objectGraphRelationCancelButton" class="small-button secondary" type="button">取消</button>
+            </div>
+          </section>
+          <div id="objectGraphNodes" class="object-graph-nodes">
+            <div class="object-graph-node empty">当前对象关联的对话、工作流、事务和外部请求会汇总到这里。</div>
+          </div>
+        </section>
+        <section id="objectActivityPanel" class="object-activity-panel idle" aria-label="对象活动">
+          <div class="object-activity-header">
+            <div>
+              <div class="object-activity-kicker">对象活动</div>
+              <div id="objectActivitySummary" class="object-activity-summary">等待当前对象活动。</div>
+            </div>
+            <button id="objectActivityRefreshButton" class="small-button object-activity-refresh" type="button">刷新</button>
+          </div>
+          <div id="objectActivityList" class="object-activity-list">
+            <div class="object-activity-row empty">历史、工作流、事务和诊断日志会按当前 MNObject 汇总到这里。</div>
+          </div>
+        </section>
+        <section id="operationLedgerPanel" class="operation-ledger-panel idle" aria-label="Operation Ledger">
+          <div class="operation-ledger-header">
+            <div>
+              <div class="operation-ledger-kicker">Operation Ledger</div>
+              <div id="operationLedgerSummary" class="operation-ledger-summary">等待当前对象账本。</div>
+            </div>
+            <button id="operationLedgerRefreshButton" class="small-button operation-ledger-refresh" type="button">刷新</button>
+          </div>
+          <div id="operationLedgerFilters" class="operation-ledger-filters" aria-label="Operation Ledger 筛选">
+            <label class="operation-ledger-filter-field">
+              <span>类型</span>
+              <select id="operationLedgerTypeFilterSelect">
+                <option value="">全部</option>
+                <option value="workflow_run">工作流</option>
+                <option value="ai_edit_transaction">事务</option>
+                <option value="external_gateway_request">外部</option>
+                <option value="object_graph_manual_relation">关系</option>
+              </select>
+            </label>
+            <label class="operation-ledger-filter-field">
+              <span>状态</span>
+              <input id="operationLedgerStatusFilterInput" type="text" placeholder="saved / pass / failed" autocomplete="off">
+            </label>
+            <label class="operation-ledger-filter-field operation-ledger-search">
+              <span>关键词</span>
+              <input id="operationLedgerSearchInput" type="search" placeholder="ledgerId / 标题 / 来源">
+            </label>
+            <button id="operationLedgerFilterButton" class="small-button operation-ledger-filter" type="button">筛选</button>
+          </div>
+          <div id="operationLedgerList" class="operation-ledger-list">
+            <div class="operation-ledger-row empty">工作流、AI 编辑事务和外部自动化请求会按当前 MNObject 汇总到这里。</div>
+          </div>
+          <section id="operationLedgerDetailPanel" class="operation-ledger-detail-panel idle" aria-label="Operation Ledger 详情">
+            <div class="operation-ledger-detail-header">
+              <div>
+                <div class="operation-ledger-detail-kicker">证据详情</div>
+                <div id="operationLedgerDetailTitle" class="operation-ledger-detail-title">选择账本项查看证据</div>
+              </div>
+              <button id="operationLedgerDetailCloseButton" class="small-button operation-ledger-detail-close" type="button">关闭</button>
+            </div>
+            <div id="operationLedgerDetailMeta" class="operation-ledger-detail-meta">事务验证、工作流确认点和外部回调会显示在这里。</div>
+            <div id="operationLedgerDetailEvidence" class="operation-ledger-detail-evidence">
+              <div class="operation-ledger-evidence-row empty">尚未打开账本项。</div>
+            </div>
+          </section>
+        </section>
+      </aside>
+
+      <section id="dialogWorkspacePanel" class="workbench-panel dialog-workspace-panel active" data-workbench-pane="dialog" aria-label="对话">
+        <section class="status-row ai-chat-status-row">
+          <div id="statusPill" class="status-pill idle">Companion: 127.0.0.1:48761</div>
+          <button id="stopButton" class="small-button danger-lite ai-chat-stop-button hidden" type="button">停止</button>
+        </section>
+
+        <section id="updateNotice" class="update-notice hidden">
+          <div id="updateNoticeText" class="update-notice-text">发现插件更新。</div>
+          <button id="updateNoticeOpenSettingsButton" class="small-button primary-lite" type="button">查看更新</button>
+        </section>
+
+        <section id="liveHistory" class="history ai-chat-history" aria-live="polite">
+          <article class="message assistant">
+            <div class="message-role">Codex</div>
+            <div class="message-body">可以直接提问；如果在 MarginNote 里选中了内容，我会优先结合当前选区和节点回答。</div>
+          </article>
+        </section>
+
+        <section class="composer ai-chat-composer">
+          <div class="composer-input-row">
+            <textarea id="promptInput" placeholder="问 AI：解释当前选中内容，或直接输入问题。"></textarea>
+            <button id="sendButton" data-action="chat" class="small-button primary send-button" type="button">
+              <span class="send-button-main">发送</span>
+              <span class="send-button-sub">可排队</span>
+            </button>
+          </div>
+          <div id="pdfCacheBanner" class="pdf-cache-banner idle" role="status" aria-live="polite">
+            <span id="pdfCacheBannerLight" class="pdf-cache-light" aria-hidden="true"></span>
+            <div id="pdfCacheBannerText" class="pdf-cache-banner-text">PDF缓存：等待当前文档</div>
+            <button id="pdfCacheFileBannerButton" class="small-button pdf-cache-action" type="button">选择PDF</button>
+          </div>
+        </section>
+      </section>
+
+      <aside id="operationWorkspacePanel" class="workbench-panel operation-workspace-panel active" data-workbench-pane="operation" aria-label="操作">
+        <header class="workbench-panel-header">
+          <div>
+            <div class="workbench-panel-kicker">操作</div>
+            <h2 id="operationWorkspaceTitle">等待操作计划</h2>
+          </div>
+          <span class="workbench-panel-badge">Plan</span>
+        </header>
+        <div id="operationWorkspaceMeta" class="workbench-panel-text">写入计划、目标脑图、事务状态和验证结果会集中显示在这里。</div>
+        <div id="operationWorkspaceNextActions" class="workbench-action-list" aria-label="下一步操作"></div>
+        <section id="mindmapStudioPanel" class="mindmap-studio-panel idle" aria-label="Mindmap Studio">
+          <div class="mindmap-studio-header">
+            <div>
+              <div class="mindmap-studio-kicker">Mindmap Studio</div>
+              <div id="mindmapStudioSummary" class="mindmap-studio-summary">读取现有脑图、预览 Diff、应用所选变更，并验证或回滚事务。</div>
+            </div>
+          </div>
+          <div class="mindmap-studio-stages">
+            <div id="mindmapStudioCurrentTree" class="mindmap-studio-stage idle">
+              <span class="mindmap-studio-stage-label">现有脑图</span>
+              <strong>未读取</strong>
+            </div>
+            <div id="mindmapStudioDiffStage" class="mindmap-studio-stage idle">
+              <span class="mindmap-studio-stage-label">Diff</span>
+              <strong>等待预览</strong>
+            </div>
+            <div id="mindmapStudioApplyStage" class="mindmap-studio-stage idle">
+              <span class="mindmap-studio-stage-label">Apply / Verify</span>
+              <strong>等待执行</strong>
+            </div>
+            <div id="mindmapStudioTransactionStage" class="mindmap-studio-stage idle">
+              <span class="mindmap-studio-stage-label">Transaction</span>
+              <strong>暂无事务</strong>
+            </div>
+          </div>
+          <div class="mindmap-studio-actions">
+            <button id="mindmapStudioReadTreeButton" class="small-button" type="button">读取现有脑图</button>
+            <button id="mindmapStudioPreviewDiffButton" class="small-button" type="button">预览 Diff</button>
+            <button id="mindmapStudioApplySelectedButton" class="small-button primary-lite" type="button">应用所选</button>
+            <button id="mindmapStudioVerifyButton" class="small-button" type="button">验证事务</button>
+            <button id="mindmapStudioRollbackButton" class="small-button danger-lite" type="button">回滚事务</button>
+          </div>
+          <div id="mindmapStudioStatusLine" class="mindmap-studio-status-line">Mindmap Studio：等待当前对象和目标脑图。</div>
+        </section>
+        <section id="mindmapTreeCacheStatus" class="mindmap-tree-cache-status idle" aria-label="当前脑图树缓存">
+          <div id="mindmapTreeCacheText">当前脑图树：未读取</div>
+          <button id="mindmapTreeRefreshButton" class="small-button mindmap-tree-refresh" type="button">读取当前脑图</button>
+        </section>
+        <div id="mindmapTreePreviewList" class="mindmap-tree-preview-list" aria-label="当前脑图树预览"></div>
+        <section id="mindmapDiffWorkbench" class="mindmap-diff-workbench idle" aria-label="脑图 Diff 编辑台">
+          <div id="mindmapDiffWorkbenchTitle" class="mindmap-diff-workbench-title">脑图 Diff 编辑台</div>
+          <div id="mindmapDiffWorkbenchSummary" class="mindmap-diff-workbench-summary">等待 AI 生成脑图 Diff 预览。</div>
+          <div id="mindmapDiffWorkbenchPreview" class="mindmap-diff-workbench-preview">
+            <div class="mindmap-diff-workbench-row empty">生成脑图树后，这里会保留最近一次新增、更新、合并、移动和建议删除的变更预览。</div>
+          </div>
+        </section>
+        <div id="operationWorkspaceVerification" class="workbench-verification-line">验证：等待操作结果</div>
+
+        <section id="mindmapTargetBar" class="mindmap-target-bar" aria-label="目标脑图">
+          <span id="mindmapTargetLight" class="mindmap-target-light" aria-hidden="true"></span>
+          <label for="mindmapTargetSelect">目标脑图</label>
+          <select id="mindmapTargetSelect">
+            <option value="document_root">当前文档 · Codex 脑图</option>
+          </select>
+          <button id="mindmapTargetRefreshButton" class="small-button mindmap-target-refresh" type="button">刷新</button>
+        </section>
+
+        <section id="agentWorkbenchBar" class="agent-workbench-bar idle" aria-label="Agent 操作计划">
+          <span id="agentWorkbenchLight" class="agent-workbench-light" aria-hidden="true"></span>
+          <div class="agent-workbench-main">
+            <div id="agentWorkbenchLine" class="agent-workbench-line">Agent：等待当前对象</div>
+            <div id="agentWorkbenchDetail" class="agent-workbench-detail">选区、卡片、脑图节点或文档会生成可审计操作计划。</div>
+          </div>
+          <button id="agentPlanRefreshButton" class="small-button agent-plan-refresh" type="button">计划</button>
+        </section>
+
+        <section id="mindmapDiffApplyStatus" class="mindmap-diff-apply-status idle hidden" aria-label="脑图 Diff 验证">
+          <span id="mindmapDiffApplyLight" class="mindmap-diff-apply-light" aria-hidden="true"></span>
+          <div id="mindmapDiffApplyText" class="mindmap-diff-apply-text">脑图验证：等待局部执行结果</div>
+        </section>
+
+        <section id="aiEditTransactionCenter" class="ai-edit-transaction-center idle" aria-label="事务中心">
+          <div id="aiEditTransactionTitle" class="ai-edit-transaction-title">事务中心</div>
+          <div id="aiEditTransactionSummary" class="ai-edit-transaction-summary">暂无 AI 编辑事务。</div>
+          <div id="aiEditTransactionNotes" class="ai-edit-transaction-notes">
+            <div class="ai-edit-transaction-note empty">接受或拒绝 AI 编辑后，这里会显示回滚状态、残留 noteId 和最近事务摘要。</div>
+          </div>
+          <div id="aiEditTransactionActions" class="ai-edit-transaction-actions" aria-label="事务操作"></div>
+        </section>
+      </aside>
+
+      <aside id="knowledgeWorkspacePanel" class="workbench-panel knowledge-workspace-panel" data-workbench-pane="knowledge" aria-label="知识">
+        <header class="workbench-panel-header">
+          <div>
+            <div class="workbench-panel-kicker">知识</div>
+            <h2 id="knowledgeWorkspaceTitle">Knowledge Graph</h2>
+          </div>
+          <span class="workbench-panel-badge">Graph</span>
+        </header>
+        <div id="knowledgeWorkspaceSummary" class="workbench-panel-text">跨 notebook 知识层默认不自动注入；只有显式要求相关、历史、跨文档或 notebook 时启用。</div>
+        <div id="knowledgeWorkspaceScope" class="knowledge-workspace-card">范围：当前文档 / 当前 notebook</div>
+        <div id="knowledgeWorkspaceEntities" class="knowledge-workspace-card">实体：等待索引状态</div>
+        <div id="knowledgeWorkspaceRelations" class="knowledge-workspace-card">关系：等待关系统计</div>
+        <div id="knowledgeWorkspaceReviewQueue" class="knowledge-workspace-card knowledge-review-queue">复习队列：等待 Card Factory 复习卡</div>
+        <div id="knowledgeWorkspaceReviewList" class="knowledge-review-list" aria-label="复习队列">
+          <div class="knowledge-review-item empty">Card Factory 复习卡会显示在这里。</div>
+        </div>
+        <div class="knowledge-workspace-search" role="search">
+          <input id="knowledgeWorkspaceSearchInput" type="search" placeholder="检索当前知识索引" />
+          <button id="knowledgeWorkspaceSearchButton" class="small-button" type="button">检索</button>
+        </div>
+        <div id="knowledgeWorkspaceResults" class="knowledge-workspace-results" aria-label="知识检索结果">
+          <div class="knowledge-workspace-result empty">输入关键词后会显示命中实体、来源和关系。</div>
+        </div>
+        <div id="knowledgeWorkspaceActions" class="workbench-action-list" aria-label="知识动作"></div>
+      </aside>
+
+      <aside id="workflowWorkspacePanel" class="workbench-panel workflow-workspace-panel" data-workbench-pane="workflow" aria-label="工作流">
+        <header class="workbench-panel-header">
+          <div>
+            <div class="workbench-panel-kicker">工作流</div>
+            <h2 id="workflowWorkspaceTitle">Workflow Runtime</h2>
+          </div>
+          <span class="workbench-panel-badge">Runtime</span>
+        </header>
+        <div id="workflowWorkspaceSummary" class="workbench-panel-text">精读、卡片生成、重组、复习和外部自动化会进入可审计 workflow run。</div>
+        <div id="workflowWorkspaceRuns" class="workflow-workspace-card">运行：等待 workflow 状态</div>
+        <div id="workflowWorkspaceGateway" class="workflow-workspace-card">External Automation Gateway：等待 MN API 状态</div>
+        <div id="workflowWorkspaceSkills" class="workflow-workspace-card">Skill Marketplace：等待技能包配置</div>
+        <div id="workflowWorkspaceSkillsList" class="workflow-workspace-skills" aria-label="技能包">
+          <div class="workflow-workspace-skill empty">等待 Skill Marketplace 技能包清单。</div>
+        </div>
+        <div id="workflowWorkspaceTemplates" class="workflow-workspace-templates" aria-label="工作流模板">
+          <div class="workflow-workspace-template empty">等待 workflow 模板列表。</div>
+        </div>
+        <div id="workflowWorkspaceRecentRuns" class="workflow-workspace-runs" aria-label="最近工作流">
+          <div class="workflow-workspace-run empty">最近启动的 workflow run 会显示在这里。</div>
+        </div>
+        <section id="workflowRunInspectorPanel" class="workflow-run-inspector-panel idle" aria-label="工作流运行检查器">
+          <div class="workflow-run-inspector-header">
+            <div>
+              <div class="workflow-run-inspector-kicker">Run Inspector</div>
+              <div id="workflowRunInspectorTitle" class="workflow-run-inspector-title">选择 workflow run 查看步骤</div>
+            </div>
+            <button id="workflowRunInspectorCloseButton" class="small-button workflow-run-inspector-close" type="button">关闭</button>
+          </div>
+          <div id="workflowRunInspectorSummary" class="workflow-run-inspector-summary">排队、确认点、阻塞和下一步动作会显示在这里。</div>
+          <div id="workflowRunInspectorSteps" class="workflow-run-inspector-steps">
+            <div class="workflow-run-inspector-step empty">尚未打开 workflow run。</div>
+          </div>
+        </section>
+        <div id="workflowWorkspaceActions" class="workbench-action-list" aria-label="工作流动作"></div>
+      </aside>
     </section>
   </main>
 
@@ -74,6 +441,11 @@
     <div class="config-body">
       <section class="config-section">
         <div class="config-section-title">当前文档历史</div>
+        <div class="conversation-history-scope" role="group" aria-label="历史范围">
+          <button id="conversationHistoryAllButton" class="scope-button active" type="button">全部</button>
+          <button id="conversationHistoryObjectButton" class="scope-button" type="button">当前对象</button>
+        </div>
+        <div id="conversationHistoryScopeLine" class="conversation-history-scope-line">历史范围：当前文档</div>
         <div id="conversationHistoryList" class="conversation-history-list">
           <div class="conversation-empty">暂无历史对话</div>
         </div>
@@ -117,6 +489,23 @@
           <button id="saveSettingsButton" class="small-button primary" type="button">保存设置</button>
           <button id="aiBackendProbeButton" class="small-button" type="button">AI 试连</button>
           <button id="clearOpenAIKeyButton" class="small-button danger-lite" type="button">清除 Key</button>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">MarginNote 接口</div>
+        <div id="mnApiStatusLine" class="mn-api-status-line warn">MN 接口：自动 / URL API 未配置</div>
+        <div class="settings-page-note">URL API 用于和支持 marginnote4app://addon/api 的扩展协作；密钥只写入本机 Companion，不会回显。</div>
+        <div class="config-grid two">
+          <label><span>MN 接口后端</span><select id="mnApiBackendSelect">
+            <option value="auto">自动</option>
+            <option value="native">原生插件</option>
+            <option value="url_api">URL API</option>
+          </select></label>
+          <label><span>URL API Secret</span><input id="mnUrlApiSecretInput" type="password" placeholder="保存后不会回显"></label>
+        </div>
+        <div class="config-actions">
+          <button id="clearMnUrlApiSecretButton" class="small-button danger-lite" type="button">清除 URL API Secret</button>
         </div>
       </section>
 
@@ -214,6 +603,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260624-send-button-v1"></script>
+  <script src="app.js?v=20260627-mindmap-studio-v1"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.27';
+  var PluginVersion = '0.4.28';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -18,7 +18,11 @@ JSB.newAddon = function(mainPath) {
     'native-highlight-selection-text-resolver-v1',
     'context-refresh-clears-stale-selection-v1',
     'ai-edit-transaction-rollback-v1',
-    'ai-edit-undo-rollback-v2'
+    'ai-edit-undo-rollback-v2',
+    'native-mindmap-read-tree-request-v1',
+    'native-mn-object-registry-scan-v1',
+    'native-mindmap-diff-apply-create-v1',
+    'native-mindmap-delete-suggestion-confirm-v1'
   ];
 
   function isNil(value) {
@@ -1245,6 +1249,10 @@ JSB.newAddon = function(mainPath) {
     }
     var hasPdfPath = !!(context && (context.pdfPath || context.documentPath));
     var hasDocumentIdentity = !!(hasPdfPath || (context && (context.documentTitle || context.documentFileName || context.sourceFileName)));
+    var canUpdateMindmapNode = canCreateNote;
+    var canMergeMindmapNode = canCreateNote;
+    var canMoveMindmapNode = canCreateNote;
+    var canDeleteMindmapNode = false;
     var highlightBlocked = '';
     var highlightNext = '点击“高亮选区”，MN4 会调用 documentController.highlightFromSelection().';
     if (!selectionControllerExists) {
@@ -1303,6 +1311,46 @@ JSB.newAddon = function(mainPath) {
         blockedReason: canCreateNote ? '' : 'unverified-note-api',
         nextStep: '生成脑图草稿后点“写入 MarginNote”；合并会追加到当前选中节点下。',
         evidence: canCreateNote ? ['Note.createWithTitleNotebookDocument', 'addChild'] : []
+      },
+      nativeMindmapUpdate: {
+        label: '更新 MN 原生脑图节点',
+        available: canUpdateMindmapNode,
+        ready: canUpdateMindmapNode,
+        entryAction: 'request_mindmap_diff_apply',
+        nativeAction: 'apply_mindmap_diff_operations',
+        blockedReason: canUpdateMindmapNode ? '' : 'unverified-note-update-api',
+        nextStep: '局部 Diff 可通过 noteTitle 与 appendMarkdownComment 更新现有节点。',
+        evidence: canUpdateMindmapNode ? ['noteTitle', 'appendMarkdownComment'] : []
+      },
+      nativeMindmapMerge: {
+        label: '合并 MN 原生脑图节点',
+        available: canMergeMindmapNode,
+        ready: canMergeMindmapNode,
+        entryAction: 'request_mindmap_diff_apply',
+        nativeAction: 'apply_mindmap_diff_operations',
+        blockedReason: canMergeMindmapNode ? '' : 'unverified-note-merge-api',
+        nextStep: '局部 Diff 可把重复节点内容追加到现有节点正文中。',
+        evidence: canMergeMindmapNode ? ['appendMarkdownComment'] : []
+      },
+      nativeMindmapMove: {
+        label: '移动 MN 原生脑图节点',
+        available: canMoveMindmapNode,
+        ready: canMoveMindmapNode,
+        entryAction: 'request_mindmap_diff_apply',
+        nativeAction: 'apply_mindmap_diff_operations',
+        blockedReason: canMoveMindmapNode ? '' : 'unverified-note-move-api',
+        nextStep: '局部 Diff 可通过 addChild 把现有节点挂到新父节点下。',
+        evidence: canMoveMindmapNode ? ['addChild'] : []
+      },
+      nativeMindmapDelete: {
+        label: '删除 MN 原生脑图节点',
+        available: canDeleteMindmapNode,
+        ready: canDeleteMindmapNode,
+        entryAction: 'request_mindmap_diff_apply',
+        nativeAction: 'apply_mindmap_diff_operations',
+        blockedReason: canDeleteMindmapNode ? '' : 'unverified-note-delete-api',
+        nextStep: '删除类 diff 仍只做建议；必须额外确认并通过事务验证后才能执行。',
+        evidence: []
       },
       undoGroupedWrites: {
         label: 'MN Undo 分组写入',
@@ -1694,6 +1742,10 @@ JSB.newAddon = function(mainPath) {
       canGroupUndo: capabilityMatrix.undoGroupedWrites.available,
       canRefreshAfterDBChanged: capabilityMatrix.refreshAfterWrite.available,
       canInstallSelectionPopupMenu: capabilityMatrix.selectionPopupHighlight.available,
+      canUpdateMindmapNode: capabilityMatrix.nativeMindmapUpdate.available,
+      canMergeMindmapNode: capabilityMatrix.nativeMindmapMerge.available,
+      canMoveMindmapNode: capabilityMatrix.nativeMindmapMove.available,
+      canDeleteMindmapNode: capabilityMatrix.nativeMindmapDelete.available,
       hasPdfPath: capabilityMatrix.cacheCurrentPdf.ready,
       handlerFeatures: NativeHandlerFeatures,
       capabilityMatrix: capabilityMatrix,
@@ -2328,6 +2380,552 @@ JSB.newAddon = function(mainPath) {
     }
   };
 
+  CodexAssistantAddon.prototype.serializeMindmapNode = function(note, depth, maxDepth, stats) {
+    if (!note || depth > maxDepth) return null;
+    stats = stats || {nodes: 0, truncated: 0};
+    stats.nodes += 1;
+    var title = safeString(valueOf(note, 'noteTitle') || valueOf(note, 'title') || valueOf(note, 'name') || noteIdentifier(note) || '未命名节点');
+    var body = '';
+    try {
+      body = allTextFromNote(note);
+    } catch (bodyErr) {
+      body = '';
+    }
+    var node = {
+      noteId: noteIdentifier(note),
+      title: title,
+      body: body ? String(body).substring(0, 1200) : '',
+      children: []
+    };
+    var children = valueOf(note, 'childNotes') || valueOf(note, 'children') || valueOf(note, 'notes');
+    var total = countOf(children);
+    if (depth >= maxDepth && total > 0) {
+      stats.truncated += total;
+      return node;
+    }
+    for (var i = 0; i < total && i < 80; i++) {
+      var child = objectAt(children, i);
+      var childTree = this.serializeMindmapNode(child, depth + 1, maxDepth, stats);
+      if (childTree) node.children.push(childTree);
+    }
+    if (total > 80) stats.truncated += total - 80;
+    return node;
+  };
+
+  CodexAssistantAddon.prototype.readMindmapTree = function(command) {
+    var ctx = this.resolveNotebookAndDocument();
+    var requestedNoteId = safeString(valueOf(command, 'selectedNoteId') || '');
+    var requestedTitle = safeString(valueOf(command, 'selectedNoteTitle') || '');
+    var note = null;
+    if (ctx && requestedNoteId) note = findNoteById(ctx.notebook, requestedNoteId);
+    if (!note) note = this.getSelectedNote();
+    var noteId = noteIdentifier(note);
+    this.postEvent('mindmapTreeReadRequested', {
+      nativeAction: 'read_mindmap_tree',
+      requestedNoteId: requestedNoteId,
+      requestedTitle: requestedTitle,
+      resolvedNoteId: noteId,
+      source: safeString(valueOf(command, 'source') || 'native-queue')
+    });
+    if (!ctx || !note) {
+      this.postEvent('mindmapTreeReadUnavailable', {
+        nativeAction: 'read_mindmap_tree',
+        reason: ctx ? 'missing-selected-note' : (this.lastResolveError || 'missing-context'),
+        requestedNoteId: requestedNoteId,
+        requestedTitle: requestedTitle
+      });
+      return;
+    }
+    var stats = {nodes: 0, truncated: 0};
+    var tree = this.serializeMindmapNode(note, 0, 4, stats);
+    this.postEvent('mindmapTreeReadFinished', {
+      nativeAction: 'read_mindmap_tree',
+      selectedNoteId: noteId,
+      selectedNoteTitle: safeString(valueOf(note, 'noteTitle') || requestedTitle),
+      nodeCount: stats.nodes,
+      truncatedCount: stats.truncated,
+      currentMindmap: tree
+    });
+  };
+
+  CodexAssistantAddon.prototype.serializeMnObjectForRegistry = function(note, parentNoteId, nodePath, documentTitle) {
+    if (!note) return null;
+    var noteId = noteIdentifier(note);
+    if (!noteId) return null;
+    var title = safeString(valueOf(note, 'noteTitle') || valueOf(note, 'title') || valueOf(note, 'name') || noteId);
+    var body = '';
+    try {
+      body = allTextFromNote(note);
+    } catch (bodyErr) {
+      body = '';
+    }
+    return {
+      objectId: 'mnobj:note:' + noteId,
+      kind: 'mindmap_node',
+      title: title || noteId,
+      summary: body ? body.substring(0, 240) : '',
+      evidenceType: 'native_object_scan',
+      sourceRef: {
+        noteId: noteId,
+        parentNoteId: safeString(parentNoteId),
+        nodePath: safeString(nodePath),
+        documentTitle: safeString(documentTitle)
+      }
+    };
+  };
+
+  CodexAssistantAddon.prototype.scanMnObjects = function(command) {
+    var ctx = this.resolveNotebookAndDocument();
+    var limit = parseInt(valueOf(command, 'limit') || 200, 10);
+    if (!limit || limit < 1) limit = 200;
+    if (limit > 1000) limit = 1000;
+    this.postEvent('mnObjectRegistryScanRequested', {
+      nativeAction: 'scan_mn_objects',
+      limit: limit,
+      source: safeString(valueOf(command, 'source') || 'native-queue')
+    });
+    if (!ctx) {
+      this.postEvent('mnObjectRegistryScanFinished', {
+        nativeAction: 'scan_mn_objects',
+        ok: false,
+        reason: this.lastResolveError || 'missing-context',
+        objects: [],
+        objectCount: 0,
+        truncatedCount: 0
+      });
+      return;
+    }
+    var objects = [];
+    var truncated = 0;
+    var documentTitle = documentTitleFromDocumentObject(ctx.document) || documentTitleFromNotebookObject(ctx.notebook);
+    var addon = this;
+
+    function scanList(notes, parentNoteId, path, depth) {
+      if (!notes || depth > 24) return;
+      var total = countOf(notes);
+      for (var i = 0; i < total; i++) {
+        var note = objectAt(notes, i);
+        if (!note) continue;
+        var notePath = path ? (path + '.' + (i + 1)) : String(i + 1);
+        if (objects.length >= limit) {
+          truncated += total - i;
+          break;
+        }
+        var objectRef = addon.serializeMnObjectForRegistry(note, parentNoteId, notePath, documentTitle);
+        if (objectRef) objects.push(objectRef);
+        var noteId = noteIdentifier(note);
+        var children = valueOf(note, 'childNotes') || valueOf(note, 'children') || valueOf(note, 'notes');
+        if (children && children !== notes) scanList(children, noteId, notePath, depth + 1);
+      }
+    }
+
+    scanList(ctx.notebook.notes, '', '', 0);
+    this.postEvent('mnObjectRegistryScanFinished', {
+      nativeAction: 'scan_mn_objects',
+      ok: true,
+      scanId: String(new Date().getTime()),
+      evidenceType: 'native_object_scan',
+      objectCount: objects.length,
+      truncatedCount: truncated,
+      objects: objects,
+      topicid: ctx.topicId
+    });
+  };
+
+  CodexAssistantAddon.prototype.applyMindmapDiffOperations = function(command) {
+    var ctx = this.resolveNotebookAndDocument();
+    var plan = valueOf(command, 'mindmapDiffOperationPlan') || {};
+    var operations = toArray(valueOf(plan, 'operations'));
+    var transactionId = safeString(valueOf(command, 'transactionId') || valueOf(plan, 'transactionId') || '');
+    var draftId = safeString(valueOf(command, 'draftId') || valueOf(command, 'id') || '');
+    var selected = this.getSelectedNote();
+    var createdByPath = {};
+    var created = [];
+    var failed = [];
+    var addon = this;
+    var previousActiveAiEditTransaction = this.activeAiEditTransaction || null;
+    var mindmapDiffTransaction = transactionId ? {
+      transactionId: transactionId,
+      draftId: draftId,
+      topicid: '',
+      objectRef: aiEditObjectRefFromDraft(command),
+      createdNotes: [],
+      createdNoteIds: [],
+      createdNoteIdsMap: {},
+      startedAt: String(new Date().getTime())
+    } : null;
+    if (mindmapDiffTransaction) this.activeAiEditTransaction = mindmapDiffTransaction;
+
+    this.postEvent('mindmapDiffApplyRequested', {
+      nativeAction: 'apply_mindmap_diff_operations',
+      transactionId: transactionId,
+      draftId: draftId,
+      operationCount: operations.length,
+      source: safeString(valueOf(command, 'source') || 'native-queue')
+    });
+
+    if (!ctx) {
+      this.activeAiEditTransaction = previousActiveAiEditTransaction;
+      this.postEvent('mindmapDiffApplyFinished', {
+        nativeAction: 'apply_mindmap_diff_operations',
+        transactionId: transactionId,
+        draftId: draftId,
+        appliedCount: 0,
+        failedCount: operations.length,
+        reason: this.lastResolveError || 'missing-context'
+      });
+      return;
+    }
+
+    function parentPathOf(path) {
+      path = safeString(path);
+      var index = path.lastIndexOf('.');
+      return index > 0 ? path.substring(0, index) : '';
+    }
+
+    function createOperationNode(operation) {
+      var title = safeString(valueOf(operation, 'title') || 'Codex 节点');
+      var proposedPath = safeString(valueOf(operation, 'proposedPath') || '');
+      var parent = createdByPath[parentPathOf(proposedPath)] || selected;
+      var note = Note.createWithTitleNotebookDocument(title, ctx.notebook, ctx.document);
+      if (!note) return null;
+      if (parent) parent.addChild(note);
+      appendOperationComment(note, operation, 'create');
+      if (proposedPath) createdByPath[proposedPath] = note;
+      created.push(note);
+      addon.recordAiEditCreatedNote(note);
+      return note;
+    }
+
+    function operationBody(operation) {
+      return safeString(valueOf(operation, 'bodyPreview') || valueOf(operation, 'shortBody') || valueOf(operation, 'body') || '');
+    }
+
+    function appendOperationComment(note, operation, label) {
+      if (!note || !note.appendMarkdownComment) return false;
+      var body = operationBody(operation);
+      var proposedRef = valueOf(operation, 'proposedRef') || {};
+      var codexId = safeString(valueOf(proposedRef, 'codexId') || valueOf(operation, 'codexId') || '');
+      var marker = metadataComment(codexId);
+      var sourceText = sourceTextForOperation(operation);
+      var chunks = [];
+      if (marker) chunks.push(marker);
+      if (label) chunks.push('**Codex ' + label + '**');
+      if (body) chunks.push(body);
+      if (sourceText) chunks.push('Source: ' + sourceText);
+      if (!chunks.length) return false;
+      note.appendMarkdownComment(chunks.join('\n\n'));
+      return true;
+    }
+
+    function resolveOperationCurrentNote(operation) {
+      var currentRef = valueOf(operation, 'currentRef') || {};
+      var noteId = safeString(
+        valueOf(currentRef, 'noteId') ||
+        valueOf(operation, 'currentNoteId') ||
+        valueOf(operation, 'noteId') ||
+        ''
+      );
+      if (!noteId) return null;
+      return findNoteById(ctx.notebook, noteId);
+    }
+
+    function resolveOperationTargetParent(operation) {
+      var targetParentRef = valueOf(operation, 'targetParentRef') || valueOf(operation, 'parentRef') || {};
+      var parentNoteId = safeString(
+        valueOf(targetParentRef, 'noteId') ||
+        valueOf(operation, 'targetParentNoteId') ||
+        valueOf(operation, 'parentNoteId') ||
+        ''
+      );
+      if (parentNoteId) return findNoteById(ctx.notebook, parentNoteId);
+      var proposedPath = safeString(valueOf(operation, 'proposedPath') || '');
+      var parentFromCreated = createdByPath[parentPathOf(proposedPath)];
+      if (parentFromCreated) return parentFromCreated;
+      return selected;
+    }
+
+    function setOperationNodeTitle(note, title) {
+      title = safeString(title);
+      if (!note || !title) return false;
+      try {
+        note.noteTitle = title;
+        return true;
+      } catch (err) {}
+      try {
+        note.title = title;
+        return true;
+      } catch (err2) {}
+      try {
+        if (note.setTitle) {
+          note.setTitle(title);
+          return true;
+        }
+      } catch (err3) {}
+      try {
+        if (note.setNoteTitle) {
+          note.setNoteTitle(title);
+          return true;
+        }
+      } catch (err4) {}
+      return false;
+    }
+
+    function updateOperationNode(operation) {
+      var note = resolveOperationCurrentNote(operation);
+      if (!note) return {ok: false, reason: 'missing-current-note'};
+      var title = safeString(valueOf(operation, 'title') || '');
+      var titleUpdated = title ? setOperationNodeTitle(note, title) : false;
+      var commentAdded = appendOperationComment(note, operation, 'update');
+      return {
+        ok: titleUpdated || commentAdded,
+        reason: titleUpdated || commentAdded ? '' : 'nothing-to-update',
+        noteId: noteIdentifier(note),
+        method: titleUpdated ? 'note-title-comment' : 'note-comment'
+      };
+    }
+
+    function mergeOperationNode(operation) {
+      var note = resolveOperationCurrentNote(operation);
+      if (!note) return {ok: false, reason: 'missing-current-note'};
+      var commentAdded = appendOperationComment(note, operation, 'merge');
+      return {
+        ok: commentAdded,
+        reason: commentAdded ? '' : 'nothing-to-merge',
+        noteId: noteIdentifier(note),
+        method: 'merge-comment'
+      };
+    }
+
+    function moveOperationNode(operation) {
+      var note = resolveOperationCurrentNote(operation);
+      if (!note) return {ok: false, reason: 'missing-current-note'};
+      var parent = resolveOperationTargetParent(operation);
+      if (!parent) return {ok: false, reason: 'missing-target-parent', noteId: noteIdentifier(note)};
+      var noteId = noteIdentifier(note);
+      var parentId = noteIdentifier(parent);
+      if (noteId && parentId && noteId === parentId) {
+        return {ok: false, reason: 'target-parent-is-current-note', noteId: noteId};
+      }
+      try {
+        parent.addChild(note);
+        return {ok: true, noteId: noteId, targetParentNoteId: parentId, method: 'add-child'};
+      } catch (err) {
+        return {ok: false, reason: 'move-failed:' + safeString(err), noteId: noteId, targetParentNoteId: parentId};
+      }
+    }
+
+    function recordApplied(operation, result, applied) {
+      applied.push({
+        opId: safeString(valueOf(operation, 'opId')),
+        op: safeString(valueOf(operation, 'op')),
+        mutation: safeString(valueOf(operation, 'mutation')),
+        noteId: result.noteId || '',
+        targetParentNoteId: result.targetParentNoteId || '',
+        method: result.method || ''
+      });
+    }
+
+    function recordFailure(operation, result) {
+      failed.push({
+        opId: safeString(valueOf(operation, 'opId')),
+        op: safeString(valueOf(operation, 'op')),
+        mutation: safeString(valueOf(operation, 'mutation')),
+        noteId: result && result.noteId ? result.noteId : '',
+        targetParentNoteId: result && result.targetParentNoteId ? result.targetParentNoteId : '',
+        reason: result && result.reason ? result.reason : 'operation-failed'
+      });
+    }
+
+    function parentNoteIdFor(noteId) {
+      noteId = safeString(noteId);
+      if (!noteId || !ctx.notebook) return '';
+      function scan(notes, parentId, depth) {
+        if (!notes || depth > 24) return '';
+        var total = countOf(notes);
+        for (var i = 0; i < total; i++) {
+          var note = objectAt(notes, i);
+          if (!note) continue;
+          var currentId = noteIdentifier(note);
+          if (currentId === noteId) return parentId || '';
+          var children = valueOf(note, 'childNotes') || valueOf(note, 'children') || valueOf(note, 'notes');
+          var found = scan(children, currentId, depth + 1);
+          if (found) return found;
+        }
+        return '';
+      }
+      return scan(ctx.notebook.notes, '', 0);
+    }
+
+    function sourceTextForOperation(operation) {
+      var source = valueOf(operation, 'source') || {};
+      if (typeof source === 'string') return safeString(source);
+      return safeString(
+        valueOf(source, 'quote') ||
+        valueOf(source, 'text') ||
+        valueOf(source, 'page') ||
+        valueOf(source, 'label') ||
+        ''
+      );
+    }
+
+    function textContainsExpected(actual, expected) {
+      actual = safeString(actual);
+      expected = safeString(expected);
+      if (!expected) return true;
+      if (actual.indexOf(expected) >= 0) return true;
+      var clipped = expected.length > 120 ? expected.substring(0, 120) : expected;
+      return clipped ? actual.indexOf(clipped) >= 0 : true;
+    }
+
+    function verifyAppliedMindmapDiffOperation(operation, applied) {
+      operation = operation || {};
+      applied = applied || {};
+      var noteId = safeString(applied.noteId || '');
+      var note = noteId ? findNoteById(ctx.notebook, noteId) : null;
+      var expectedTitle = safeString(valueOf(operation, 'title') || '');
+      var actualTitle = note ? safeString(valueOf(note, 'noteTitle') || valueOf(note, 'title') || valueOf(note, 'name') || '') : '';
+      var targetParentRef = valueOf(operation, 'targetParentRef') || valueOf(operation, 'parentRef') || {};
+      var expectedParentNoteId = safeString(
+        applied.targetParentNoteId ||
+        valueOf(targetParentRef, 'noteId') ||
+        valueOf(operation, 'targetParentNoteId') ||
+        valueOf(operation, 'parentNoteId') ||
+        ''
+      );
+      var actualParentNoteId = note ? parentNoteIdFor(noteId) : '';
+      var titleMatches = !expectedTitle || expectedTitle === actualTitle;
+      var parentMatches = !expectedParentNoteId || expectedParentNoteId === actualParentNoteId;
+      var expectedBody = operationBody(operation);
+      var expectedSourceText = sourceTextForOperation(operation);
+      var actualCommentText = note ? allTextFromNote(note) : '';
+      var bodyMatches = textContainsExpected(actualCommentText, expectedBody);
+      var sourceMatches = textContainsExpected(actualCommentText, expectedSourceText);
+      var commentMatches = bodyMatches && sourceMatches;
+      var ok = !!note && titleMatches && parentMatches && commentMatches;
+      return {
+        opId: safeString(valueOf(operation, 'opId') || applied.opId || ''),
+        op: safeString(valueOf(operation, 'op') || applied.op || ''),
+        mutation: safeString(valueOf(operation, 'mutation') || applied.mutation || ''),
+        noteId: noteId,
+        exists: !!note,
+        ok: ok,
+        expectedTitle: expectedTitle,
+        actualTitle: actualTitle,
+        titleMatches: titleMatches,
+        expectedParentNoteId: expectedParentNoteId,
+        actualParentNoteId: actualParentNoteId,
+        parentMatches: parentMatches,
+        expectedBody: expectedBody,
+        bodyMatches: bodyMatches,
+        commentMatches: commentMatches,
+        expectedSourceText: expectedSourceText,
+        sourceMatches: sourceMatches,
+        actualCommentText: actualCommentText ? actualCommentText.substring(0, 1200) : '',
+        method: safeString(applied.method || '')
+      };
+    }
+
+    function buildMindmapDiffApplyVerification(operationsList, appliedList, failedList) {
+      var byOpId = {};
+      for (var i = 0; i < operationsList.length; i++) {
+        var operation = operationsList[i] || {};
+        byOpId[safeString(valueOf(operation, 'opId'))] = operation;
+      }
+      var operationVerification = [];
+      var verifiedCount = 0;
+      var failedVerificationCount = 0;
+      for (var j = 0; j < appliedList.length; j++) {
+        var applied = appliedList[j] || {};
+        var original = byOpId[safeString(applied.opId)] || {};
+        var verified = verifyAppliedMindmapDiffOperation(original, applied);
+        operationVerification.push(verified);
+        if (verified.ok) verifiedCount += 1;
+        else failedVerificationCount += 1;
+      }
+      failedVerificationCount += failedList.length;
+      return {
+        schema: 'codex.mn.mindmapDiffApplyVerification.v1',
+        status: failedVerificationCount ? 'block' : 'pass',
+        summary: '脑图 Diff 验证：通过 ' + verifiedCount + '，失败 ' + failedVerificationCount + '。',
+        operationCount: operationsList.length,
+        appliedCount: appliedList.length,
+        failedCount: failedList.length,
+        verifiedCount: verifiedCount,
+        failedVerificationCount: failedVerificationCount,
+        operationVerification: operationVerification,
+        failures: failedList
+      };
+    }
+
+    var appliedOperations = [];
+    UndoManager.sharedInstance().undoGrouping('Codex Apply Mindmap Diff', ctx.topicId, function() {
+      for (var i = 0; i < operations.length; i++) {
+        var operation = operations[i];
+        var op = safeString(valueOf(operation, 'op'));
+        var mutation = safeString(valueOf(operation, 'mutation'));
+        if (op === 'create_mindmap_node' || mutation === 'create') {
+          var note = createOperationNode(operation);
+          if (!note) {
+            recordFailure(operation, {reason: 'note-create-failed'});
+          } else {
+            recordApplied(operation, {
+              noteId: noteIdentifier(note),
+              method: 'create-note'
+            }, appliedOperations);
+          }
+          continue;
+        }
+        var result = null;
+        if (op === 'update_mindmap_node' || mutation === 'update') result = updateOperationNode(operation);
+        else if (op === 'merge_mindmap_node' || mutation === 'merge') result = mergeOperationNode(operation);
+        else if (op === 'move_mindmap_node' || mutation === 'move') result = moveOperationNode(operation);
+        else if (op === 'suggest_delete_mindmap_node' || mutation === 'delete_suggest' || mutation === 'delete') {
+          result = {ok: false, reason: 'delete-suggestion-not-applied'};
+        } else {
+          result = {ok: false, reason: 'unknown-operation'};
+        }
+        if (result && result.ok) recordApplied(operation, result, appliedOperations);
+        else recordFailure(operation, result);
+      }
+    });
+
+    Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
+    var verification = buildMindmapDiffApplyVerification(operations, appliedOperations, failed);
+    if (mindmapDiffTransaction) {
+      mindmapDiffTransaction.topicid = ctx.topicId;
+      if (!mindmapDiffTransaction.createdNoteIds.length) {
+        mindmapDiffTransaction.createdNoteIds = created.map(function(note) { return noteIdentifier(note); });
+      }
+      mindmapDiffTransaction.createdNotes = created;
+      for (var createdIndex = 0; createdIndex < mindmapDiffTransaction.createdNoteIds.length; createdIndex++) {
+        var createdId = mindmapDiffTransaction.createdNoteIds[createdIndex];
+        if (createdId) mindmapDiffTransaction.createdNoteIdsMap[createdId] = true;
+      }
+      this.aiEditTransactions = this.aiEditTransactions || {};
+      this.aiEditTransactions[transactionId] = mindmapDiffTransaction;
+      this.activeAiEditTransaction = previousActiveAiEditTransaction;
+    }
+    this.postEvent('mindmapDiffApplyFinished', {
+      nativeAction: 'apply_mindmap_diff_operations',
+      transactionId: transactionId,
+      draftId: draftId,
+      appliedCount: appliedOperations.length,
+      failedCount: failed.length,
+      createdNoteIds: created.map(function(note) { return noteIdentifier(note); }),
+      appliedOperations: appliedOperations,
+      failures: failed,
+      verification: verification,
+      topicid: ctx.topicId
+    });
+    if (created.length && ctx.controller.focusNoteInMindMapById) {
+      var noteId = noteIdentifier(created[0]);
+      NSTimer.scheduledTimerWithTimeInterval(0.3, false, function() {
+        ctx.controller.focusNoteInMindMapById(noteId);
+      });
+    }
+  };
+
   CodexAssistantAddon.prototype.handleNativeQueueCommand = function(command) {
     var nativeAction = safeString(valueOf(command, 'nativeAction'));
     if (!nativeAction) return false;
@@ -2387,6 +2985,18 @@ JSB.newAddon = function(mainPath) {
       }
       return true;
     }
+    if (nativeAction === 'read_mindmap_tree') {
+      this.readMindmapTree(command);
+      return true;
+    }
+    if (nativeAction === 'scan_mn_objects') {
+      this.scanMnObjects(command);
+      return true;
+    }
+    if (nativeAction === 'apply_mindmap_diff_operations') {
+      this.applyMindmapDiffOperations(command);
+      return true;
+    }
     this.postEvent('nativeQueueCommandUnknown', {nativeAction: nativeAction});
     return true;
   };
@@ -2401,12 +3011,107 @@ JSB.newAddon = function(mainPath) {
     this.postEvent('commandsAcked', {count: ids.length});
   };
 
+  function aiEditObjectRefFromDraft(json) {
+    var mnObject = valueOf(json, 'mnObject') || {};
+    var sourceRef = valueOf(mnObject, 'sourceRef') || {};
+    var objectRef = {
+      objectId: safeString(valueOf(mnObject, 'objectId')),
+      kind: safeString(valueOf(mnObject, 'kind')),
+      title: safeString(valueOf(mnObject, 'title')),
+      sourceRef: {
+        page: valueOf(sourceRef, 'page'),
+        quote: safeString(valueOf(sourceRef, 'quote')),
+        documentTitle: safeString(valueOf(sourceRef, 'documentTitle')),
+        path: safeString(valueOf(sourceRef, 'path'))
+      }
+    };
+    return objectRef;
+  }
+
+  function aiEditObjectRefFromBridgeParams(params) {
+    params = params || {};
+    return {
+      objectId: safeString(valueOf(params, 'mnObjectId')),
+      kind: safeString(valueOf(params, 'mnObjectKind')),
+      title: safeString(valueOf(params, 'mnObjectTitle')),
+      sourceRef: {
+        page: valueOf(params, 'mnObjectSourcePage'),
+        quote: safeString(valueOf(params, 'mnObjectSourceQuote')),
+        documentTitle: safeString(valueOf(params, 'mnObjectSourceDocumentTitle')),
+        path: safeString(valueOf(params, 'mnObjectSourcePath'))
+      }
+    };
+  }
+
+  function aiEditCreatedNoteIdsFromBridgeParams(params) {
+    params = params || {};
+    var createdNoteIdsString = safeString(valueOf(params, 'createdNoteIds'));
+    var parts = createdNoteIdsString.split('|');
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < parts.length; i++) {
+      var noteId = safeString(parts[i]);
+      if (!noteId || seen[noteId]) continue;
+      seen[noteId] = true;
+      out.push(noteId);
+    }
+    return out;
+  }
+
+  function mindmapDeleteTargetNoteIdsFromBridgeParams(params) {
+    params = params || {};
+    var targetNoteIdsString = safeString(valueOf(params, 'targetNoteIds'));
+    var parts = targetNoteIdsString.split('|');
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < parts.length; i++) {
+      var noteId = safeString(parts[i]);
+      if (!noteId || seen[noteId]) continue;
+      seen[noteId] = true;
+      out.push(noteId);
+    }
+    return out;
+  }
+
+  function fallbackAiEditTransactionFromBridge(transactionId, fallback) {
+    transactionId = safeString(transactionId);
+    fallback = fallback || {};
+    var createdNoteIds = aiEditCreatedNoteIdsFromBridgeParams(fallback);
+    if (!transactionId || !createdNoteIds.length) return null;
+    var createdNoteIdsMap = {};
+    for (var i = 0; i < createdNoteIds.length; i++) {
+      createdNoteIdsMap[createdNoteIds[i]] = true;
+    }
+    return {
+      transactionId: transactionId,
+      draftId: safeString(valueOf(fallback, 'draftId') || valueOf(fallback, 'id')),
+      topicid: safeString(valueOf(fallback, 'topicid')),
+      objectRef: aiEditObjectRefFromBridgeParams(fallback),
+      createdNotes: [],
+      createdNoteIds: createdNoteIds,
+      createdNoteIdsMap: createdNoteIdsMap,
+      startedAt: String(new Date().getTime())
+    };
+  }
+
+  function copyAiEditObjectRefFields(payload, objectRef) {
+    objectRef = objectRef || {};
+    payload.objectRef = objectRef;
+    payload.mnObjectId = safeString(valueOf(objectRef, 'objectId'));
+    payload.mnObjectKind = safeString(valueOf(objectRef, 'kind'));
+    payload.mnObjectTitle = safeString(valueOf(objectRef, 'title'));
+    payload.mnObjectSourceRef = valueOf(objectRef, 'sourceRef') || {};
+    return payload;
+  }
+
   CodexAssistantAddon.prototype.beginAiEditTransaction = function(draftId, json) {
     var now = String(new Date().getTime());
+    var objectRef = aiEditObjectRefFromDraft(json);
     var transaction = {
       transactionId: 'ai-edit-' + now + '-' + String(Math.random()).substring(2, 8),
       draftId: safeString(draftId),
       topicid: '',
+      objectRef: objectRef,
       createdNotes: [],
       createdNoteIds: [],
       createdNoteIdsMap: {},
@@ -2418,13 +3123,13 @@ JSB.newAddon = function(mainPath) {
     } catch (ctxErr) {}
     this.activeAiEditTransaction = transaction;
     this.aiEditTransactions = this.aiEditTransactions || {};
-    this.postEvent('aiEditTransactionStarted', {
+    this.postEvent('aiEditTransactionStarted', copyAiEditObjectRefFields({
       transactionId: transaction.transactionId,
       draftId: transaction.draftId,
       topicid: transaction.topicid,
       hasMindmap: valueOf(json, 'mindmap') ? true : false,
       cards: countOf(valueOf(json, 'cards'))
-    });
+    }, objectRef));
     return transaction;
   };
 
@@ -2458,25 +3163,38 @@ JSB.newAddon = function(mainPath) {
       write_target: safeString(valueOf(draftSummary, 'write_target')),
       topicid: transaction.topicid
     };
+    copyAiEditObjectRefFields(payload, transaction.objectRef);
     this.postEvent('aiEditOperationReady', payload);
     if (this.panel && this.panel.setAiEditOperationReady) this.panel.setAiEditOperationReady(payload);
     return payload;
   };
 
-  CodexAssistantAddon.prototype.acceptAiEditTransaction = function(transactionId) {
+  CodexAssistantAddon.prototype.acceptAiEditTransaction = function(transactionId, fallback) {
     transactionId = safeString(transactionId);
+    fallback = fallback || {};
+    var acceptedObjectRef = this.aiEditTransactions && this.aiEditTransactions[transactionId]
+      ? this.aiEditTransactions[transactionId].objectRef
+      : aiEditObjectRefFromBridgeParams(fallback);
     if (this.aiEditTransactions && this.aiEditTransactions[transactionId]) {
       delete this.aiEditTransactions[transactionId];
     }
-    var payload = {ok: true, action: 'accept', transactionId: transactionId, message: '已保留本次 AI 编辑结果。'};
+    var payload = copyAiEditObjectRefFields({ok: true, action: 'accept', transactionId: transactionId, message: '已保留本次 AI 编辑结果。'}, acceptedObjectRef);
     this.postEvent('aiEditTransactionAccepted', payload);
     if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(payload);
     return payload;
   };
 
-  CodexAssistantAddon.prototype.rejectAiEditTransaction = function(transactionId) {
+  CodexAssistantAddon.prototype.rejectAiEditTransaction = function(transactionId, fallback) {
     transactionId = safeString(transactionId);
+    fallback = fallback || {};
     var transaction = this.aiEditTransactions ? this.aiEditTransactions[transactionId] : null;
+    if (!transaction) {
+      transaction = fallbackAiEditTransactionFromBridge(transactionId, fallback);
+      if (transaction) {
+        this.aiEditTransactions = this.aiEditTransactions || {};
+        this.aiEditTransactions[transactionId] = transaction;
+      }
+    }
     if (!transaction) {
       var missing = {ok: false, action: 'reject', transactionId: transactionId, message: '未找到可撤销的 AI 编辑事务。'};
       this.postEvent('aiEditTransactionRejected', missing);
@@ -2535,7 +3253,67 @@ JSB.newAddon = function(mainPath) {
         reason: undoRollback.reason || ''
       }
     };
+    copyAiEditObjectRefFields(payload, transaction.objectRef);
     this.postEvent('aiEditTransactionRejected', payload);
+    if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(payload);
+    return payload;
+  };
+
+  CodexAssistantAddon.prototype.confirmMindmapDeleteTransaction = function(transactionId, fallback) {
+    transactionId = safeString(transactionId);
+    fallback = fallback || {};
+    var targetNoteIds = mindmapDeleteTargetNoteIdsFromBridgeParams(fallback);
+    var ctx = this.resolveNotebookAndDocument() || aiEditFallbackContext(safeString(valueOf(fallback, 'topicid')));
+    var deleted = 0;
+    var failed = [];
+    UndoManager.sharedInstance().undoGrouping('Codex Confirm Mindmap Delete', ctx ? ctx.topicId : safeString(valueOf(fallback, 'topicid')), function() {
+      for (var i = targetNoteIds.length - 1; i >= 0; i--) {
+        var noteId = targetNoteIds[i];
+        var note = resolveAiEditNoteById(ctx, noteId);
+        var result = deleteNoteForAiEdit(note, ctx, noteId);
+        if (result && result.ok) deleted += 1;
+        else failed.push({
+          noteId: noteId,
+          method: result ? result.method : '',
+          reason: result ? result.reason : 'unknown'
+        });
+      }
+    });
+    markAiEditDatabaseChanged(ctx ? ctx.topicId : safeString(valueOf(fallback, 'topicid')));
+    if (ctx && ctx.topicId) Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
+    if (failed.length && ctx) {
+      var originalFailed = failed.length;
+      failed = pruneAiEditDeleteFailures(failed, ctx);
+      deleted += originalFailed - failed.length;
+    }
+    var ok = failed.length === 0;
+    var payload = {
+      ok: ok,
+      action: 'confirm_delete',
+      transactionId: transactionId,
+      targetNoteIds: targetNoteIds,
+      deleted: deleted,
+      failed: failed.length,
+      failures: failed,
+      message: ok ? '已删除确认的脑图节点。' : '部分确认删除的脑图节点删除失败。'
+    };
+    this.postEvent('mindmapDeleteSuggestionConfirmed', payload);
+    if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(payload);
+    return payload;
+  };
+
+  CodexAssistantAddon.prototype.dismissMindmapDeleteTransaction = function(transactionId, fallback) {
+    transactionId = safeString(transactionId);
+    fallback = fallback || {};
+    var targetNoteIds = mindmapDeleteTargetNoteIdsFromBridgeParams(fallback);
+    var payload = {
+      ok: true,
+      action: 'dismiss_delete',
+      transactionId: transactionId,
+      targetNoteIds: targetNoteIds,
+      message: '已忽略本次脑图删除建议。'
+    };
+    this.postEvent('mindmapDeleteSuggestionDismissed', payload);
     if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(payload);
     return payload;
   };
@@ -2561,6 +3339,22 @@ JSB.newAddon = function(mainPath) {
         if (this.panel) this.panel.setStatus(message);
         Application.sharedInstance().showHUD(message, view, 3);
         this.postEvent('draftWriteFailed', {id: draftId, reason: message || 'load-failed'});
+        return;
+      }
+      var operationManifest = valueOf(json, 'operationManifest') || {};
+      var dryRun = valueOf(operationManifest, 'dryRun') || {};
+      var dryRunStatus = safeString(valueOf(dryRun, 'status'));
+      if (dryRunStatus === 'blocked') {
+        var dryRunMessage = safeString(valueOf(dryRun, 'message')) || 'Operation dry-run blocked this write.';
+        var blockedMessage = '草稿写入已阻断：' + dryRunMessage;
+        if (this.panel) this.panel.setStatus(blockedMessage);
+        Application.sharedInstance().showHUD(blockedMessage, view, 4);
+        this.postEvent('draftWriteFailed', {
+          id: draftId,
+          reason: 'operation-dry-run-blocked',
+          dryRunStatus: dryRunStatus,
+          dryRunMessage: dryRunMessage
+        });
         return;
       }
       this.postEvent('draftWritten', {

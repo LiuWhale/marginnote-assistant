@@ -12,6 +12,78 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "single_document_acceptance.py"
+CURRENT_WEB_CONTROLS = ",".join(
+    [
+        "aiChatShell",
+        "modeSwitchBar",
+        "chatModeButton",
+        "agentWorkspaceModeButton",
+        "modeIntentLine",
+        "workspaceNavigator",
+        "workspaceNavigatorSummary",
+        "workspaceNavConsoleButton",
+        "workspaceNavMindmapStudioButton",
+        "workspaceNavCardFactoryButton",
+        "workspaceNavLedgerExplorerButton",
+        "workspaceNavKnowledgeGraphButton",
+        "workspaceNavWorkflowBuilderButton",
+        "workspaceNavSkillCenterButton",
+        "workbenchTabs",
+        "workbenchTabObject",
+        "workbenchTabDialog",
+        "workbenchTabOperation",
+        "workbenchTabKnowledge",
+        "workbenchTabWorkflow",
+        "objectWorkspacePanel",
+        "objectGraphPanel",
+        "objectGraphRelationAddButton",
+        "objectGraphRelationEditor",
+        "objectGraphRelationTargetInput",
+        "objectGraphRelationTypeInput",
+        "objectGraphRelationLabelInput",
+        "objectGraphRelationNoteInput",
+        "objectGraphRelationSaveButton",
+        "objectGraphRelationCancelButton",
+        "objectActivityPanel",
+        "operationLedgerPanel",
+        "operationWorkspacePanel",
+        "operationWorkspaceNextActions",
+        "mindmapStudioPanel",
+        "mindmapStudioSummary",
+        "mindmapStudioCurrentTree",
+        "mindmapStudioDiffStage",
+        "mindmapStudioApplyStage",
+        "mindmapStudioTransactionStage",
+        "mindmapStudioReadTreeButton",
+        "mindmapStudioPreviewDiffButton",
+        "mindmapStudioApplySelectedButton",
+        "mindmapStudioVerifyButton",
+        "mindmapStudioRollbackButton",
+        "mindmapStudioStatusLine",
+        "knowledgeWorkspacePanel",
+        "workflowWorkspacePanel",
+        "agentWorkbenchBar",
+        "mindmapDiffWorkbench",
+        "aiEditTransactionCenter",
+        "promptInput",
+        "sendButton",
+        "stopButton",
+        "contextButton",
+        "contextScopeAutoButton",
+        "contextScopeSelectionButton",
+        "contextScopeDocumentButton",
+        "closeButton",
+        "liveHistory",
+        "contextSourceLine",
+        "aiReadinessLine",
+        "aiReadinessDetail",
+        "selectionPreview",
+        "statusPill",
+        "contextLine",
+        "readinessPanel",
+        "mnApiStatusLine",
+    ]
+)
 
 
 def load_module() -> Any:
@@ -39,13 +111,7 @@ class SingleDocumentAcceptanceTests(unittest.TestCase):
         return [
             event(
                 "webControlsReady",
-                controls=(
-                    "aiChatShell,promptInput,sendButton,stopButton,contextButton,"
-                    "contextScopeAutoButton,contextScopeSelectionButton,contextScopeDocumentButton,"
-                    "closeButton,liveHistory,"
-                    "contextSourceLine,"
-                    "aiReadinessLine,aiReadinessDetail,selectionPreview,statusPill,contextLine,readinessPanel"
-                ),
+                controls=CURRENT_WEB_CONTROLS,
                 missing="",
                 minWidth=390,
                 minHeight=520,
@@ -147,6 +213,17 @@ class SingleDocumentAcceptanceTests(unittest.TestCase):
 
         self.assertEqual(check["status"], "BLOCK")
         self.assertIn("aiChatShell", check["evidence"]["absent"])
+        self.assertIn("modeSwitchBar", check["evidence"]["absent"])
+        self.assertIn("agentWorkspaceModeButton", check["evidence"]["absent"])
+        self.assertIn("workspaceNavigator", check["evidence"]["absent"])
+        self.assertIn("workspaceNavMindmapStudioButton", check["evidence"]["absent"])
+        self.assertIn("objectWorkspacePanel", check["evidence"]["absent"])
+        self.assertIn("objectGraphPanel", check["evidence"]["absent"])
+        self.assertIn("objectGraphRelationAddButton", check["evidence"]["absent"])
+        self.assertIn("operationLedgerPanel", check["evidence"]["absent"])
+        self.assertIn("knowledgeWorkspacePanel", check["evidence"]["absent"])
+        self.assertIn("workflowWorkspacePanel", check["evidence"]["absent"])
+        self.assertIn("agentWorkbenchBar", check["evidence"]["absent"])
         self.assertIn("liveHistory", check["evidence"]["absent"])
         self.assertIn("readinessPanel", check["evidence"]["absent"])
 

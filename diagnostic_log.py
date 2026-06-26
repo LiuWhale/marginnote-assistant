@@ -101,6 +101,7 @@ def append_diagnostic_log(
     *,
     payload: Any | None = None,
     extra: Any | None = None,
+    object_ref: Any | None = None,
     request_id: str = "",
 ) -> dict[str, Any]:
     record = {
@@ -111,6 +112,8 @@ def append_diagnostic_log(
         "requestId": str(request_id or ""),
         "message": str(message or "")[:800],
     }
+    if object_ref is not None:
+        record["objectRef"] = sanitize_diagnostic_payload(object_ref)
     if payload is not None:
         record["payload"] = sanitize_diagnostic_payload(payload)
     if extra is not None:

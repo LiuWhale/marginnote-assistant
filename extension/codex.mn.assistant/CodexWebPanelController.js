@@ -448,21 +448,31 @@ CodexWebPanelController.prototype.handleBridgeUrl = function(raw) {
   }
   if (lower.indexOf('codexpaper://reject_ai_edit_transaction') === 0) {
     var rejectTransactionId = params.transactionId || params.id || '';
-    if (this.addon && this.addon.rejectAiEditTransaction) this.addon.rejectAiEditTransaction(rejectTransactionId);
+    if (this.addon && this.addon.rejectAiEditTransaction) this.addon.rejectAiEditTransaction(rejectTransactionId, params);
     return false;
   }
   if (lower.indexOf('codexpaper://accept_ai_edit_transaction') === 0) {
     var acceptTransactionId = params.transactionId || params.id || '';
-    if (this.addon && this.addon.acceptAiEditTransaction) this.addon.acceptAiEditTransaction(acceptTransactionId);
+    if (this.addon && this.addon.acceptAiEditTransaction) this.addon.acceptAiEditTransaction(acceptTransactionId, params);
+    return false;
+  }
+  if (lower.indexOf('codexpaper://confirm_mindmap_delete_transaction') === 0) {
+    var confirmDeleteTransactionId = params.transactionId || params.id || '';
+    if (this.addon && this.addon.confirmMindmapDeleteTransaction) this.addon.confirmMindmapDeleteTransaction(confirmDeleteTransactionId, params);
+    return false;
+  }
+  if (lower.indexOf('codexpaper://dismiss_mindmap_delete_transaction') === 0) {
+    var dismissDeleteTransactionId = params.transactionId || params.id || '';
+    if (this.addon && this.addon.dismissMindmapDeleteTransaction) this.addon.dismissMindmapDeleteTransaction(dismissDeleteTransactionId, params);
     return false;
   }
   if (lower.indexOf('codexpaper://ai_edit') === 0) {
     var editAction = params.action || '';
     var transactionId = params.transactionId || params.id || '';
     if (editAction === 'reject' && this.addon && this.addon.rejectAiEditTransaction) {
-      this.addon.rejectAiEditTransaction(transactionId);
+      this.addon.rejectAiEditTransaction(transactionId, params);
     } else if (editAction === 'accept' && this.addon && this.addon.acceptAiEditTransaction) {
-      this.addon.acceptAiEditTransaction(transactionId);
+      this.addon.acceptAiEditTransaction(transactionId, params);
     }
     return false;
   }

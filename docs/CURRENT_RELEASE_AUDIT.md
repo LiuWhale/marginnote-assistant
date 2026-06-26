@@ -1,24 +1,67 @@
 # Current Release Audit
 
-审计时间：2026-06-25 15:17 CST
+审计时间：2026-06-27 CST
 
 本文档记录当前 Codex Companion 公开预览版的可验证状态。它不是最终 v1.0 发布承诺，而是当前证据基线。历史条目保留当时版本号和当时判断。
 
 ## 版本与包
 
-- 当前发布候选：0.4.27 公开预览版
-- MN4 插件 manifest：0.4.27
-- Companion：0.4.27
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.27`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.27-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.27-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.27-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.27-latest.mnaddon`
+- 当前发布候选：0.4.28 公开预览版
+- MN4 插件 manifest：0.4.28
+- Companion：0.4.28
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.28`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.28-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.28-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.28-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.28-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：尚未生成 0.4.27 signed/notarized pkg
-- 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前最终 gate 因缺 `.pkg` entry 仍会阻塞 `release_sha256_manifest`。
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.28-latest.pkg`，已生成但未签名、未公证
+- 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.28 发布候选：Agent Workspace 与 Mindmap Studio 第一阶段
+
+本轮把 0.4.27 之后的开发态归档为 0.4.28 公开预览候选。主要变化包括：
+
+- `Chat Mode / Agent Workspace` 双模式壳层和 `Workspace Navigator`，把 `Knowledge Console`、`Mindmap Studio`、`Card Factory`、`Operation Ledger`、`Knowledge Graph`、`Workflow Builder` 和 `Skill Center` 做成一等入口。
+- `Mindmap Studio` 第一阶段，提供 `读取现有脑图`、`预览 Diff`、`应用所选`、`验证事务`、`回滚事务`，并汇总真实脑图树、Diff、局部应用和事务状态。它不是回答下方按钮的别名。
+- Object Browser / Object Graph / Operation Ledger / Card Factory / Workflow Run Inspector 的第一阶段对象化和证据化能力。
+
+本轮本地验证结果：
+
+```text
+python3 -m unittest discover -s tests
+490 tests passed
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/CodexWebPanelController.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.28-latest-dist.zip --mnaddon release/CodexCompanion-0.4.28-latest.mnaddon
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.28-latest-dist.zip --mnaddon release/CodexCompanion-0.4.28-latest.mnaddon --install-dry-run
+PASS
+
+python3 build_pkg.py release/CodexCompanion-0.4.28-latest-dist.zip --json
+PASS unsigned pkg
+
+python3 release_acceptance.py release/CodexCompanion-0.4.28-latest-dist.zip --json
+BLOCKED as expected for preview release
+```
+
+本轮 artifact：
+
+- `CodexCompanion-0.4.28-latest-dist.zip`
+- `CodexCompanion-0.4.28-latest.mnaddon`
+- `CodexCompanion-0.4.28-latest.pkg`
+- 精确 sha256 不写死在包内文档里，避免文档 hash 改动反过来改变 zip hash；以 release 目录、OneDrive 镜像和 GitHub Release asset 旁边的外部 `SHA256SUMS.txt` 为准。
+
+本机已替换到 0.4.28：MN4 扩展目录 `mnaddon.json` 为 `0.4.28`，`main.js` 为 `PluginVersion = '0.4.28'`，Companion `/status.pluginVersion` 为 `0.4.28`。MN4 运行态仍需重新打开面板或重启 MN4 后才会上报 `pluginVersion=0.4.28` 的 `webControlsReady` 和 `nativeApiCapabilities`。
+
+当前 release acceptance 剩余阻塞：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。`release_sha256_manifest` 已通过，不再因缺 pkg entry 阻塞。
 
 ### 2026-06-25 v0.4.27 发布：补 MarginNote 原生 `.mnaddon` 发布包
 
@@ -877,7 +920,7 @@ NOTARIZE_MISSING_CREDENTIALS credentialsWarning without traceback in dry-run; er
 - Companion 运行正常。
 - 插件 manifest 合法且为 `Codex Companion / 0.4.0`。
 - MN4 已加载 0.4.0 WebView 面板。
-- WebView 面板提供对话、按钮、设置、文件、历史五个子界面。
+- WebView 面板首屏提供对象、对话、操作、知识、工作流五个工作区；设置和历史作为独立页面打开。
 - 主界面固定发送按钮、自定义按钮置顶、主操作/原文工具/设置诊断分区、消息级队列引导、后端运行状态行、权限诊断、缓存 PDF、打开设置和高亮选区入口已进入代码与静态测试清单。
 - WebView 队列泵能自动续跑 raw action，并会把 `nativeAction` 留给 MN4 插件原生轮询处理，不会误走聊天/文本生成路径。
 - MN 原生动作矩阵已进入插件 runtime event、Companion `status/settings_get`、doctor 和设置页；并新增 `request_native_capability_probe` / `probe_native_api_capabilities` 主动刷新链路。doctor 已能按对应事件时间识别 stale runtime event，并且旧 handler 的 unknown 事件会被后续成功 probe 覆盖。当前 MN4 运行态已上报 `capabilityMatrix=True`、`ready_actions=4`。

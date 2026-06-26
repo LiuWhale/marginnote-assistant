@@ -25,7 +25,14 @@ from typing import Any
 from urllib import error, request
 from urllib.parse import parse_qs, unquote, urlparse
 
+import agent_workbench
 import diagnostic_log
+import knowledge_index
+import marginnote_api_adapter
+import operation_runtime
+import skill_marketplace
+import transaction_manager
+import workflow_engine
 import update_manager
 from runtime_config import (
     CODEX_CLI_REASONING,
@@ -43,6 +50,8 @@ from runtime_config import (
     sanitize_file_search_roots,
     sanitize_github_repo,
     sanitize_model,
+    sanitize_mn_api_backend,
+    sanitize_mn_url_api_secret,
     sanitize_openai_api_key,
     sanitize_permission,
     sanitize_proxy_url,
@@ -72,9 +81,15 @@ STOP_PATH = CONTROL_DIR / "stop.json"
 WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 MINDMAP_TARGETS_PATH = CONTROL_DIR / "mindmap-targets.json"
+MINDMAP_TREES_DIR = CONTROL_DIR / "mindmap-trees"
+OBJECT_GRAPH_RELATIONS_PATH = ROOT / "object-graph-relations.json"
+MN_OBJECT_REGISTRY_PATH = ROOT / "mn-object-registry.json"
+REVIEW_QUEUE_PATH = ROOT / "review-queue.json"
 CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
-CURRENT_PLUGIN_VERSION = "0.4.27"
+WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
+EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
+CURRENT_PLUGIN_VERSION = "0.4.28"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -154,6 +169,10 @@ DOCUMENT_SCOPE_REQUEST_RE = re.compile(
     r"全文|整篇|这篇|当前文档|当前材料|整份|通读|精读|完整|full[-\s]?(document|text|reading)|whole\s+(document|paper|file)",
     re.I,
 )
+KNOWLEDGE_INDEX_REQUEST_RE = re.compile(
+    r"之前|已有|历史|索引|知识库|相关|关联|跨文档|整个\s*notebook|notebook|knowledge|previous|related|existing|index",
+    re.I,
+)
 DOCUMENT_CONTEXT_MAX_CHARS = 7000
 PDF_TEXT_CHUNK_MAX_CHARS = 1400
 PDF_TEXT_CHUNK_OVERLAP_CHARS = 160
@@ -162,6 +181,8 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 CARD_BODY_MAX_CHARS = 900
 CARD_SOURCE_EXCERPT_MAX_CHARS = 220
 CARD_FALLBACK_SECTION_TARGET_CHARS = 180
+CARD_FACTORY_SCHEMA = "codex.mn.cardFactory.v1"
+CARD_FACTORY_CARD_SCHEMA = "codex.mn.cardFactoryCard.v1"
 READ_ONLY_ACTIONS = {
     "chat",
     "explain_selection",
@@ -190,6 +211,18 @@ READ_ONLY_ACTIONS = {
     "history_clear",
     "logs_recent",
     "logs_clear",
+    "mn_object_registry",
+    "request_mn_object_registry_scan",
+    "object_browser",
+    "object_graph",
+    "object_graph_relation_save",
+    "object_graph_relation_delete",
+    "object_activity",
+    "operation_ledger_list",
+    "operation_ledger_get",
+    "ai_edit_transaction_list",
+    "ai_edit_transaction_get",
+    "ai_edit_transaction_verify",
     "conversation_new",
     "conversation_list",
     "conversation_load",
@@ -197,6 +230,30 @@ READ_ONLY_ACTIONS = {
     "diagnose_highlights",
     "diagnose_permissions",
     "open_full_disk_access_settings",
+    "mn_api_status",
+    "mn_url_api_build_request",
+    "agent_plan",
+    "operation_plan_preview",
+    "mindmap_diff_preview",
+    "request_mindmap_diff_apply",
+    "mn_read_tree",
+    "workflow_templates",
+    "workflow_preview",
+    "workflow_start",
+    "workflow_status",
+    "workflow_list",
+    "workflow_cancel",
+    "workflow_retry_step",
+    "external_gateway_start_workflow",
+    "external_gateway_request_status",
+    "external_gateway_callback",
+    "skill_marketplace_status",
+    "skill_install",
+    "skill_uninstall",
+    "knowledge_index_status",
+    "knowledge_index_search",
+    "knowledge_index_ingest_context",
+    "knowledge_index_clear",
     "update_check",
     "update_install",
     "update_status",
@@ -213,7 +270,8 @@ NOTE_WRITE_ACTIONS = {
     "generate_full_reading",
     "expand_node",
     "reorganize_mindmap",
-    "request_draft_write",
+    "request_mindmap_diff_apply",
+    "request_mindmap_delete_confirmation",
 }
 FULL_PERMISSION_ACTIONS = {"export_annotated_pdf", "request_native_highlight_selection", "native_highlight_wizard_start"}
 WEB_PANEL_SOURCE = "marginnote4-web-panel"
@@ -249,9 +307,15 @@ NATIVE_QUEUE_ACTIONS = {
     "reload_web_panel",
     "probe_native_api_capabilities",
     "write_draft",
+    "read_mindmap_tree",
+    "scan_mn_objects",
+    "apply_mindmap_diff_operations",
 }
 
 diagnostic_log.configure(DIAGNOSTIC_LOG_PATH, max_lines=DIAGNOSTIC_LOG_MAX_LINES)
+knowledge_index.configure(ROOT)
+skill_marketplace.configure(ROOT)
+transaction_manager.configure(ROOT)
 SENSITIVE_LOG_KEYS = diagnostic_log.SENSITIVE_LOG_KEYS
 LARGE_LOG_KEYS = diagnostic_log.LARGE_LOG_KEYS
 diagnostic_timestamp = diagnostic_log.diagnostic_timestamp
@@ -314,6 +378,7 @@ def runtime_settings() -> dict[str, Any]:
     settings["model"] = sanitize_model(settings.get("model"), get_setting("OPENAI_MODEL", DEFAULT_MODEL))
     settings["proxyUrl"] = sanitize_proxy_url(settings.get("proxyUrl"))
     settings["aiBackend"] = sanitize_ai_backend(settings.get("aiBackend"))
+    settings["mnApiBackend"] = sanitize_mn_api_backend(settings.get("mnApiBackend"))
     settings["codexCliPath"] = sanitize_codex_cli_path(settings.get("codexCliPath"))
     settings["defaultContextScope"] = sanitize_default_context_scope(settings.get("defaultContextScope"))
     settings["githubRepo"] = sanitize_github_repo(settings.get("githubRepo"))
@@ -334,6 +399,8 @@ def save_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
         current["proxyUrl"] = sanitize_proxy_url(values.get("proxyUrl"))
     if "aiBackend" in values:
         current["aiBackend"] = sanitize_ai_backend(values.get("aiBackend"))
+    if "mnApiBackend" in values:
+        current["mnApiBackend"] = sanitize_mn_api_backend(values.get("mnApiBackend"))
     if "codexCliPath" in values:
         current["codexCliPath"] = sanitize_codex_cli_path(values.get("codexCliPath"))
     if "defaultContextScope" in values:
@@ -349,6 +416,11 @@ def save_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
         write_env_setting("OPENAI_API_KEY", api_key)
     if values.get("clearOpenAIKey") is True:
         write_env_setting("OPENAI_API_KEY", "")
+    mn_url_api_secret = sanitize_mn_url_api_secret(values.get("mnUrlApiSecret")) if "mnUrlApiSecret" in values else ""
+    if mn_url_api_secret:
+        write_env_setting("MN_URL_API_SECRET", mn_url_api_secret)
+    if values.get("clearMnUrlApiSecret") is True:
+        write_env_setting("MN_URL_API_SECRET", "")
     write_json_file(SETTINGS_PATH, current)
     return current
 
@@ -357,12 +429,31 @@ def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
     cards = draft.get("cards") if isinstance(draft.get("cards"), list) else []
     mindmap = draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None
     write_target = draft.get("writeTarget") if isinstance(draft.get("writeTarget"), dict) else {}
+    operation_manifest = (
+        draft.get("operationManifest")
+        if isinstance(draft.get("operationManifest"), dict)
+        else draft_operation_manifest(cards, mindmap, write_target)
+    )
+    if not isinstance(operation_manifest.get("dryRun"), dict):
+        operation_manifest = {
+            **operation_manifest,
+            "dryRun": operation_dry_run(
+                operation_manifest,
+                str(draft.get("topicid") or ""),
+                str(draft.get("bookmd5") or ""),
+            ),
+        }
     write_target_label = str(write_target.get("label") or "").strip()
     if not write_target_label and mindmap and mindmap.get("mergeIntoSelected"):
         write_target_label = "当前选中节点"
     edit_text = str(draft.get("editText") or "").strip()
     if not edit_text:
         edit_text = draft_edit_text(cards, str(draft.get("reply") or ""))
+    mn_object = draft.get("mnObject") if isinstance(draft.get("mnObject"), dict) else {}
+    card_factory = draft.get("cardFactory") if isinstance(draft.get("cardFactory"), dict) else {}
+    if not card_factory and cards:
+        first_source = cards[0].get("source") if isinstance(cards[0], dict) and isinstance(cards[0].get("source"), dict) else {}
+        card_factory = card_factory_summary([card for card in cards if isinstance(card, dict)], first_source)
     return {
         "id": draft_id,
         "original_action": str(draft.get("originalAction") or draft.get("action") or ""),
@@ -370,11 +461,38 @@ def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
         "reply_preview": str(draft.get("reply") or "")[:280],
         "edit_text": edit_text,
         "card_count": len(cards),
+        "card_factory": card_factory,
+        "card_quality": operation_manifest.get("cardQuality") if isinstance(operation_manifest.get("cardQuality"), dict) else operation_runtime.audit_card_quality(cards),
         "has_mindmap": bool(mindmap),
         "mindmap_title": str(mindmap.get("title") or "") if mindmap else "",
         "write_target": write_target_label,
+        "operation_manifest": operation_manifest,
+        "mn_object": mn_object,
         "created_at": str(draft.get("created_at") or ""),
     }
+
+
+def count_mindmap_nodes(node: Any) -> int:
+    return operation_runtime.count_mindmap_nodes(node)
+
+
+def operation_dry_run(manifest: dict[str, Any], topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
+    settings = runtime_settings()
+    native_caps = latest_native_api_capabilities(topic_id, book_md5)
+    mn_api = mn_api_status_fields(settings).get("mnApi", {})
+    return operation_runtime.simulate_operation_manifest(manifest, settings, native_caps, mn_api)
+
+
+def draft_operation_manifest(
+    cards: list[Any],
+    mindmap: dict[str, Any] | None,
+    write_target: dict[str, Any],
+    topic_id: str = "",
+    book_md5: str = "",
+) -> dict[str, Any]:
+    manifest = operation_runtime.build_operation_manifest(cards, mindmap, write_target)
+    manifest["dryRun"] = operation_dry_run(manifest, topic_id, book_md5)
+    return manifest
 
 
 def draft_edit_text(cards: list[Any], fallback: str = "") -> str:
@@ -436,6 +554,13 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
     if not cards and not mindmap:
         return {"ok": False, "message": "草稿没有卡片或脑图，不能写入。"}
     draft_id = hashlib.sha256(f"{time.time()}|{uuid.uuid4()}".encode("utf-8")).hexdigest()[:20]
+    topic_id = str(payload.get("topicid") or draft_payload.get("topicid") or "")
+    book_md5 = str(payload.get("bookmd5") or draft_payload.get("bookmd5") or "")
+    mn_object = (
+        draft_payload.get("mnObject")
+        if isinstance(draft_payload.get("mnObject"), dict)
+        else payload.get("mnObject") if isinstance(payload.get("mnObject"), dict) else {}
+    )
     draft = {
         "ok": bool(draft_payload.get("ok", True)),
         "message": str(draft_payload.get("message") or "草稿已准备好。"),
@@ -443,9 +568,12 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "cards": cards,
         "mindmap": mindmap,
         "writeTarget": write_target,
+        "mnObject": mn_object,
+        "cardFactory": draft_payload.get("cardFactory") if isinstance(draft_payload.get("cardFactory"), dict) else {},
+        "operationManifest": draft_operation_manifest(cards, mindmap, write_target, topic_id, book_md5),
         "originalAction": str(payload.get("originalAction") or draft_payload.get("action") or ""),
-        "topicid": str(payload.get("topicid") or draft_payload.get("topicid") or ""),
-        "bookmd5": str(payload.get("bookmd5") or draft_payload.get("bookmd5") or ""),
+        "topicid": topic_id,
+        "bookmd5": book_md5,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -481,6 +609,54 @@ def delete_draft(draft_id: str) -> dict[str, Any]:
         return {"ok": True, "message": "草稿已不存在。", "id": clean_id}
 
 
+def _excluded_mindmap_paths(payload: dict[str, Any]) -> list[str]:
+    raw = (
+        payload.get("excludedMindmapPaths")
+        if isinstance(payload.get("excludedMindmapPaths"), list)
+        else payload.get("excludeMindmapPaths")
+        if isinstance(payload.get("excludeMindmapPaths"), list)
+        else []
+    )
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        path = str(item or "").strip()
+        if not re.fullmatch(r"\d+(?:\.\d+)*", path):
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def _mindmap_node_edits(payload: dict[str, Any]) -> list[dict[str, str]]:
+    raw = payload.get("mindmapNodeEdits") if isinstance(payload.get("mindmapNodeEdits"), list) else []
+    edits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("proposedPath") or item.get("path") or "").strip()
+        if not re.fullmatch(r"\d+(?:\.\d+)*", path):
+            continue
+        edit: dict[str, str] = {"proposedPath": path}
+        title = str(item.get("title") or "").strip()
+        if title:
+            edit["title"] = title[:180]
+        if "body" in item or "shortBody" in item:
+            body = str(item.get("body") if "body" in item else item.get("shortBody") or "").strip()
+            edit["body"] = body[:2000]
+        if len(edit) <= 1:
+            continue
+        key = path + "\n" + edit.get("title", "") + "\n" + edit.get("body", "")
+        if key in seen:
+            continue
+        seen.add(key)
+        edits.append(edit)
+    return edits
+
+
 def update_draft(payload: dict[str, Any]) -> dict[str, Any]:
     clean_id = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("id") or payload.get("draftId") or ""))[:80]
     if not clean_id:
@@ -490,21 +666,1090 @@ def update_draft(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(draft, dict) or not draft:
         return {"ok": False, "message": "草稿不存在或已过期。", "id": clean_id}
     edit_text = str(payload.get("editText") or "").strip()
-    if not edit_text:
+    excluded_paths = _excluded_mindmap_paths(payload)
+    node_edits = _mindmap_node_edits(payload)
+    if not edit_text and not excluded_paths and not node_edits:
         return {"ok": False, "message": "草稿编辑内容为空。", "id": clean_id}
-    cards = cards_from_draft_edit_text(edit_text)
+    cards = cards_from_draft_edit_text(edit_text) if edit_text else []
+    if node_edits or excluded_paths:
+        mindmap = draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None
+        if not mindmap:
+            return {"ok": False, "message": "当前草稿没有可编辑节点的脑图。", "id": clean_id}
+        if node_edits:
+            mindmap = operation_runtime.edit_mindmap_nodes_by_paths(mindmap, node_edits)
+            draft["mindmap"] = mindmap
+            draft["mindmapNodeEdits"] = node_edits
+    if excluded_paths:
+        mindmap = draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None
+        if not mindmap:
+            return {"ok": False, "message": "当前草稿没有可排除节点的脑图。", "id": clean_id}
+        pruned_mindmap = operation_runtime.prune_mindmap_by_paths(mindmap, excluded_paths)
+        if not pruned_mindmap:
+            return {"ok": False, "message": "不能排除脑图根节点或排除后脑图为空。", "id": clean_id}
+        draft["mindmap"] = pruned_mindmap
+        draft["excludedMindmapPaths"] = excluded_paths
     if not cards and not isinstance(draft.get("mindmap"), dict):
         return {"ok": False, "message": "编辑内容没有可写入卡片。", "id": clean_id}
     if cards:
         draft["cards"] = cards
-    draft["editText"] = edit_text
-    draft["reply"] = edit_text
+    if edit_text:
+        draft["editText"] = edit_text
+        draft["reply"] = edit_text
+    draft["operationManifest"] = draft_operation_manifest(
+        draft.get("cards") if isinstance(draft.get("cards"), list) else [],
+        draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None,
+        draft.get("writeTarget") if isinstance(draft.get("writeTarget"), dict) else {},
+        str(payload.get("topicid") or draft.get("topicid") or ""),
+        str(payload.get("bookmd5") or draft.get("bookmd5") or ""),
+    )
     draft["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     write_json_file(path, draft)
     return {
         "ok": True,
         "message": "草稿编辑已保存。",
         "draft": draft_summary(clean_id, draft),
+    }
+
+
+def operation_plan_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    draft_id = str(payload.get("id") or payload.get("draftId") or "").strip()
+    draft = load_draft(draft_id)
+    if not draft.get("ok"):
+        return draft
+    manifest = draft.get("operationManifest") if isinstance(draft.get("operationManifest"), dict) else {}
+    if not manifest:
+        manifest = draft_operation_manifest(
+            draft.get("cards") if isinstance(draft.get("cards"), list) else [],
+            draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None,
+            draft.get("writeTarget") if isinstance(draft.get("writeTarget"), dict) else {},
+        )
+    topic_id = str(payload.get("topicid") or draft.get("topicid") or "")
+    book_md5 = str(payload.get("bookmd5") or draft.get("bookmd5") or "")
+    dry_run = operation_dry_run(manifest, topic_id, book_md5)
+    manifest = {**manifest, "dryRun": dry_run}
+    return {
+        "ok": True,
+        "message": dry_run.get("message") or "已生成操作计划预览。",
+        "reply": (
+            f"Operation dry-run：{dry_run.get('status')}\n"
+            f"操作数：{dry_run.get('operationCount', 0)}\n"
+            f"阻断：{dry_run.get('blockedCount', 0)} / 未确认：{dry_run.get('unknownCount', 0)}"
+        ),
+        "draftId": draft_id,
+        "operationManifest": manifest,
+        "operationPlan": manifest.get("operationPlan") if isinstance(manifest.get("operationPlan"), dict) else {},
+        "dryRun": dry_run,
+        **mn_api_status_fields(runtime_settings()),
+    }
+
+
+def _payload_mindmap(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def mindmap_diff_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    draft_id = str(payload.get("id") or payload.get("draftId") or "").strip()
+    draft: dict[str, Any] = {}
+    if draft_id:
+        loaded = load_draft(draft_id)
+        if loaded.get("ok"):
+            draft = loaded
+        else:
+            return loaded
+    proposed = _payload_mindmap(
+        payload.get("proposedMindmap")
+        or payload.get("mindmap")
+        or draft.get("mindmap")
+    )
+    current = _payload_mindmap(
+        payload.get("currentMindmap")
+        or payload.get("currentTree")
+        or payload.get("existingMindmap")
+        or payload.get("existingTree")
+    )
+    tree_cache: dict[str, Any] = {}
+    if not current:
+        tree_cache = read_latest_mindmap_tree(normalize_topic_id(payload) or str(draft.get("topicid") or ""), normalize_book_md5(payload) or str(draft.get("bookmd5") or ""))
+        current = _payload_mindmap(tree_cache.get("currentMindmap"))
+    target = (
+        payload.get("mindmapTarget")
+        if isinstance(payload.get("mindmapTarget"), dict)
+        else draft.get("writeTarget") if isinstance(draft.get("writeTarget"), dict) else {}
+    )
+    if not proposed:
+        return {
+            "ok": False,
+            "message": "缺少拟写入脑图，无法生成 diff。",
+            "draftId": draft_id,
+        }
+    diff = operation_runtime.build_mindmap_diff(proposed, current, target=target)
+    diff_operation_plan = operation_runtime.build_mindmap_diff_operation_plan(
+        diff,
+        excluded_paths=payload.get("excludedMindmapPaths") if isinstance(payload.get("excludedMindmapPaths"), list) else [],
+    )
+    summary = diff.get("summary") if isinstance(diff.get("summary"), dict) else {}
+    reply = (
+        "脑图 Diff 预览\n"
+        f"新增 {summary.get('createCount', 0)} / 更新 {summary.get('updateCount', 0)} / "
+        f"合并 {summary.get('mergeCount', 0)} / 重复 {summary.get('duplicateCount', 0)}\n"
+        f"拟写入节点 {summary.get('proposedCount', 0)}，当前树节点 {summary.get('currentCount', 0)}。"
+    )
+    return {
+        "ok": True,
+        "message": "已生成脑图 Diff 预览。",
+        "reply": reply,
+        "draftId": draft_id,
+        "mindmapDiff": diff,
+        "mindmapDiffOperationPlan": diff_operation_plan,
+        "mindmapTreeCache": {
+            "schema": str(tree_cache.get("schema") or ""),
+            "sourceEvent": str(tree_cache.get("sourceEvent") or ""),
+            "nodeCount": int(tree_cache.get("nodeCount") or 0),
+            "updatedAt": str(tree_cache.get("updatedAt") or ""),
+        } if tree_cache else {},
+    }
+
+
+def workflow_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = runtime_settings()
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    native_caps = latest_native_api_capabilities(topic_id, book_md5)
+    mn_api = mn_api_status_fields(settings).get("mnApi", {})
+    preview = workflow_engine.build_workflow_preview(payload, native_caps=native_caps, mn_api=mn_api)
+    step_lines = "\n".join(
+        f"{index}. {step.get('title') or step.get('action')}"
+        for index, step in enumerate(preview.get("steps") or [], start=1)
+        if isinstance(step, dict)
+    )
+    return {
+        "ok": True,
+        "message": f"已生成工作流预览：{preview['title']}",
+        "reply": (
+            f"工作流：{preview['title']}\n"
+            f"状态：{preview['status']}\n"
+            f"步骤数：{preview['stepCount']}\n\n"
+            f"{step_lines}"
+        ).strip(),
+        "workflow": preview,
+        **mn_api_status_fields(settings),
+    }
+
+
+def agent_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = runtime_settings()
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    native_caps = latest_native_api_capabilities(topic_id, book_md5)
+    mn_api = mn_api_status_fields(settings).get("mnApi", {})
+    workflow = workflow_engine.build_workflow_preview(payload, native_caps=native_caps, mn_api=mn_api)
+    knowledge = knowledge_index.status(topic_id, book_md5)
+    dry_run: dict[str, Any] = {}
+    draft_id = str(payload.get("draftId") or payload.get("id") or "").strip()
+    if draft_id:
+        preview = operation_plan_preview(payload)
+        dry_run = preview.get("dryRun") if isinstance(preview.get("dryRun"), dict) else {}
+    operation = agent_workbench.build_agent_operation(
+        payload,
+        workflow=workflow,
+        knowledge=knowledge,
+        dry_run=dry_run,
+        settings=settings,
+    )
+    focus = operation.get("object") if isinstance(operation.get("object"), dict) else {}
+    policy = operation.get("operationPolicy") if isinstance(operation.get("operationPolicy"), dict) else {}
+    risk = policy.get("risk") if isinstance(policy.get("risk"), dict) else {}
+    return {
+        "ok": True,
+        "message": "已生成 Agent 操作计划。",
+        "reply": (
+            "Agent 操作计划\n"
+            f"对象：{focus.get('kind')} / {focus.get('title')}\n"
+            f"工作流：{workflow.get('title')} / {workflow.get('status')}\n"
+            f"写入风险：{risk.get('status')}\n"
+            "后续写入必须经过 dry-run 和接受/拒绝确认。"
+        ),
+        "agentOperation": operation,
+        "workflow": workflow,
+        "knowledge": knowledge,
+        "dryRun": dry_run,
+        **mn_api_status_fields(settings),
+    }
+
+
+WORKFLOW_QUEUEABLE_RAW_ACTIONS = {
+    "chat",
+    "generate_full_reading",
+    "generate_mindmap",
+    "generate_card",
+    "expand_node",
+    "reorganize_mindmap",
+}
+WORKFLOW_DIRECT_ACTIONS = {"request_pdf_cache", "mn_read_tree"}
+WORKFLOW_CONFIRMATION_ACTIONS = {"write_draft", "operation_plan_preview", "ai_edit_transaction_get"}
+
+
+def workflow_run_path(run_id: str) -> Path:
+    clean_id = re.sub(r"[^A-Za-z0-9_-]", "", str(run_id or ""))[:80]
+    return WORKFLOW_RUNS_DIR / f"{clean_id}.json"
+
+
+def workflow_run_summary(run: dict[str, Any]) -> dict[str, Any]:
+    steps = run.get("steps") if isinstance(run.get("steps"), list) else []
+    queued = [step for step in steps if isinstance(step, dict) and step.get("status") == "queued"]
+    waiting = [step for step in steps if isinstance(step, dict) and step.get("status") == "waiting_confirmation"]
+    skipped = [step for step in steps if isinstance(step, dict) and step.get("status") == "manual"]
+    object_ref = run.get("objectRef") if isinstance(run.get("objectRef"), dict) else {}
+    external_request = run.get("externalRequest") if isinstance(run.get("externalRequest"), dict) else {}
+    return {
+        "id": str(run.get("id") or ""),
+        "workflowId": str(run.get("workflowId") or ""),
+        "title": str(run.get("title") or ""),
+        "status": str(run.get("status") or "unknown"),
+        "topicid": str(run.get("topicid") or ""),
+        "bookmd5": str(run.get("bookmd5") or ""),
+        "requestId": str(external_request.get("requestId") or ""),
+        "externalCaller": str(external_request.get("caller") or ""),
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "mnObjectKind": str(object_ref.get("kind") or ""),
+        "mnObjectTitle": str(object_ref.get("title") or ""),
+        "queuedCount": len(queued),
+        "waitingConfirmationCount": len(waiting),
+        "manualCount": len(skipped),
+        "createdAt": str(run.get("createdAt") or ""),
+        "updatedAt": str(run.get("updatedAt") or ""),
+    }
+
+
+def workflow_run_status_tone(status: Any) -> str:
+    clean_status = str(status or "unknown").strip().lower()
+    if clean_status in {"failed", "blocked", "cancelled"}:
+        return "block"
+    if clean_status in {"waiting_confirmation", "manual", "pending", "partial"}:
+        return "warn"
+    if clean_status in {"queued", "complete", "completed", "done", "saved"}:
+        return "pass"
+    return "idle"
+
+
+def workflow_step_retryable(step: dict[str, Any]) -> bool:
+    status = str(step.get("status") or "").strip().lower()
+    action = str(step.get("action") or "")
+    if status not in {"failed", "blocked"}:
+        return False
+    return action in WORKFLOW_DIRECT_ACTIONS or action in WORKFLOW_QUEUEABLE_RAW_ACTIONS
+
+
+def workflow_step_next_action(step: dict[str, Any]) -> str:
+    action = str(step.get("action") or "")
+    status = str(step.get("status") or "").strip().lower()
+    if workflow_step_retryable(step):
+        return "retry_step"
+    if status == "queued":
+        return "watch_queue"
+    if status == "waiting_confirmation":
+        return "confirm_or_reject"
+    if status in {"failed", "blocked"}:
+        return "inspect_error"
+    if status == "manual" and action == "operation_plan_preview":
+        return "review_dry_run"
+    if status == "manual" and action == "ai_edit_transaction_get":
+        return "verify_transaction"
+    if status == "manual":
+        return "manual_execute"
+    if status == "cancelled":
+        return "stopped"
+    if status == "pending":
+        return "wait"
+    return "inspect"
+
+
+def workflow_run_inspector(run: dict[str, Any]) -> dict[str, Any]:
+    summary = workflow_run_summary(run)
+    raw_steps = run.get("steps") if isinstance(run.get("steps"), list) else []
+    steps: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    confirmations: list[dict[str, Any]] = []
+    for step in raw_steps:
+        if not isinstance(step, dict):
+            continue
+        status = str(step.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        step_id = str(step.get("id") or step.get("stepId") or step.get("action") or "")
+        retryable = workflow_step_retryable(step)
+        inspected = {
+            "stepId": step_id,
+            "index": int(step.get("index") or (len(steps) + 1)),
+            "title": str(step.get("title") or step.get("action") or "工作流步骤"),
+            "action": str(step.get("action") or ""),
+            "status": status,
+            "statusTone": workflow_run_status_tone(status),
+            "writes": bool(step.get("writes")),
+            "requiresConfirmation": bool(step.get("writes")) or status == "waiting_confirmation",
+            "queueId": str(step.get("queueId") or ""),
+            "message": str(step.get("message") or ""),
+            "nextAction": workflow_step_next_action(step),
+            "retryable": retryable,
+            "retryAction": {
+                "action": "workflow_retry_step",
+                "workflowRunId": str(summary.get("id") or ""),
+                "workflowStepId": step_id,
+            } if retryable else {},
+        }
+        steps.append(inspected)
+        if status == "waiting_confirmation":
+            confirmations.append(
+                {
+                    "stepId": step_id,
+                    "title": inspected["title"],
+                    "action": inspected["action"],
+                    "message": inspected["message"],
+                    "nextAction": inspected["nextAction"],
+                    "statusTone": inspected["statusTone"],
+                }
+            )
+    step_counts = {
+        "total": len(steps),
+        "queued": status_counts.get("queued", 0),
+        "waitingConfirmation": status_counts.get("waiting_confirmation", 0),
+        "manual": status_counts.get("manual", 0),
+        "blocked": status_counts.get("blocked", 0),
+        "failed": status_counts.get("failed", 0),
+        "pending": status_counts.get("pending", 0),
+        "completed": status_counts.get("completed", 0) + status_counts.get("complete", 0) + status_counts.get("done", 0),
+    }
+    return {
+        "schema": "codex.mn.workflowRunInspector.v1",
+        "workflowRunId": str(summary.get("id") or ""),
+        "workflowId": str(summary.get("workflowId") or ""),
+        "title": str(summary.get("title") or ""),
+        "status": str(summary.get("status") or "unknown"),
+        "statusTone": workflow_run_status_tone(summary.get("status")),
+        "objectRef": {
+            "objectId": str(summary.get("mnObjectId") or ""),
+            "kind": str(summary.get("mnObjectKind") or ""),
+            "title": str(summary.get("mnObjectTitle") or ""),
+        },
+        "stepCounts": step_counts,
+        "confirmations": confirmations,
+        "steps": steps,
+        "summaryText": (
+            f"{step_counts['total']} steps / queued {step_counts['queued']} / "
+            f"confirm {step_counts['waitingConfirmation']} / manual {step_counts['manual']}"
+        ),
+    }
+
+
+def workflow_recalculate_status(steps: list[dict[str, Any]]) -> str:
+    statuses = {str(step.get("status") or "") for step in steps if isinstance(step, dict)}
+    if statuses.intersection({"failed", "blocked"}):
+        return "partial"
+    if "waiting_confirmation" in statuses:
+        return "waiting_confirmation"
+    if "queued" in statuses:
+        return "queued"
+    if statuses.intersection({"pending", "manual"}):
+        return "pending"
+    return "complete"
+
+
+def load_workflow_run(run_id: str) -> dict[str, Any]:
+    clean_id = re.sub(r"[^A-Za-z0-9_-]", "", str(run_id or ""))[:80]
+    if not clean_id:
+        return {"ok": False, "message": "缺少 workflow run id。"}
+    run = read_json_file(workflow_run_path(clean_id), {})
+    if not isinstance(run, dict) or not run:
+        return {"ok": False, "message": "工作流不存在。", "id": clean_id}
+    return {
+        "ok": True,
+        "message": "已读取工作流。",
+        "workflowRun": run,
+        "summary": workflow_run_summary(run),
+        "runInspector": workflow_run_inspector(run),
+    }
+
+
+def workflow_retry_step(payload: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(payload.get("workflowRunId") or payload.get("id") or "")
+    step_id = str(payload.get("workflowStepId") or payload.get("stepId") or "").strip()
+    loaded = load_workflow_run(run_id)
+    if not loaded.get("ok"):
+        return loaded
+    if not step_id:
+        return {"ok": False, "message": "缺少 workflow step id。"}
+    run = loaded["workflowRun"]
+    steps = run.get("steps") if isinstance(run.get("steps"), list) else []
+    target: dict[str, Any] | None = None
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        candidate_id = str(step.get("id") or step.get("stepId") or step.get("action") or "")
+        candidate_index = str(step.get("index") or "")
+        if step_id in {candidate_id, candidate_index}:
+            target = step
+            break
+    if target is None:
+        return {"ok": False, "message": "未找到 workflow step。", "workflowRun": run, "summary": workflow_run_summary(run)}
+    action = str(target.get("action") or "")
+    if action in WORKFLOW_CONFIRMATION_ACTIONS or target.get("writes"):
+        return {
+            "ok": False,
+            "message": "确认或写入步骤不能通过重试自动执行；请在 AI 编辑确认里接受或拒绝。",
+            "workflowRun": run,
+            "summary": workflow_run_summary(run),
+            "runInspector": workflow_run_inspector(run),
+        }
+    if not workflow_step_retryable(target):
+        return {
+            "ok": False,
+            "message": "该 workflow step 当前不可重试。",
+            "workflowRun": run,
+            "summary": workflow_run_summary(run),
+            "runInspector": workflow_run_inspector(run),
+        }
+
+    topic_id = str(run.get("topicid") or normalize_topic_id(payload))
+    book_md5 = str(run.get("bookmd5") or normalize_book_md5(payload))
+    object_ref = run.get("objectRef") if isinstance(run.get("objectRef"), dict) else {}
+    workflow = run.get("preview") if isinstance(run.get("preview"), dict) else {
+        "id": str(run.get("workflowId") or ""),
+        "title": str(run.get("title") or ""),
+    }
+    retry_payload = {
+        **payload,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "prompt": str(run.get("prompt") or payload.get("prompt") or ""),
+        "source": "workflow_retry_step",
+        "workflowRunId": str(run.get("id") or run_id),
+        "mnObject": run.get("mnObject") if isinstance(run.get("mnObject"), dict) else {},
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "mnObjectKind": str(object_ref.get("kind") or ""),
+    }
+
+    queued_records: list[dict[str, Any]] = []
+    direct_results: list[dict[str, Any]] = []
+    if action in WORKFLOW_DIRECT_ACTIONS:
+        if action == "request_pdf_cache":
+            result = request_pdf_cache(retry_payload)
+        else:
+            result = request_mindmap_tree(retry_payload)
+        target["status"] = "queued" if result.get("ok") else "failed"
+        target["message"] = str(result.get("message") or "")
+        if isinstance(result.get("queued"), dict):
+            target["queueId"] = str(result["queued"].get("id") or "")
+            queued_records.append(result["queued"])
+        direct_results.append({"stepId": step_id, "action": action, "ok": bool(result.get("ok")), "message": result.get("message")})
+    elif action in WORKFLOW_QUEUEABLE_RAW_ACTIONS:
+        permission_error = permission_error_for_action(action)
+        if permission_error:
+            target["status"] = "blocked"
+            target["message"] = permission_error
+            return {
+                "ok": False,
+                "message": permission_error,
+                "workflowRun": run,
+                "summary": workflow_run_summary(run),
+                "runInspector": workflow_run_inspector(run),
+            }
+        command = {
+            "rawAction": action,
+            "prompt": workflow_step_prompt(retry_payload, workflow, target),
+            "source": "workflow_retry_step",
+            "_queue_raw": True,
+            "workflowRunId": str(run.get("id") or run_id),
+            "workflowStepId": str(target.get("id") or step_id),
+            "mnObjectId": str(object_ref.get("objectId") or ""),
+            "mnObjectKind": str(object_ref.get("kind") or ""),
+            "message": f"workflow retry {workflow.get('id') or run.get('workflowId')} step {target.get('id') or action}",
+        }
+        queued = enqueue_command({**retry_payload, "command": command, "_queue_raw": True, "message": command["message"]})
+        target["status"] = "queued" if queued.get("ok") else "failed"
+        target["message"] = str(queued.get("message") or "")
+        if isinstance(queued.get("queued"), dict):
+            target["queueId"] = str(queued["queued"].get("id") or "")
+            queued_records.append(queued["queued"])
+    else:
+        return {"ok": False, "message": "该 workflow step 不是可自动执行步骤。", "workflowRun": run}
+
+    target["retriedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    target["retryCount"] = int(target.get("retryCount") or 0) + 1
+    target["lastRetrySource"] = "workflow_retry_step"
+    run["status"] = workflow_recalculate_status([step for step in steps if isinstance(step, dict)])
+    run["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    write_json_file(workflow_run_path(str(run.get("id") or run_id)), run)
+    inspector = workflow_run_inspector(run)
+    retried_step = next((step for step in inspector.get("steps", []) if isinstance(step, dict) and step.get("stepId") == str(target.get("id") or step_id)), {})
+    return {
+        "ok": target.get("status") == "queued",
+        "message": "已重试 workflow step。" if target.get("status") == "queued" else str(target.get("message") or "workflow step 重试失败。"),
+        "workflowRun": run,
+        "summary": workflow_run_summary(run),
+        "runInspector": inspector,
+        "retriedStep": retried_step,
+        "queued": queued_records,
+        "directResults": direct_results,
+        "queue": queue_status_payload(topic_id, book_md5),
+    }
+
+
+def clean_external_gateway_id(value: Any) -> str:
+    text = str(value or "").strip()
+    clean = re.sub(r"[^A-Za-z0-9._-]", "", text)[:120]
+    return clean or marginnote_api_adapter.generate_request_id("ext")
+
+
+def external_gateway_request_path(request_id: str) -> Path:
+    return EXTERNAL_GATEWAY_DIR / f"{clean_external_gateway_id(request_id)}.json"
+
+
+def external_gateway_callback(payload: dict[str, Any]) -> dict[str, str]:
+    success = str(payload.get("x-success") or payload.get("xSuccess") or payload.get("successCallback") or "").strip()
+    error_url = str(payload.get("x-error") or payload.get("xError") or payload.get("errorCallback") or "").strip()
+    base = str(payload.get("callbackBaseUrl") or "").strip()
+    if base and (not success or not error_url):
+        try:
+            normalized = marginnote_api_adapter.normalize_callback_base_url(base)
+        except ValueError:
+            normalized = ""
+        if normalized:
+            success = success or f"{normalized}/success"
+            error_url = error_url or f"{normalized}/error"
+    return {"success": success, "error": error_url, "status": "pending" if (success or error_url) else "not_configured"}
+
+
+def external_gateway_base_record(payload: dict[str, Any], request_id: str) -> dict[str, Any]:
+    settings = runtime_settings()
+    mn_object = payload.get("mnObject") if isinstance(payload.get("mnObject"), dict) else agent_workbench.build_mn_object(payload)
+    object_ref = {
+        "objectId": str(mn_object.get("objectId") or ""),
+        "kind": str(mn_object.get("kind") or ""),
+        "title": str(mn_object.get("title") or ""),
+        "sourceRef": mn_object.get("sourceRef") if isinstance(mn_object.get("sourceRef"), dict) else {},
+    }
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    return {
+        "schema": "codex.mn.externalGatewayRequest.v1",
+        "requestId": request_id,
+        "caller": str(payload.get("caller") or payload.get("source") or "external")[:120],
+        "permission": str(settings.get("permission") or "notes"),
+        "requestedAction": "workflow_start",
+        "workflowId": str(payload.get("workflowId") or ""),
+        "topicid": normalize_topic_id(payload),
+        "bookmd5": normalize_book_md5(payload),
+        "objectRef": object_ref,
+        "contextPolicy": {
+            "contextScope": str(payload.get("contextScope") or settings.get("defaultContextScope") or "auto"),
+            "source": "external_gateway",
+        },
+        "callback": external_gateway_callback(payload),
+        "stage": "received",
+        "result": {},
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def write_external_gateway_record(record: dict[str, Any]) -> dict[str, Any]:
+    record = dict(record)
+    record["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    write_json_file(external_gateway_request_path(str(record.get("requestId") or "")), record)
+    return record
+
+
+def external_gateway_request_status(payload: dict[str, Any]) -> dict[str, Any]:
+    request_id = clean_external_gateway_id(payload.get("requestId") or payload.get("id") or "")
+    record = read_json_file(external_gateway_request_path(request_id), {})
+    if not isinstance(record, dict) or not record:
+        return {"ok": False, "message": "未找到外部自动化请求。", "requestId": request_id}
+    return {"ok": True, "message": "已读取外部自动化请求。", "externalGateway": record}
+
+
+def external_gateway_callback_update(payload: dict[str, Any]) -> dict[str, Any]:
+    request_id = clean_external_gateway_id(payload.get("requestId") or payload.get("id") or "")
+    path = external_gateway_request_path(request_id)
+    record = read_json_file(path, {})
+    if not isinstance(record, dict) or not record:
+        return {"ok": False, "message": "未找到外部自动化请求，无法记录回调。", "requestId": request_id}
+
+    raw_status = str(payload.get("callbackStatus") or payload.get("status") or "").strip().lower()
+    if raw_status in {"ok", "done", "complete", "completed"}:
+        callback_status = "success"
+    elif raw_status in {"fail", "failed", "failure"}:
+        callback_status = "error"
+    elif raw_status in {"success", "error"}:
+        callback_status = raw_status
+    else:
+        callback_status = "unknown"
+
+    callback_payload = payload.get("payload")
+    if callback_payload is None:
+        callback_payload = payload.get("result") if "result" in payload else {}
+    if not isinstance(callback_payload, dict):
+        callback_payload = {"value": callback_payload}
+
+    callback = record.get("callback") if isinstance(record.get("callback"), dict) else {}
+    history = callback.get("history") if isinstance(callback.get("history"), list) else []
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    event = {
+        "status": callback_status,
+        "message": str(payload.get("message") or ""),
+        "payload": callback_payload,
+        "receivedAt": now,
+    }
+    callback = {
+        **callback,
+        "status": callback_status,
+        "message": event["message"],
+        "payload": callback_payload,
+        "receivedAt": now,
+        "receivedCount": len(history) + 1,
+        "history": [*history, event],
+    }
+    record = {
+        **record,
+        "stage": f"callback_{callback_status}" if callback_status in {"success", "error"} else "callback_received",
+        "callback": callback,
+        "result": {
+            **(record.get("result") if isinstance(record.get("result"), dict) else {}),
+            "callbackStatus": callback_status,
+            "callbackMessage": event["message"],
+        },
+    }
+    record = write_external_gateway_record(record)
+    return {"ok": True, "message": "已记录外部自动化回调。", "externalGateway": record}
+
+
+def external_gateway_start_workflow(payload: dict[str, Any]) -> dict[str, Any]:
+    request_id = clean_external_gateway_id(payload.get("requestId") or payload.get("_request_id") or "")
+    record = write_external_gateway_record(external_gateway_base_record(payload, request_id))
+    run_payload = {
+        **payload,
+        "source": "external_gateway",
+        "requestId": request_id,
+        "externalRequest": {
+            "requestId": record["requestId"],
+            "caller": record["caller"],
+            "permission": record["permission"],
+            "callback": record["callback"],
+        },
+    }
+    result = workflow_start(run_payload)
+    workflow_run = result.get("workflowRun") if isinstance(result.get("workflowRun"), dict) else {}
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    record = {
+        **record,
+        "stage": "workflow_started" if result.get("ok") else "failed",
+        "workflowRunId": str(summary.get("id") or workflow_run.get("id") or ""),
+        "result": {
+            "ok": bool(result.get("ok")),
+            "message": str(result.get("message") or ""),
+            "workflowStatus": str(summary.get("status") or workflow_run.get("status") or ""),
+            "queuedCount": int(summary.get("queuedCount") or 0),
+            "waitingConfirmationCount": int(summary.get("waitingConfirmationCount") or 0),
+        },
+    }
+    record = write_external_gateway_record(record)
+    result["externalGateway"] = record
+    result["gatewayLedger"] = {"path": str(external_gateway_request_path(request_id)), "requestId": request_id}
+    return result
+
+
+def workflow_step_prompt(payload: dict[str, Any], workflow: dict[str, Any], step: dict[str, Any]) -> str:
+    base_prompt = str(payload.get("prompt") or payload.get("title") or workflow.get("title") or "").strip()
+    title = str(step.get("title") or step.get("action") or "工作流步骤")
+    parts = [
+        f"工作流：{workflow.get('title') or workflow.get('id')}",
+        f"当前步骤：{title}",
+        base_prompt,
+        "请只完成当前步骤，输出要结构化、可追溯，并适合后续转换为 MarginNote 卡片或脑图草稿。",
+    ]
+    return "\n\n".join(part for part in parts if part).strip()[:4200]
+
+
+def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
+    preview_result = workflow_preview(payload)
+    workflow = preview_result.get("workflow") if isinstance(preview_result.get("workflow"), dict) else {}
+    if not workflow:
+        return {"ok": False, "message": "无法启动工作流：缺少 workflow preview。"}
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "无法启动工作流：缺少 topicid。"}
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    run_id = hashlib.sha256(f"{now}|{uuid.uuid4()}|{workflow.get('id')}".encode("utf-8")).hexdigest()[:20]
+    provided_mn_object = payload.get("mnObject") if isinstance(payload.get("mnObject"), dict) else {}
+    mn_object = provided_mn_object if provided_mn_object.get("objectId") else agent_workbench.build_mn_object(payload)
+    object_ref = {
+        "objectId": str(mn_object.get("objectId") or ""),
+        "kind": str(mn_object.get("kind") or ""),
+        "title": str(mn_object.get("title") or ""),
+        "sourceRef": mn_object.get("sourceRef") if isinstance(mn_object.get("sourceRef"), dict) else {},
+    }
+    run_steps: list[dict[str, Any]] = []
+    queued_records: list[dict[str, Any]] = []
+    direct_results: list[dict[str, Any]] = []
+    waiting_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(workflow.get("steps") if isinstance(workflow.get("steps"), list) else [], start=1):
+        if not isinstance(step, dict):
+            continue
+        action = str(step.get("action") or "")
+        step_record = {
+            **step,
+            "index": index,
+            "status": "pending",
+            "queueId": "",
+            "message": "",
+        }
+        if action in WORKFLOW_DIRECT_ACTIONS:
+            if action == "request_pdf_cache":
+                result = request_pdf_cache({**payload, "source": "workflow_start", "workflowRunId": run_id, "mnObjectId": object_ref["objectId"]})
+            else:
+                result = request_mindmap_tree({**payload, "source": "workflow_start", "workflowRunId": run_id, "mnObjectId": object_ref["objectId"]})
+            step_record["status"] = "queued" if result.get("ok") else "failed"
+            step_record["message"] = str(result.get("message") or "")
+            if isinstance(result.get("queued"), dict):
+                step_record["queueId"] = str(result["queued"].get("id") or "")
+                queued_records.append(result["queued"])
+            direct_results.append({"stepId": step.get("id"), "action": action, "ok": bool(result.get("ok")), "message": result.get("message")})
+        elif action in WORKFLOW_QUEUEABLE_RAW_ACTIONS:
+            permission_error = permission_error_for_action(action)
+            if permission_error:
+                step_record["status"] = "blocked"
+                step_record["message"] = permission_error
+                run_steps.append(step_record)
+                continue
+            command = {
+                "rawAction": action,
+                "prompt": workflow_step_prompt(payload, workflow, step),
+                "source": "workflow_start",
+                "_queue_raw": True,
+                "workflowRunId": run_id,
+                "workflowStepId": str(step.get("id") or ""),
+                "mnObjectId": object_ref["objectId"],
+                "mnObjectKind": object_ref["kind"],
+                "message": f"workflow {workflow.get('id')} step {step.get('id') or action}",
+            }
+            queued = enqueue_command({**payload, "command": command, "_queue_raw": True, "message": command["message"]})
+            step_record["status"] = "queued" if queued.get("ok") else "failed"
+            step_record["message"] = str(queued.get("message") or "")
+            if isinstance(queued.get("queued"), dict):
+                step_record["queueId"] = str(queued["queued"].get("id") or "")
+                queued_records.append(queued["queued"])
+        elif action in WORKFLOW_CONFIRMATION_ACTIONS or step.get("writes"):
+            step_record["status"] = "waiting_confirmation" if step.get("writes") else "manual"
+            step_record["message"] = "该步骤需要上一步草稿或用户确认，未自动入队。"
+            waiting_steps.append(step_record)
+        else:
+            step_record["status"] = "manual"
+            step_record["message"] = "当前版本暂不自动执行该步骤。"
+        run_steps.append(step_record)
+    run_status = "waiting_confirmation" if waiting_steps else "queued"
+    if any(step.get("status") in {"failed", "blocked"} for step in run_steps):
+        run_status = "partial"
+    run = {
+        "id": run_id,
+        "schema": "codex.mn.workflowRun.v1",
+        "workflowId": str(workflow.get("id") or ""),
+        "title": str(workflow.get("title") or ""),
+        "status": run_status,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "mnObject": mn_object,
+        "objectRef": object_ref,
+        "createdAt": now,
+        "updatedAt": now,
+        "prompt": str(payload.get("prompt") or ""),
+        "preview": workflow,
+        "steps": run_steps,
+    }
+    if isinstance(payload.get("externalRequest"), dict):
+        run["externalRequest"] = payload["externalRequest"]
+    WORKFLOW_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    write_json_file(workflow_run_path(run_id), run)
+    summary = workflow_run_summary(run)
+    return {
+        "ok": True,
+        "message": f"已启动工作流：{workflow.get('title')}",
+        "reply": (
+            f"已启动工作流：{workflow.get('title')}\n"
+            f"已入队步骤：{summary['queuedCount']}\n"
+            f"等待确认步骤：{summary['waitingConfirmationCount']}\n"
+            "写入类步骤不会自动执行；生成草稿后仍需要接受/拒绝。"
+        ),
+        "workflowRun": run,
+        "summary": summary,
+        "queued": queued_records,
+        "directResults": direct_results,
+        "queue": queue_status_payload(topic_id, book_md5),
+    }
+
+
+def workflow_list(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    requested_object_ref = object_ref_from_mapping(payload)
+    requested_object_id = str(requested_object_ref.get("objectId") or "")
+    runs: list[dict[str, Any]] = []
+    for path in sorted(WORKFLOW_RUNS_DIR.glob("*.json"), reverse=True):
+        run = read_json_file(path, {})
+        if not isinstance(run, dict) or not run:
+            continue
+        if topic_id and str(run.get("topicid") or "") != topic_id:
+            continue
+        if book_md5 and str(run.get("bookmd5") or "") != book_md5:
+            continue
+        summary = workflow_run_summary(run)
+        if requested_object_id and str(summary.get("mnObjectId") or "") != requested_object_id:
+            continue
+        runs.append(summary)
+        if len(runs) >= int(payload.get("limit") or 20):
+            break
+    return {
+        "ok": True,
+        "message": f"已读取 {len(runs)} 个工作流。",
+        "workflowRuns": runs,
+        "runCount": len(runs),
+        "latestStatus": str(runs[0].get("status") or "none") if runs else "none",
+        "workflowTemplates": workflow_engine.list_workflow_templates(),
+    }
+
+
+def workflow_cancel(payload: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(payload.get("workflowRunId") or payload.get("id") or "")
+    loaded = load_workflow_run(run_id)
+    if not loaded.get("ok"):
+        return loaded
+    run = loaded["workflowRun"]
+    run["status"] = "cancelled"
+    run["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    write_json_file(workflow_run_path(str(run.get("id") or run_id)), run)
+    return {"ok": True, "message": "工作流已标记为取消。", "workflowRun": run, "summary": workflow_run_summary(run)}
+
+
+def knowledge_index_ingest_context(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    entities = payload.get("entities") if isinstance(payload.get("entities"), list) else []
+    if entities:
+        result = knowledge_index.ingest_entities(
+            entities,
+            topicid=topic_id,
+            bookmd5=book_md5,
+            source=str(payload.get("source") or "marginnote-entities"),
+            metadata={
+                "contextScope": str(payload.get("contextScope") or payload.get("scope") or ""),
+                "documentTitle": str(payload.get("documentTitle") or payload.get("docTitle") or ""),
+                "selectedNoteId": str(payload.get("selectedNoteId") or payload.get("noteid") or ""),
+            },
+        )
+        if result.get("ok"):
+            result["reply"] = f"已加入知识索引：{result.get('entityCount') or 0} 个结构化实体。"
+        return result
+    context_text = (
+        str(payload.get("text") or "").strip()
+        or selected_context(payload)
+        or str(payload.get("prompt") or "").strip()
+    )
+    title = (
+        str(payload.get("title") or "").strip()
+        or str(payload.get("documentTitle") or payload.get("docTitle") or "").strip()
+        or str(payload.get("selectedNoteTitle") or "").strip()
+        or "当前 MarginNote 上下文"
+    )
+    result = knowledge_index.ingest_entry(
+        kind=str(payload.get("kind") or "context"),
+        title=title,
+        text=context_text,
+        topicid=topic_id,
+        bookmd5=book_md5,
+        source=str(payload.get("source") or "marginnote-context"),
+        metadata={
+            "contextScope": str(payload.get("contextScope") or payload.get("scope") or ""),
+            "documentTitle": str(payload.get("documentTitle") or payload.get("docTitle") or ""),
+            "selectedNoteId": str(payload.get("selectedNoteId") or payload.get("noteid") or ""),
+        },
+    )
+    if result.get("ok"):
+        result["reply"] = f"已加入知识索引：{result['entry']['title']}"
+    return result
+
+
+def knowledge_index_search_action(payload: dict[str, Any]) -> dict[str, Any]:
+    result = knowledge_index.search(
+        str(payload.get("query") or payload.get("prompt") or ""),
+        topicid=normalize_topic_id(payload),
+        bookmd5=normalize_book_md5(payload),
+        limit=int(payload.get("limit") or 8),
+    )
+    if result.get("ok"):
+        lines = []
+        for item in result.get("matches", []):
+            if not isinstance(item, dict):
+                continue
+            source_ref = item.get("sourceRef") if isinstance(item.get("sourceRef"), dict) else {}
+            source_bits = []
+            if item.get("noteId"):
+                source_bits.append(f"noteId={item.get('noteId')}")
+            if source_ref.get("page"):
+                source_bits.append(f"p.{source_ref.get('page')}")
+            if source_ref.get("quote"):
+                source_bits.append(f"quote={source_ref.get('quote')}")
+            suffix = (" / " + " / ".join(source_bits)) if source_bits else ""
+            lines.append(f"- {item.get('title')} [{item.get('kind')}]：{item.get('snippet')}{suffix}")
+        result["reply"] = "知识索引搜索结果：\n" + ("\n".join(lines) if lines else "未命中。")
+    return result
+
+
+def review_queue_store() -> dict[str, Any]:
+    data = read_json_file(REVIEW_QUEUE_PATH, {})
+    if not isinstance(data, dict):
+        data = {}
+    items = data.get("items") if isinstance(data.get("items"), list) else []
+    return {"schema": "codex.mn.reviewQueue.v1", "items": items}
+
+
+def write_review_queue_store(data: dict[str, Any]) -> None:
+    REVIEW_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    items = data.get("items") if isinstance(data.get("items"), list) else []
+    write_json_file(REVIEW_QUEUE_PATH, {"schema": "codex.mn.reviewQueue.v1", "items": items})
+
+
+def review_queue_item_id(topic_id: str, book_md5: str, draft_id: str, index: int, card: dict[str, Any]) -> str:
+    basis = "|".join(
+        [
+            topic_id,
+            book_md5,
+            draft_id,
+            str(index),
+            str(card.get("codexId") or ""),
+            str(card.get("title") or ""),
+            str(card.get("reviewPrompt") or ""),
+        ]
+    )
+    return "review:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:24]
+
+
+def review_queue_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    due_count = len([item for item in items if str(item.get("state") or "") in {"new", "due"}])
+    type_counts: dict[str, int] = {}
+    for item in items:
+        card_type = str(item.get("cardType") or "concept")
+        type_counts[card_type] = type_counts.get(card_type, 0) + 1
+    return {
+        "schema": "codex.mn.reviewQueueSummary.v1",
+        "totalCount": len(items),
+        "dueCount": due_count,
+        "typeCounts": type_counts,
+    }
+
+
+def filter_review_queue_items(items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    requested_object = object_ref_from_mapping(payload)
+    requested_object_id = str(requested_object.get("objectId") or payload.get("mnObjectId") or "").strip()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if topic_id and str(item.get("topicid") or "") != topic_id:
+            continue
+        if book_md5 and str(item.get("bookmd5") or "") != book_md5:
+            continue
+        if requested_object_id and str(item.get("mnObjectId") or "") != requested_object_id:
+            continue
+        out.append(item)
+    return out
+
+
+def review_queue_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.reviewQueue.v1",
+        "items": items,
+        "summary": review_queue_summary(items),
+    }
+
+
+def review_queue_list(payload: dict[str, Any]) -> dict[str, Any]:
+    store = review_queue_store()
+    filtered = filter_review_queue_items([item for item in store.get("items", []) if isinstance(item, dict)], payload)
+    limit = int(payload.get("limit") or 50)
+    filtered = filtered[: max(1, min(limit, 200))]
+    queue = review_queue_payload(filtered)
+    return {
+        "ok": True,
+        "message": f"已读取 {len(filtered)} 张复习卡。",
+        "reviewQueue": queue,
+        "summary": queue["summary"],
+        "items": filtered,
+    }
+
+
+def review_queue_add(payload: dict[str, Any]) -> dict[str, Any]:
+    draft_id = str(payload.get("draftId") or payload.get("id") or "").strip()
+    if not draft_id:
+        return {"ok": False, "message": "缺少草稿 ID。"}
+    draft = load_draft(draft_id)
+    if not draft.get("ok"):
+        return draft
+    cards = draft.get("cards") if isinstance(draft.get("cards"), list) else []
+    if not cards:
+        return {"ok": False, "message": "草稿没有可加入复习队列的卡片。", "id": draft_id}
+    topic_id = str(payload.get("topicid") or draft.get("topicid") or "")
+    book_md5 = str(payload.get("bookmd5") or draft.get("bookmd5") or "")
+    object_ref = object_ref_from_mapping(payload)
+    if not object_ref_has_identity(object_ref):
+        object_ref = draft.get("mnObject") if isinstance(draft.get("mnObject"), dict) else {}
+    mn_object_id = str(object_ref.get("objectId") or payload.get("mnObjectId") or "").strip()
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    store = review_queue_store()
+    items = [item for item in store.get("items", []) if isinstance(item, dict)]
+    existing_ids = {str(item.get("reviewId") or "") for item in items}
+    added: list[dict[str, Any]] = []
+    duplicate_count = 0
+    for index, raw_card in enumerate(cards, start=1):
+        if not isinstance(raw_card, dict):
+            continue
+        review_id = review_queue_item_id(topic_id, book_md5, draft_id, index, raw_card)
+        if review_id in existing_ids:
+            duplicate_count += 1
+            continue
+        source = raw_card.get("source") if isinstance(raw_card.get("source"), dict) else {}
+        item = {
+            "schema": "codex.mn.reviewQueueItem.v1",
+            "reviewId": review_id,
+            "draftId": draft_id,
+            "cardIndex": index,
+            "topicid": topic_id,
+            "bookmd5": book_md5,
+            "mnObjectId": mn_object_id,
+            "mnObject": object_ref if object_ref_has_identity(object_ref) else {},
+            "title": str(raw_card.get("title") or f"复习卡 {index}"),
+            "cardType": str(raw_card.get("cardType") or raw_card.get("type") or "concept"),
+            "learningGoal": str(raw_card.get("learningGoal") or ""),
+            "reviewPrompt": str(raw_card.get("reviewPrompt") or raw_card.get("title") or ""),
+            "source": source,
+            "state": "new",
+            "dueAt": now,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        items.insert(0, item)
+        existing_ids.add(review_id)
+        added.append(item)
+    write_review_queue_store({"items": items})
+    filtered = filter_review_queue_items(items, payload)
+    queue = review_queue_payload(filtered)
+    return {
+        "ok": True,
+        "message": f"已加入复习队列：新增 {len(added)} 张，重复 {duplicate_count} 张。",
+        "reviewQueue": queue,
+        "summary": queue["summary"],
+        "items": filtered,
+        "addedItems": added,
+        "addedCount": len(added),
+        "duplicateCount": duplicate_count,
     }
 
 
@@ -1417,6 +2662,18 @@ def ai_status_fields(settings: dict[str, str] | None = None) -> dict[str, Any]:
     }
 
 
+def mn_api_status_fields(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    load_env_file()
+    settings = settings or runtime_settings()
+    status = marginnote_api_adapter.adapter_status(settings, get_setting("MN_URL_API_SECRET"))
+    return {
+        "mn_api_backend": status["backend"],
+        "mn_api_backend_label": status["backendLabel"],
+        "mn_url_api_configured": bool(status["urlApiConfigured"]),
+        "mnApi": status,
+    }
+
+
 def codex_cli_auth_detected() -> bool:
     return (HOME / ".codex/auth.json").exists() or (CODEX_LITE_HOME / "auth.json").exists()
 
@@ -1672,6 +2929,416 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def request_mindmap_tree(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "请求读取脑图失败：缺少 topicid。"}
+    target = payload.get("mindmapTarget") if isinstance(payload.get("mindmapTarget"), dict) else {}
+    command = {
+        "nativeAction": "read_mindmap_tree",
+        "message": "请 MN4 插件读取当前脑图或选中子树。",
+        "source": str(payload.get("source") or "request_mindmap_tree"),
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "selectedNoteId": str(payload.get("selectedNoteId") or target.get("selectedNoteId") or ""),
+        "selectedNoteTitle": str(payload.get("selectedNoteTitle") or target.get("selectedNoteTitle") or ""),
+        "targetMode": str(target.get("mode") or payload.get("targetMode") or "selected_or_document_root"),
+        "workflowRunId": str(payload.get("workflowRunId") or ""),
+    }
+    queued = enqueue_command({**payload, "command": command})
+    if not queued.get("ok"):
+        return queued
+    return {
+        "ok": True,
+        "message": "已请求 MN4 插件读取当前脑图树。",
+        "reply": (
+            "已把“读取当前脑图树”命令加入当前 notebook 队列。\n\n"
+            "MN4 插件轮询后会尝试读取当前选中节点或目标脑图，并把结果记录到诊断事件。"
+        ),
+        "queued": queued["queued"],
+        "queue": queue_status_payload(topic_id, book_md5),
+    }
+
+
+def request_mn_object_registry_scan(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "请求扫描 MN 对象失败：缺少 topicid。"}
+    try:
+        limit = max(1, min(int(payload.get("limit") or 200), 1000))
+    except Exception:
+        limit = 200
+    command = {
+        "nativeAction": "scan_mn_objects",
+        "message": "请 MN4 插件扫描当前 notebook 可见对象并写入 MNObject Registry。",
+        "source": str(payload.get("source") or "request_mn_object_registry_scan"),
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "limit": limit,
+        "selectedNoteId": str(payload.get("selectedNoteId") or ""),
+    }
+    queued = enqueue_command({**payload, "command": command})
+    if not queued.get("ok"):
+        return queued
+    return {
+        "ok": True,
+        "message": "已请求 MN4 插件扫描当前 notebook 对象。",
+        "reply": (
+            "已把“扫描 MN 对象”命令加入当前 notebook 队列。\n\n"
+            "MN4 插件轮询后会尽量枚举当前 notebook 中可见的卡片/脑图节点，并把结果写入 MNObject Registry。"
+        ),
+        "queued": queued["queued"],
+        "queue": queue_status_payload(topic_id, book_md5),
+    }
+
+
+def request_mindmap_diff_apply(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "局部应用脑图 Diff 失败：缺少 topicid。"}
+    permission = runtime_settings().get("permission", "notes")
+    if permission == "read_only":
+        return {
+            "ok": False,
+            "message": "局部应用脑图 Diff 失败：当前权限是 read_only，需要 notes 或 full。",
+            "reply": "当前权限是 read_only，不能写入 MarginNote。请在设置页把权限改为 notes 或 full 后再试。",
+            "queue": queue_status_payload(topic_id, book_md5),
+        }
+    plan = payload.get("mindmapDiffOperationPlan")
+    if not isinstance(plan, dict):
+        return {"ok": False, "message": "局部应用脑图 Diff 失败：缺少 mindmapDiffOperationPlan。"}
+    operations = plan.get("operations") if isinstance(plan.get("operations"), list) else []
+    raw_operations = [item for item in operations if isinstance(item, dict)]
+    delete_suggestion_operations = [
+        item
+        for item in raw_operations
+        if str(item.get("mutation") or "") in {"delete_suggest", "delete"}
+        or str(item.get("op") or "") == "suggest_delete_mindmap_node"
+    ]
+    clean_operations = [item for item in raw_operations if item not in delete_suggestion_operations]
+    skipped_delete_suggestion_count = len(delete_suggestion_operations)
+    if not clean_operations:
+        return {
+            "ok": False,
+            "message": (
+                "局部应用脑图 Diff 失败：没有可执行操作。"
+                if not skipped_delete_suggestion_count
+                else "局部应用脑图 Diff 没有可直接执行的非删除操作；删除建议需要二次确认。"
+            ),
+            "applyPlan": {
+                **plan,
+                "operationCount": 0,
+                "operations": [],
+                "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
+                "applyBoundary": {
+                    **(plan.get("applyBoundary") if isinstance(plan.get("applyBoundary"), dict) else {}),
+                    "localApplyStatus": "empty",
+                    "currentApplyPath": "local_operation_queue",
+                    "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
+                },
+            },
+        }
+
+    native_caps = latest_native_api_capabilities(topic_id, book_md5)
+    matrix = native_caps.get("capabilityMatrix") if isinstance(native_caps.get("capabilityMatrix"), dict) else {}
+    blocked: list[dict[str, str]] = []
+    for operation in clean_operations:
+        mutation = str(operation.get("mutation") or "")
+        requirements = operation.get("requires") if isinstance(operation.get("requires"), list) else []
+        for requirement in requirements:
+            requirement_key = str(requirement or "")
+            if not requirement_key or requirement_key == "nativeMindmap":
+                continue
+            capability = matrix.get(requirement_key) if isinstance(matrix.get(requirement_key), dict) else {}
+            if capability.get("ready"):
+                continue
+            blocked.append(
+                {
+                    "opId": str(operation.get("opId") or ""),
+                    "op": str(operation.get("op") or ""),
+                    "mutation": mutation,
+                    "title": str(operation.get("title") or ""),
+                    "requirement": requirement_key,
+                    "reason": str(capability.get("blockedReason") or f"{requirement_key}-unverified"),
+                    "nextStep": str(capability.get("nextStep") or "刷新 MN 原生能力；当前仅稳定支持 create 局部操作。"),
+                }
+            )
+            break
+
+    if blocked:
+        apply_plan = {
+            **plan,
+            "operationCount": len(clean_operations),
+            "operations": clean_operations,
+            "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
+            "applyBoundary": {
+                **(plan.get("applyBoundary") if isinstance(plan.get("applyBoundary"), dict) else {}),
+                "localApplyStatus": "blocked",
+                "currentApplyPath": "local_operation_queue",
+                "blockedOperationCount": len(blocked),
+                "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
+            },
+        }
+        return {
+            "ok": False,
+            "message": f"局部应用脑图 Diff 已阻断：{len(blocked)} 个操作缺少 MN 原生能力。",
+            "reply": (
+                "局部应用脑图 Diff 已阻断。\n\n"
+                f"阻断操作：{len(blocked)}\n"
+                f"首个原因：{blocked[0]['reason']}\n"
+                "请先刷新 MN 原生能力；update/merge/move/delete 不能在未确认能力时执行。"
+            ),
+            "applyPlan": apply_plan,
+            "blockedOperations": blocked,
+            "nativeApiCapabilities": native_caps,
+            "queue": queue_status_payload(topic_id, book_md5),
+        }
+
+    transaction_id = transaction_manager.safe_transaction_id(
+        payload.get("transactionId") or f"mindmap-diff-{uuid.uuid4().hex[:16]}"
+    )
+    apply_plan = {
+        **plan,
+        "transactionId": transaction_id,
+        "operationCount": len(clean_operations),
+        "operations": clean_operations,
+        "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
+        "applyBoundary": {
+            **(plan.get("applyBoundary") if isinstance(plan.get("applyBoundary"), dict) else {}),
+            "localApplyStatus": "queued",
+            "currentApplyPath": "local_operation_queue",
+            "blockedOperationCount": 0,
+            "skippedDeleteSuggestionCount": skipped_delete_suggestion_count,
+        },
+    }
+    command = {
+        "nativeAction": "apply_mindmap_diff_operations",
+        "message": "请 MN4 插件逐项应用脑图 Diff 操作。",
+        "source": str(payload.get("source") or "request_mindmap_diff_apply"),
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "mindmapDiffOperationPlan": apply_plan,
+        "draftId": str(payload.get("draftId") or payload.get("id") or ""),
+        "transactionId": transaction_id,
+        "mnObject": payload.get("mnObject") if isinstance(payload.get("mnObject"), dict) else {},
+    }
+    queued = enqueue_command({**payload, "command": command})
+    if not queued.get("ok"):
+        return queued
+    return {
+        "ok": True,
+        "message": "已请求 MN4 插件逐项应用脑图 Diff。",
+        "reply": (
+            "已把“逐项应用脑图 Diff”命令加入当前 notebook 队列。\n\n"
+            f"操作数：{len(clean_operations)}。保持该文档在 MarginNote 4 中打开，插件轮询后会执行并上报结果。"
+        ),
+        "applyPlan": apply_plan,
+        "queued": queued["queued"],
+        "queue": queue_status_payload(topic_id, book_md5),
+        "nativeApiCapabilities": native_caps,
+    }
+
+
+def request_mindmap_delete_confirmation(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "删除建议确认失败：缺少 topicid。"}
+    plan = payload.get("mindmapDiffOperationPlan")
+    if not isinstance(plan, dict):
+        return {"ok": False, "message": "删除建议确认失败：缺少 mindmapDiffOperationPlan。"}
+    operations = plan.get("operations") if isinstance(plan.get("operations"), list) else []
+    delete_operations = [
+        item
+        for item in operations
+        if isinstance(item, dict)
+        and (
+            str(item.get("mutation") or "") in {"delete_suggest", "delete"}
+            or str(item.get("op") or "") == "suggest_delete_mindmap_node"
+        )
+    ]
+    if not delete_operations:
+        return {
+            "ok": False,
+            "message": "删除建议确认失败：当前计划没有 delete_suggest 操作。",
+            "queue": queue_status_payload(topic_id, book_md5),
+        }
+    target_note_ids: list[str] = []
+    seen: set[str] = set()
+    for operation in delete_operations:
+        current_ref = operation.get("currentRef") if isinstance(operation.get("currentRef"), dict) else {}
+        note_id = str(current_ref.get("noteId") or operation.get("noteId") or "").strip()
+        if note_id and note_id not in seen:
+            seen.add(note_id)
+            target_note_ids.append(note_id)
+    if not target_note_ids:
+        return {
+            "ok": False,
+            "message": "删除建议确认失败：delete_suggest 缺少 currentRef.noteId，无法安全删除。",
+            "deleteOperations": delete_operations,
+            "queue": queue_status_payload(topic_id, book_md5),
+        }
+
+    transaction_id = transaction_manager.safe_transaction_id(
+        payload.get("transactionId") or f"mindmap-delete-{uuid.uuid4().hex[:16]}"
+    )
+    event_result = append_event(
+        {
+            "event": "mindmapDeleteSuggestionPrepared",
+            "topicid": topic_id,
+            "bookmd5": book_md5,
+            "source": str(payload.get("source") or "request_mindmap_delete_confirmation"),
+            "extra": {
+                "transactionId": transaction_id,
+                "targetNoteIds": target_note_ids,
+                "deleteOperations": delete_operations,
+                "operationCount": len(delete_operations),
+                "message": f"删除建议等待确认：{len(target_note_ids)} 个节点。",
+            },
+        }
+    )
+    transaction = event_result.get("event", {}).get("transaction") if isinstance(event_result.get("event"), dict) else {}
+    return {
+        "ok": True,
+        "message": "已创建脑图删除建议二次确认事务。",
+        "reply": (
+            "已把脑图删除建议放入事务中心，尚未删除任何现有节点。\n\n"
+            f"建议删除节点：{len(target_note_ids)}\n"
+            "请在事务中心点击“删除”确认，或点击“忽略”保留原脑图。"
+        ),
+        "transactionId": transaction_id,
+        "deleteConfirmation": {
+            "schema": "codex.mn.mindmapDeleteConfirmation.v1",
+            "status": "delete_pending_confirmation",
+            "targetNoteIds": target_note_ids,
+            "operationCount": len(delete_operations),
+            "transaction": transaction,
+        },
+        "queue": queue_status_payload(topic_id, book_md5),
+    }
+
+
+def mindmap_tree_cache_path(topic_id: str, book_md5: str) -> Path:
+    key = f"{topic_id}|{book_md5 or 'any'}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return MINDMAP_TREES_DIR / f"{digest}.json"
+
+
+def write_latest_mindmap_tree(record: dict[str, Any]) -> dict[str, Any]:
+    extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+    tree = extra.get("currentMindmap") if isinstance(extra.get("currentMindmap"), dict) else {}
+    topic_id = str(record.get("topicid") or "")
+    book_md5 = str(record.get("bookmd5") or "")
+    if not topic_id or not tree:
+        return {"ok": False, "reason": "missing-topic-or-tree"}
+    payload = {
+        "schema": "codex.mn.mindmapTreeCache.v1",
+        "sourceEvent": str(record.get("event") or ""),
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "updatedAt": str(record.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+        "selectedNoteId": str(extra.get("selectedNoteId") or tree.get("noteId") or ""),
+        "selectedNoteTitle": str(extra.get("selectedNoteTitle") or tree.get("title") or ""),
+        "rootTitle": str(tree.get("title") or extra.get("selectedNoteTitle") or ""),
+        "nodeCount": int(extra.get("nodeCount") or operation_runtime.count_mindmap_nodes(tree)),
+        "truncatedCount": int(extra.get("truncatedCount") or 0),
+        "currentMindmap": tree,
+    }
+    write_json_file(mindmap_tree_cache_path(topic_id, book_md5), payload)
+    registry_result: dict[str, Any] = {}
+    try:
+        registry_result = register_mindmap_tree_cache_objects({"topicid": topic_id, "bookmd5": book_md5}, payload)
+    except Exception as exc:
+        registry_result = {"ok": False, "message": f"MNObject Registry 写入脑图缓存失败：{exc}"}
+    return {"ok": True, "cache": payload, "mnObjectRegistry": registry_result}
+
+
+def read_latest_mindmap_tree(topic_id: str, book_md5: str) -> dict[str, Any]:
+    if not topic_id:
+        return {}
+    payload = read_json_file(mindmap_tree_cache_path(topic_id, book_md5), {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def mindmap_tree_preview(tree: dict[str, Any], max_nodes: int = 24, max_depth: int = 2) -> list[dict[str, Any]]:
+    preview: list[dict[str, Any]] = []
+
+    def walk(node: Any, depth: int, path: str) -> None:
+        if len(preview) >= max_nodes or depth > max_depth or not isinstance(node, dict):
+            return
+        children = node.get("children") if isinstance(node.get("children"), list) else []
+        preview.append(
+            {
+                "noteId": str(node.get("noteId") or ""),
+                "title": str(node.get("title") or node.get("name") or "未命名节点"),
+                "depth": depth,
+                "path": path,
+                "childCount": len(children),
+            }
+        )
+        for index, child in enumerate(children):
+            if len(preview) >= max_nodes:
+                break
+            walk(child, depth + 1, f"{path}.{index + 1}" if path else str(index + 1))
+
+    walk(tree, 0, "1")
+    return preview
+
+
+def latest_mindmap_tree_cache_status(topic_id: str = "", book_md5: str = "", limit: int = 120) -> dict[str, Any]:
+    topic_id = str(topic_id or "")
+    book_md5 = str(book_md5 or "")
+    for item in reversed(read_recent_events(limit)):
+        if str(item.get("event") or "") != "mindmapTreeReadFinished":
+            continue
+        if topic_id and str(item.get("topicid") or "") != topic_id:
+            continue
+        if book_md5 and str(item.get("bookmd5") or "") != book_md5:
+            continue
+        extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
+        tree = extra.get("currentMindmap") if isinstance(extra.get("currentMindmap"), dict) else {}
+        node_count = int(extra.get("nodeCount") or operation_runtime.count_mindmap_nodes(tree) or 0)
+        truncated_count = int(extra.get("truncatedCount") or 0)
+        root_title = str(tree.get("title") or extra.get("selectedNoteTitle") or "")
+        preview = mindmap_tree_preview(tree)
+        return {
+            "schema": "codex.mn.mindmapTreeCache.v1",
+            "available": True,
+            "status": "ready",
+            "summary": f"当前脑图树缓存：{node_count} 个节点，截断 {truncated_count} 个。",
+            "sourceEvent": "mindmapTreeReadFinished",
+            "topicid": str(item.get("topicid") or ""),
+            "bookmd5": str(item.get("bookmd5") or ""),
+            "updatedAt": str(item.get("ts") or ""),
+            "selectedNoteId": str(extra.get("selectedNoteId") or tree.get("noteId") or ""),
+            "selectedNoteTitle": str(extra.get("selectedNoteTitle") or root_title),
+            "rootTitle": root_title,
+            "nodeCount": node_count,
+            "truncatedCount": truncated_count,
+            "treePreview": preview,
+            "treePreviewCount": len(preview),
+            "treePreviewTruncated": node_count > len(preview),
+        }
+    return {
+        "schema": "codex.mn.mindmapTreeCache.v1",
+        "available": False,
+        "status": "unknown",
+        "summary": "还没有读取当前脑图树。",
+        "sourceEvent": "",
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "updatedAt": "",
+        "selectedNoteId": "",
+        "selectedNoteTitle": "",
+        "rootTitle": "",
+        "nodeCount": 0,
+        "truncatedCount": 0,
+        "treePreview": [],
+        "treePreviewCount": 0,
+        "treePreviewTruncated": False,
+    }
+
+
 def request_native_capability_probe(payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
@@ -1736,6 +3403,37 @@ def request_draft_write(payload: dict[str, Any]) -> dict[str, Any]:
     draft = load_draft(clean_id)
     if not draft.get("ok"):
         return draft
+    raw_draft_path = DRAFTS_DIR / f"{clean_id}.json"
+    raw_draft = read_json_file(raw_draft_path, {})
+    if not isinstance(raw_draft, dict) or not raw_draft:
+        raw_draft = draft
+    raw_manifest = raw_draft.get("operationManifest") if isinstance(raw_draft.get("operationManifest"), dict) else {}
+    if not raw_manifest:
+        raw_manifest = draft_operation_manifest(
+            raw_draft.get("cards") if isinstance(raw_draft.get("cards"), list) else [],
+            raw_draft.get("mindmap") if isinstance(raw_draft.get("mindmap"), dict) else None,
+            raw_draft.get("writeTarget") if isinstance(raw_draft.get("writeTarget"), dict) else {},
+            topic_id or str(raw_draft.get("topicid") or ""),
+            book_md5 or str(raw_draft.get("bookmd5") or ""),
+        )
+    dry_run = operation_dry_run(raw_manifest, topic_id or str(raw_draft.get("topicid") or ""), book_md5 or str(raw_draft.get("bookmd5") or ""))
+    raw_manifest = {**raw_manifest, "dryRun": dry_run}
+    raw_draft["operationManifest"] = raw_manifest
+    if raw_draft_path.exists():
+        write_json_file(raw_draft_path, raw_draft)
+    if dry_run.get("status") == "blocked":
+        return {
+            "ok": False,
+            "message": str(dry_run.get("message") or "写入草稿已被 Operation dry-run 阻断。"),
+            "reply": (
+                "写入草稿已阻断。\n\n"
+                f"原因：{dry_run.get('message') or 'Operation dry-run 未通过'}\n"
+                "请先按 dry-run 提示调整权限或配置 MN 接口，再重新写入。"
+            ),
+            "draft": draft_summary(clean_id, raw_draft),
+            "dryRun": dry_run,
+            "operationManifest": raw_manifest,
+        }
     command = {
         "nativeAction": "write_draft",
         "draftId": clean_id,
@@ -1743,6 +3441,17 @@ def request_draft_write(payload: dict[str, Any]) -> dict[str, Any]:
         "source": str(payload.get("source") or "request_draft_write"),
         "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
+    mn_object = raw_draft.get("mnObject") if isinstance(raw_draft.get("mnObject"), dict) else {}
+    if mn_object:
+        source_ref = mn_object.get("sourceRef") if isinstance(mn_object.get("sourceRef"), dict) else {}
+        command.update(
+            {
+                "mnObjectId": str(mn_object.get("objectId") or ""),
+                "mnObjectKind": str(mn_object.get("kind") or ""),
+                "mnObjectTitle": str(mn_object.get("title") or ""),
+                "mnObjectSourceRef": source_ref,
+            }
+        )
     queued = enqueue_command({**payload, "command": command})
     if not queued.get("ok"):
         return queued
@@ -1755,7 +3464,8 @@ def request_draft_write(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "queued": queued["queued"],
         "queue": queue_status_payload(topic_id, book_md5),
-        "draft": draft.get("draft", {}),
+        "draft": draft_summary(clean_id, raw_draft),
+        "dryRun": dry_run,
     }
 
 
@@ -2306,7 +4016,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.27-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.28-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -2987,6 +4697,50 @@ def conversation_last_message(history: list[dict[str, str]]) -> str:
     return ""
 
 
+def object_ref_has_identity(object_ref: dict[str, Any]) -> bool:
+    if not isinstance(object_ref, dict):
+        return False
+    source_ref = object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {}
+    return bool(
+        object_ref.get("objectId")
+        or object_ref.get("kind")
+        or object_ref.get("title")
+        or source_ref.get("quote")
+        or source_ref.get("documentTitle")
+        or source_ref.get("path")
+        or source_ref.get("page") is not None
+    )
+
+
+def object_ref_from_mapping(data: dict[str, Any], fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    fallback = fallback if isinstance(fallback, dict) else {}
+    mn_object = data.get("mnObject") if isinstance(data.get("mnObject"), dict) else {}
+    if mn_object:
+        object_ref = {
+            "objectId": str(mn_object.get("objectId") or fallback.get("objectId") or ""),
+            "kind": str(mn_object.get("kind") or fallback.get("kind") or ""),
+            "title": str(mn_object.get("title") or fallback.get("title") or ""),
+            "sourceRef": transaction_manager.clean_source_ref(
+                mn_object.get("sourceRef")
+                if isinstance(mn_object.get("sourceRef"), dict)
+                else fallback.get("sourceRef")
+            ),
+        }
+        return object_ref if object_ref_has_identity(object_ref) else {}
+    object_ref = transaction_manager.clean_object_ref(data, fallback)
+    return object_ref if object_ref_has_identity(object_ref) else {}
+
+
+def object_ref_from_existing_session(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return object_ref_from_mapping(data) if isinstance(data, dict) else {}
+
+
 def read_conversation_file(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -3010,6 +4764,7 @@ def read_conversation_file(path: Path) -> dict[str, Any] | None:
     conversation_id = str(data.get("conversationId") or "")
     title = str(data.get("title") or conversation_title_from_history(clean_history) or "新对话")
     updated_at = str(data.get("updated_at") or "")
+    object_ref = object_ref_from_mapping(data)
     return {
         "sessionId": path.stem,
         "conversationId": conversation_id,
@@ -3021,6 +4776,10 @@ def read_conversation_file(path: Path) -> dict[str, Any] | None:
         "messageCount": len(clean_history),
         "lastMessage": conversation_last_message(clean_history),
         "history": clean_history,
+        "objectRef": object_ref,
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "mnObjectKind": str(object_ref.get("kind") or ""),
+        "mnObjectTitle": str(object_ref.get("title") or ""),
     }
 
 
@@ -3031,10 +4790,17 @@ def conversation_matches_payload(item: dict[str, Any], payload: dict[str, Any]) 
         return False
     if book_md5 and str(item.get("bookmd5") or "") != book_md5:
         return False
+    requested_object_ref = object_ref_from_mapping(payload)
+    requested_object_id = str(requested_object_ref.get("objectId") or "")
+    if requested_object_id:
+        item_object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+        if str(item_object_ref.get("objectId") or "") != requested_object_id:
+            return False
     return True
 
 
 def conversation_summary(item: dict[str, Any]) -> dict[str, Any]:
+    object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
     return {
         "sessionId": item.get("sessionId") or "",
         "conversationId": item.get("conversationId") or "",
@@ -3044,12 +4810,17 @@ def conversation_summary(item: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": item.get("updatedAt") or "",
         "messageCount": int(item.get("messageCount") or 0),
         "lastMessage": item.get("lastMessage") or "",
+        "objectRef": object_ref if object_ref_has_identity(object_ref) else {},
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "mnObjectKind": str(object_ref.get("kind") or ""),
+        "mnObjectTitle": str(object_ref.get("title") or ""),
     }
 
 
 def conversation_payload_for_new(payload: dict[str, Any]) -> dict[str, Any]:
     conversation_id = str(uuid.uuid4()).upper()
     derived = {**payload, "conversationId": conversation_id}
+    object_ref = object_ref_from_mapping(payload)
     return {
         "sessionId": session_key(derived),
         "conversationId": conversation_id,
@@ -3059,6 +4830,10 @@ def conversation_payload_for_new(payload: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": "",
         "messageCount": 0,
         "lastMessage": "",
+        "objectRef": object_ref,
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+        "mnObjectKind": str(object_ref.get("kind") or ""),
+        "mnObjectTitle": str(object_ref.get("title") or ""),
     }
 
 
@@ -3098,7 +4873,7 @@ def load_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     if not item:
         return {"ok": False, "message": "加载历史对话失败：会话不存在。"}
     if not conversation_matches_payload(item, payload):
-        return {"ok": False, "message": "加载历史对话失败：该会话不属于当前文档。"}
+        return {"ok": False, "message": "加载历史对话失败：该会话不属于当前文档或当前对象。"}
     return {
         "ok": True,
         "message": "已加载历史对话。",
@@ -3116,7 +4891,7 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     if not item:
         return {"ok": False, "message": "删除历史对话失败：会话不存在。"}
     if not conversation_matches_payload(item, payload):
-        return {"ok": False, "message": "删除历史对话失败：该会话不属于当前文档。"}
+        return {"ok": False, "message": "删除历史对话失败：该会话不属于当前文档或当前对象。"}
     try:
         path.unlink()
     except Exception as exc:
@@ -3128,6 +4903,7 @@ def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None
     path = session_path(payload)
     conversation_id = normalize_conversation_id(payload)
     title = conversation_title_from_history(history)
+    object_ref = object_ref_from_mapping(payload, object_ref_from_existing_session(path))
     body = {
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
@@ -3137,6 +4913,11 @@ def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "history": history[-16:],
     }
+    if object_ref_has_identity(object_ref):
+        body["objectRef"] = object_ref
+        body["mnObjectId"] = str(object_ref.get("objectId") or "")
+        body["mnObjectKind"] = str(object_ref.get("kind") or "")
+        body["mnObjectTitle"] = str(object_ref.get("title") or "")
     path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -3164,12 +4945,2148 @@ def history_for_model(payload: dict[str, Any], model_input: str) -> list[dict[st
 
 def history_payload(payload: dict[str, Any]) -> dict[str, Any]:
     history = load_history(payload)
+    object_ref = object_ref_from_mapping(payload, object_ref_from_existing_session(session_path(payload)))
     return {
         "ok": True,
         "message": f"已读取历史对话：{len(history)} 条。",
         "history": history,
         "history_count": len(history),
         "session": session_key(payload),
+        "objectRef": object_ref,
+        "mnObjectId": str(object_ref.get("objectId") or ""),
+    }
+
+
+def merge_object_ref(primary: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    primary = primary if isinstance(primary, dict) else {}
+    fallback = fallback if isinstance(fallback, dict) else {}
+    source_ref = primary.get("sourceRef") if isinstance(primary.get("sourceRef"), dict) else {}
+    fallback_source_ref = fallback.get("sourceRef") if isinstance(fallback.get("sourceRef"), dict) else {}
+    return {
+        "objectId": str(primary.get("objectId") or fallback.get("objectId") or ""),
+        "kind": str(primary.get("kind") or fallback.get("kind") or ""),
+        "title": str(primary.get("title") or fallback.get("title") or ""),
+        "sourceRef": transaction_manager.clean_source_ref(source_ref or fallback_source_ref),
+    }
+
+
+def operation_ledger_id(prefix: str, source_id: Any) -> str:
+    clean_prefix = re.sub(r"[^a-z_]", "", str(prefix or "").lower())[:40]
+    clean_id = re.sub(r"[^A-Za-z0-9._-]", "", str(source_id or ""))[:140]
+    return f"{clean_prefix}:{clean_id}" if clean_prefix and clean_id else ""
+
+
+def operation_ledger_action(ledger_id: str) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.operationLedgerAction.v1",
+        "label": "查看账本",
+        "action": "operation_ledger_get",
+        "payload": {"ledgerId": ledger_id},
+    }
+
+
+def operation_ledger_entry(
+    *,
+    ledger_id: str,
+    entry_type: str,
+    source_id: str,
+    title: str,
+    status: str,
+    summary: str,
+    topicid: str,
+    bookmd5: str,
+    object_ref: dict[str, Any],
+    created_at: str,
+    updated_at: str,
+    counts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    object_ref = object_ref if isinstance(object_ref, dict) else {}
+    return {
+        "schema": "codex.mn.operationLedgerEntry.v1",
+        "ledgerId": ledger_id,
+        "entryType": entry_type,
+        "sourceId": source_id,
+        "title": title,
+        "status": status,
+        "summary": summary,
+        "topicid": topicid,
+        "bookmd5": bookmd5,
+        "objectRef": object_ref,
+        "createdAt": created_at,
+        "updatedAt": updated_at or created_at,
+        "counts": counts or {},
+        "ledgerAction": operation_ledger_action(ledger_id),
+    }
+
+
+def operation_ledger_object_filter(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    requested_object_ref = object_ref_from_mapping(payload)
+    requested_object_id = str(
+        payload.get("mnObjectId")
+        or payload.get("objectId")
+        or requested_object_ref.get("objectId")
+        or ""
+    ).strip()
+    if requested_object_id and not requested_object_ref.get("objectId"):
+        requested_object_ref = {"objectId": requested_object_id, "kind": "", "title": "", "sourceRef": {}}
+    return requested_object_ref, requested_object_id
+
+
+def operation_ledger_matches(
+    *,
+    payload: dict[str, Any],
+    topicid: str,
+    bookmd5: str,
+    object_ref: dict[str, Any],
+    requested_object_id: str,
+) -> bool:
+    requested_topic = normalize_topic_id(payload)
+    requested_book = normalize_book_md5(payload)
+    if requested_topic and topicid != requested_topic:
+        return False
+    if requested_book and bookmd5 != requested_book:
+        return False
+    if requested_object_id and str(object_ref.get("objectId") or "") != requested_object_id:
+        return False
+    return True
+
+
+def operation_ledger_filter_payload(payload: dict[str, Any]) -> dict[str, str]:
+    return {
+        "entryTypeFilter": str(payload.get("entryTypeFilter") or payload.get("entryType") or "").strip(),
+        "statusFilter": str(payload.get("statusFilter") or payload.get("status") or "").strip(),
+        "query": str(payload.get("query") or payload.get("search") or "").strip(),
+    }
+
+
+def operation_ledger_entry_text(entry: dict[str, Any]) -> str:
+    object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+    source_ref = object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {}
+    fields = [
+        entry.get("ledgerId"),
+        entry.get("entryType"),
+        entry.get("sourceId"),
+        entry.get("title"),
+        entry.get("status"),
+        entry.get("summary"),
+        object_ref.get("objectId"),
+        object_ref.get("kind"),
+        object_ref.get("title"),
+        source_ref.get("noteId"),
+        source_ref.get("documentTitle"),
+        source_ref.get("quote"),
+    ]
+    return " ".join(str(item) for item in fields if item is not None).lower()
+
+
+def filter_operation_ledger_entries(entries: list[dict[str, Any]], filters: dict[str, str]) -> list[dict[str, Any]]:
+    entry_type = filters.get("entryTypeFilter", "").lower()
+    status = filters.get("statusFilter", "").lower()
+    query = filters.get("query", "").lower()
+    out: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry_type and str(entry.get("entryType") or "").lower() != entry_type:
+            continue
+        if status and str(entry.get("status") or "").lower() != status:
+            continue
+        if query and query not in operation_ledger_entry_text(entry):
+            continue
+        out.append(entry)
+    return out
+
+
+def workflow_operation_ledger_entry(run: dict[str, Any]) -> dict[str, Any]:
+    summary = workflow_run_summary(run)
+    object_ref = run.get("objectRef") if isinstance(run.get("objectRef"), dict) else {}
+    ledger_id = operation_ledger_id("workflow", summary.get("id"))
+    return operation_ledger_entry(
+        ledger_id=ledger_id,
+        entry_type="workflow_run",
+        source_id=str(summary.get("id") or ""),
+        title=str(summary.get("title") or summary.get("workflowId") or "Workflow run"),
+        status=str(summary.get("status") or "unknown"),
+        summary=(
+            f"工作流：{summary.get('workflowId') or ''} / "
+            f"队列 {summary.get('queuedCount') or 0} / "
+            f"等待确认 {summary.get('waitingConfirmationCount') or 0}"
+        ),
+        topicid=str(summary.get("topicid") or ""),
+        bookmd5=str(summary.get("bookmd5") or ""),
+        object_ref=object_ref,
+        created_at=str(summary.get("createdAt") or ""),
+        updated_at=str(summary.get("updatedAt") or summary.get("createdAt") or ""),
+        counts={
+            "queued": int(summary.get("queuedCount") or 0),
+            "waitingConfirmation": int(summary.get("waitingConfirmationCount") or 0),
+            "manual": int(summary.get("manualCount") or 0),
+        },
+    )
+
+
+def transaction_operation_ledger_entry(summary: dict[str, Any]) -> dict[str, Any]:
+    transaction_id = str(summary.get("transactionId") or "")
+    object_ref = summary.get("objectRef") if isinstance(summary.get("objectRef"), dict) else {}
+    title = str(summary.get("mindmapTitle") or summary.get("draftId") or transaction_id or "AI 编辑事务")
+    return operation_ledger_entry(
+        ledger_id=operation_ledger_id("transaction", transaction_id),
+        entry_type="ai_edit_transaction",
+        source_id=transaction_id,
+        title=title,
+        status=str(summary.get("status") or "unknown"),
+        summary=str(summary.get("message") or "AI 编辑事务记录。"),
+        topicid=str(summary.get("topicid") or ""),
+        bookmd5=str(summary.get("bookmd5") or ""),
+        object_ref=object_ref,
+        created_at=str(summary.get("createdAt") or summary.get("updatedAt") or ""),
+        updated_at=str(summary.get("updatedAt") or summary.get("createdAt") or ""),
+        counts={
+            "created": int(summary.get("createdCount") or 0),
+            "applied": int(summary.get("appliedCount") or 0),
+            "deleted": int(summary.get("deletedCount") or 0),
+            "failed": int(summary.get("failedCount") or 0),
+            "cards": int(summary.get("cardCount") or 0),
+        },
+    )
+
+
+def external_gateway_operation_ledger_entry(record: dict[str, Any]) -> dict[str, Any]:
+    request_id = str(record.get("requestId") or "")
+    object_ref = record.get("objectRef") if isinstance(record.get("objectRef"), dict) else {}
+    result = record.get("result") if isinstance(record.get("result"), dict) else {}
+    callback = record.get("callback") if isinstance(record.get("callback"), dict) else {}
+    caller = str(record.get("caller") or "external")
+    return operation_ledger_entry(
+        ledger_id=operation_ledger_id("external", request_id),
+        entry_type="external_gateway_request",
+        source_id=request_id,
+        title=f"外部自动化：{caller}",
+        status=str(record.get("stage") or "unknown"),
+        summary=str(result.get("message") or f"callback: {callback.get('status') or 'not_configured'}"),
+        topicid=str(record.get("topicid") or ""),
+        bookmd5=str(record.get("bookmd5") or ""),
+        object_ref=object_ref,
+        created_at=str(record.get("createdAt") or ""),
+        updated_at=str(record.get("updatedAt") or record.get("createdAt") or ""),
+        counts={
+            "queued": int(result.get("queuedCount") or 0),
+            "waitingConfirmation": int(result.get("waitingConfirmationCount") or 0),
+            "callbackReceived": int(callback.get("receivedCount") or 0),
+        },
+    )
+
+
+def manual_relation_operation_ledger_entry(event: dict[str, Any]) -> dict[str, Any]:
+    from_object = event.get("fromObject") if isinstance(event.get("fromObject"), dict) else {}
+    to_object = event.get("toObject") if isinstance(event.get("toObject"), dict) else {}
+    from_title = str(from_object.get("title") or event.get("fromObjectId") or "")
+    to_title = str(to_object.get("title") or event.get("toObjectId") or "")
+    relation = str(event.get("relation") or "related_to")
+    status = str(event.get("status") or "saved")
+    object_ref = from_object if object_ref_has_identity(from_object) else {"objectId": str(event.get("fromObjectId") or "")}
+    return operation_ledger_entry(
+        ledger_id=operation_ledger_id("manualrel", str(event.get("eventId") or "")),
+        entry_type="object_graph_manual_relation",
+        source_id=str(event.get("eventId") or event.get("relationId") or ""),
+        title=str(event.get("label") or f"{from_title} {relation} {to_title}" or "手工对象关系"),
+        status=status,
+        summary=f"{from_title} {relation} {to_title}".strip(),
+        topicid=str(event.get("topicid") or ""),
+        bookmd5=str(event.get("bookmd5") or ""),
+        object_ref=object_ref,
+        created_at=str(event.get("createdAt") or event.get("updatedAt") or ""),
+        updated_at=str(event.get("updatedAt") or event.get("createdAt") or ""),
+        counts={"manualRelations": 1},
+    )
+
+
+def manual_relation_events_for_object(payload: dict[str, Any], requested_object_id: str = "") -> list[dict[str, Any]]:
+    requested_topic = normalize_topic_id(payload)
+    requested_book = normalize_book_md5(payload)
+    store = object_graph_relation_store()
+    events = store.get("events") if isinstance(store.get("events"), list) else []
+    out: list[dict[str, Any]] = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        if requested_topic and item.get("topicid") and item.get("topicid") != requested_topic:
+            continue
+        if requested_book and item.get("bookmd5") and item.get("bookmd5") != requested_book:
+            continue
+        if requested_object_id and item.get("fromObjectId") != requested_object_id and item.get("toObjectId") != requested_object_id:
+            continue
+        out.append(item)
+    out.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    return out
+
+
+def manual_relation_event_by_id(event_id: str) -> dict[str, Any]:
+    store = object_graph_relation_store()
+    for item in store.get("events") if isinstance(store.get("events"), list) else []:
+        if isinstance(item, dict) and str(item.get("eventId") or "") == event_id:
+            return item
+    return {}
+
+
+def operation_ledger_list(payload: dict[str, Any]) -> dict[str, Any]:
+    requested_object_ref, requested_object_id = operation_ledger_object_filter(payload)
+    limit = max(1, min(int(payload.get("limit") or 30), 120))
+    entries: list[dict[str, Any]] = []
+    object_ref = requested_object_ref
+
+    if WORKFLOW_RUNS_DIR.exists():
+        for path in sorted(WORKFLOW_RUNS_DIR.glob("*.json"), reverse=True):
+            run = read_json_file(path, {})
+            if not isinstance(run, dict) or not run:
+                continue
+            entry = workflow_operation_ledger_entry(run)
+            entry_object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+            if not operation_ledger_matches(
+                payload=payload,
+                topicid=str(entry.get("topicid") or ""),
+                bookmd5=str(entry.get("bookmd5") or ""),
+                object_ref=entry_object_ref,
+                requested_object_id=requested_object_id,
+            ):
+                continue
+            object_ref = merge_object_ref(object_ref, entry_object_ref)
+            entries.append(entry)
+
+    transaction_candidates = transaction_manager.latest_summary(
+        topicid=normalize_topic_id(payload),
+        bookmd5=normalize_book_md5(payload),
+        limit=200,
+    )
+    for summary in transaction_candidates.get("items") if isinstance(transaction_candidates.get("items"), list) else []:
+        if not isinstance(summary, dict):
+            continue
+        entry = transaction_operation_ledger_entry(summary)
+        entry_object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+        if not operation_ledger_matches(
+            payload=payload,
+            topicid=str(entry.get("topicid") or ""),
+            bookmd5=str(entry.get("bookmd5") or ""),
+            object_ref=entry_object_ref,
+            requested_object_id=requested_object_id,
+        ):
+            continue
+        object_ref = merge_object_ref(object_ref, entry_object_ref)
+        entries.append(entry)
+
+    if EXTERNAL_GATEWAY_DIR.exists():
+        for path in sorted(EXTERNAL_GATEWAY_DIR.glob("*.json"), reverse=True):
+            record = read_json_file(path, {})
+            if not isinstance(record, dict) or not record:
+                continue
+            entry = external_gateway_operation_ledger_entry(record)
+            entry_object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+            if not operation_ledger_matches(
+                payload=payload,
+                topicid=str(entry.get("topicid") or ""),
+                bookmd5=str(entry.get("bookmd5") or ""),
+                object_ref=entry_object_ref,
+                requested_object_id=requested_object_id,
+            ):
+                continue
+            object_ref = merge_object_ref(object_ref, entry_object_ref)
+            entries.append(entry)
+
+    for event in manual_relation_events_for_object(payload, requested_object_id):
+        entry = manual_relation_operation_ledger_entry(event)
+        entry_object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+        object_ref = merge_object_ref(object_ref, entry_object_ref)
+        entries.append(entry)
+
+    entries.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    filters = operation_ledger_filter_payload(payload)
+    unfiltered_total = len(entries)
+    filtered_entries = filter_operation_ledger_entries(entries, filters)
+    entries = filtered_entries[:limit]
+    type_counts: dict[str, int] = {}
+    for item in entries:
+        entry_type = str(item.get("entryType") or "unknown")
+        type_counts[entry_type] = type_counts.get(entry_type, 0) + 1
+    filtered_message = (
+        f"已读取 Operation Ledger：{len(entries)} / {unfiltered_total} 条。"
+        if filtered_entries != entries or any(filters.values())
+        else f"已读取 Operation Ledger：{len(entries)} 条。"
+    )
+    return {
+        "ok": True,
+        "schema": "codex.mn.operationLedger.v1",
+        "message": filtered_message,
+        "objectRef": object_ref if object_ref_has_identity(object_ref) else {},
+        "filters": filters,
+        "counts": {
+            "total": len(entries),
+            "filteredTotal": len(filtered_entries),
+            "unfilteredTotal": unfiltered_total,
+            **type_counts,
+        },
+        "entries": entries,
+    }
+
+
+def transaction_operation_chain_evidence(record: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
+    plan = record.get("mindmapDiffOperationPlan") if isinstance(record.get("mindmapDiffOperationPlan"), dict) else {}
+    operation_manifest = record.get("operationManifest") if isinstance(record.get("operationManifest"), dict) else {}
+    if not plan and isinstance(operation_manifest.get("operationPlan"), dict):
+        plan = operation_manifest["operationPlan"]
+    dry_run = operation_manifest.get("dryRun") if isinstance(operation_manifest.get("dryRun"), dict) else {}
+    apply_boundary = plan.get("applyBoundary") if isinstance(plan.get("applyBoundary"), dict) else {}
+    dry_run_status = str(dry_run.get("status") or apply_boundary.get("localApplyStatus") or "")
+    mindmap_apply = record.get("mindmapDiffApply") if isinstance(record.get("mindmapDiffApply"), dict) else {}
+    applied_operations = mindmap_apply.get("appliedOperations") if isinstance(mindmap_apply.get("appliedOperations"), list) else []
+    mindmap_verification = mindmap_apply.get("verification") if isinstance(mindmap_apply.get("verification"), dict) else {}
+    created_note_ids = transaction_manager.unique_strings(record.get("createdNoteIds"))
+    applied_note_ids = transaction_manager.unique_strings(record.get("appliedNoteIds"))
+    raw_events = record.get("events") if isinstance(record.get("events"), list) else []
+    timeline: list[dict[str, Any]] = []
+    for item in raw_events:
+        if not isinstance(item, dict):
+            continue
+        timeline.append(
+            {
+                "event": str(item.get("event") or ""),
+                "ts": str(item.get("ts") or ""),
+                "nativeAction": str(item.get("nativeAction") or ""),
+                "queueId": str(item.get("queueId") or ""),
+                "source": str(item.get("source") or ""),
+                "operationCount": int(item.get("operationCount") or 0),
+            }
+        )
+    native_command_source = next(
+        (
+            item
+            for item in timeline
+            if item.get("nativeAction") or item.get("queueId") or item.get("event") == "mindmapDiffApplyRequested"
+        ),
+        {},
+    )
+    plan_operation_count = int(plan.get("operationCount") or len(plan.get("operations") if isinstance(plan.get("operations"), list) else []) or 0)
+    return {
+        "schema": "codex.mn.operationChainEvidence.v1",
+        "transactionId": str(record.get("transactionId") or ""),
+        "operationPlan": plan,
+        "dryRun": {
+            "schema": "codex.mn.operationChainDryRunEvidence.v1",
+            "status": dry_run_status or "unknown",
+            "dryRun": dry_run,
+            "applyBoundary": apply_boundary,
+        },
+        "nativeCommand": {
+            "schema": "codex.mn.nativeCommandEvidence.v1",
+            "nativeAction": str(native_command_source.get("nativeAction") or ("apply_mindmap_diff_operations" if mindmap_apply else "")),
+            "queueId": str(native_command_source.get("queueId") or ""),
+            "source": str(native_command_source.get("source") or ""),
+            "operationCount": int(native_command_source.get("operationCount") or plan_operation_count),
+        },
+        "nativeEventTimeline": timeline,
+        "nativeApply": {
+            "schema": "codex.mn.nativeApplyEvidence.v1",
+            "nativeAction": "apply_mindmap_diff_operations" if mindmap_apply else "",
+            "status": str(mindmap_verification.get("status") or record.get("status") or "unknown"),
+            "appliedCount": int(record.get("appliedCount") or len(applied_operations) or 0),
+            "failedCount": int(record.get("failedCount") or 0),
+            "createdNoteIds": created_note_ids,
+            "appliedNoteIds": applied_note_ids,
+            "appliedOperations": applied_operations,
+            "verification": mindmap_verification,
+        },
+        "rollback": {
+            "schema": "codex.mn.rollbackEvidence.v1",
+            "status": str(record.get("status") or ""),
+            "deletedCount": int(record.get("deletedCount") or 0),
+            "failedCount": int(record.get("failedCount") or 0),
+            "rollbackComplete": bool(verification.get("rollbackComplete")),
+            "requiresConfirmation": bool(verification.get("requiresConfirmation")),
+            "accepted": bool(verification.get("accepted")),
+            "availableActions": verification.get("availableActions") if isinstance(verification.get("availableActions"), list) else [],
+            "failures": verification.get("failures") if isinstance(verification.get("failures"), list) else [],
+            "undoRollback": verification.get("undoRollback") if isinstance(verification.get("undoRollback"), dict) else {},
+        },
+        "residual": {
+            "schema": "codex.mn.residualObjectEvidence.v1",
+            "remainingCount": int(verification.get("remainingCount") or 0),
+            "remainingNoteIds": verification.get("remainingNoteIds") if isinstance(verification.get("remainingNoteIds"), list) else [],
+            "createdNoteIds": created_note_ids,
+            "targetNoteIds": verification.get("targetNoteIds") if isinstance(verification.get("targetNoteIds"), list) else [],
+        },
+    }
+
+
+def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
+    ledger_id = str(payload.get("ledgerId") or payload.get("id") or "").strip()
+    if ":" not in ledger_id:
+        return {"ok": False, "message": "读取 Operation Ledger 失败：缺少有效 ledgerId。"}
+    prefix, source_id = ledger_id.split(":", 1)
+    prefix = prefix.strip()
+    source_id = source_id.strip()
+    evidence: dict[str, Any] = {
+        "schema": "codex.mn.operationLedgerEvidence.v1",
+        "ledgerId": ledger_id,
+        "entryType": "",
+        "status": "unknown",
+        "summary": "",
+        "verification": {},
+        "callback": {},
+        "workflow": {},
+    }
+    if prefix == "workflow":
+        loaded = load_workflow_run(source_id)
+        if not loaded.get("ok"):
+            return loaded
+        record = loaded["workflowRun"]
+        entry = workflow_operation_ledger_entry(record)
+        summary = workflow_run_summary(record)
+        waiting = [step for step in record.get("steps") if isinstance(step, dict) and step.get("status") == "waiting_confirmation"] if isinstance(record.get("steps"), list) else []
+        blocked = [step for step in record.get("steps") if isinstance(step, dict) and step.get("status") in {"blocked", "failed"}] if isinstance(record.get("steps"), list) else []
+        evidence.update(
+            {
+                "entryType": "workflow_run",
+                "status": str(summary.get("status") or "unknown"),
+                "summary": (
+                    f"workflow {summary.get('workflowId') or ''}: "
+                    f"queued={summary.get('queuedCount') or 0}, "
+                    f"waiting={summary.get('waitingConfirmationCount') or 0}, "
+                    f"blocked={len(blocked)}"
+                ),
+                "workflow": {
+                    "schema": "codex.mn.workflowRunEvidence.v1",
+                    "workflowRunId": str(summary.get("id") or ""),
+                    "workflowId": str(summary.get("workflowId") or ""),
+                    "status": str(summary.get("status") or ""),
+                    "queuedCount": int(summary.get("queuedCount") or 0),
+                    "waitingConfirmationCount": int(summary.get("waitingConfirmationCount") or 0),
+                    "blockedCount": len(blocked),
+                    "waitingStepIds": [str(step.get("id") or step.get("action") or "") for step in waiting],
+                    "blockedStepIds": [str(step.get("id") or step.get("action") or "") for step in blocked],
+                },
+            }
+        )
+    elif prefix == "transaction":
+        record = transaction_manager.load_transaction(source_id)
+        if not record:
+            return {"ok": False, "message": "读取 Operation Ledger 失败：事务不存在。", "ledgerId": ledger_id}
+        verification = transaction_manager.verification_report(record)
+        entry = transaction_operation_ledger_entry(transaction_manager.transaction_summary(record))
+        evidence.update(
+            {
+                "entryType": "ai_edit_transaction",
+                "status": str(verification.get("status") or "unknown"),
+                "summary": str(verification.get("summary") or ""),
+                "verification": verification,
+                "operationChain": transaction_operation_chain_evidence(record, verification),
+            }
+        )
+    elif prefix == "external":
+        record = read_json_file(external_gateway_request_path(source_id), {})
+        if not isinstance(record, dict) or not record:
+            return {"ok": False, "message": "读取 Operation Ledger 失败：外部请求不存在。", "ledgerId": ledger_id}
+        entry = external_gateway_operation_ledger_entry(record)
+        callback = record.get("callback") if isinstance(record.get("callback"), dict) else {}
+        result = record.get("result") if isinstance(record.get("result"), dict) else {}
+        evidence.update(
+            {
+                "entryType": "external_gateway_request",
+                "status": str(record.get("stage") or callback.get("status") or "unknown"),
+                "summary": str(result.get("message") or f"callback: {callback.get('status') or 'not_configured'}"),
+                "callback": {
+                    "schema": "codex.mn.externalCallbackEvidence.v1",
+                    "status": str(callback.get("status") or "not_configured"),
+                    "receivedCount": int(callback.get("receivedCount") or 0),
+                    "receivedAt": str(callback.get("receivedAt") or ""),
+                    "message": str(callback.get("message") or ""),
+                    "payload": callback.get("payload") if isinstance(callback.get("payload"), dict) else {},
+                    "history": callback.get("history") if isinstance(callback.get("history"), list) else [],
+                },
+            }
+        )
+    elif prefix == "manualrel":
+        record = manual_relation_event_by_id(source_id)
+        if not record:
+            return {"ok": False, "message": "读取 Operation Ledger 失败：手工对象关系事件不存在。", "ledgerId": ledger_id}
+        entry = manual_relation_operation_ledger_entry(record)
+        evidence.update(
+            {
+                "entryType": "object_graph_manual_relation",
+                "status": str(record.get("status") or "unknown"),
+                "summary": str(entry.get("summary") or ""),
+                "manualRelation": {
+                    "schema": "codex.mn.objectGraphManualRelationEvidence.v1",
+                    "eventId": str(record.get("eventId") or ""),
+                    "relationId": str(record.get("relationId") or ""),
+                    "status": str(record.get("status") or ""),
+                    "topicid": str(record.get("topicid") or ""),
+                    "bookmd5": str(record.get("bookmd5") or ""),
+                    "fromObjectId": str(record.get("fromObjectId") or ""),
+                    "toObjectId": str(record.get("toObjectId") or ""),
+                    "fromObject": record.get("fromObject") if isinstance(record.get("fromObject"), dict) else {},
+                    "toObject": record.get("toObject") if isinstance(record.get("toObject"), dict) else {},
+                    "relation": str(record.get("relation") or "related_to"),
+                    "label": str(record.get("label") or ""),
+                    "note": str(record.get("note") or ""),
+                    "evidenceType": "manual_relation",
+                    "createdAt": str(record.get("createdAt") or ""),
+                    "updatedAt": str(record.get("updatedAt") or ""),
+                },
+            }
+        )
+    else:
+        return {"ok": False, "message": f"读取 Operation Ledger 失败：未知 ledger 类型 {prefix}。", "ledgerId": ledger_id}
+    return {
+        "ok": True,
+        "schema": "codex.mn.operationLedgerEntryDetail.v1",
+        "message": "已读取 Operation Ledger 详情。",
+        "entry": entry,
+        "record": record,
+        "evidence": evidence,
+    }
+
+
+def object_graph_action(label: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.objectGraphAction.v1",
+        "label": label,
+        "action": action,
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def object_graph_action_from_descriptor(descriptor: dict[str, Any]) -> dict[str, Any]:
+    descriptor = descriptor if isinstance(descriptor, dict) else {}
+    return object_graph_action(
+        str(descriptor.get("label") or "打开"),
+        str(descriptor.get("action") or ""),
+        descriptor.get("payload") if isinstance(descriptor.get("payload"), dict) else {},
+    )
+
+
+def object_graph_node(
+    *,
+    node_id: str,
+    node_type: str,
+    title: str,
+    status: str = "",
+    summary: str = "",
+    object_ref: dict[str, Any] | None = None,
+    source_id: str = "",
+    updated_at: str = "",
+    graph_action: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    object_ref = object_ref if isinstance(object_ref, dict) else {}
+    node: dict[str, Any] = {
+        "schema": "codex.mn.objectGraphNode.v1",
+        "nodeId": node_id,
+        "nodeType": node_type,
+        "title": title,
+        "status": status,
+        "summary": summary,
+        "sourceId": source_id,
+        "updatedAt": updated_at,
+        "objectRef": object_ref if object_ref_has_identity(object_ref) else {},
+    }
+    if graph_action and graph_action.get("action"):
+        node["graphAction"] = graph_action
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            if key not in node:
+                node[key] = value
+    return node
+
+
+def object_graph_edge(
+    from_id: str,
+    to_id: str,
+    relation: str,
+    evidence_type: str,
+    source_id: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    edge = {
+        "schema": "codex.mn.objectGraphEdge.v1",
+        "edgeId": operation_ledger_id("edge", f"{from_id}:{relation}:{to_id}") or f"{from_id}:{relation}:{to_id}",
+        "from": from_id,
+        "to": to_id,
+        "relation": relation,
+        "evidenceType": evidence_type,
+        "sourceId": source_id,
+    }
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            if key not in edge:
+                edge[key] = value
+    return edge
+
+
+def object_graph_add_node(
+    nodes: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+    root_id: str,
+    node: dict[str, Any],
+    relation: str,
+    evidence_type: str,
+) -> None:
+    node_id = str(node.get("nodeId") or "")
+    if not node_id or node_id == root_id:
+        return
+    if node_id not in nodes:
+        nodes[node_id] = node
+        edges.append(object_graph_edge(root_id, node_id, relation, evidence_type, str(node.get("sourceId") or "")))
+
+
+def object_graph_relation_store() -> dict[str, Any]:
+    store = read_json_file(OBJECT_GRAPH_RELATIONS_PATH, {})
+    if not isinstance(store, dict):
+        store = {}
+    relations = store.get("relations") if isinstance(store.get("relations"), list) else []
+    events = store.get("events") if isinstance(store.get("events"), list) else []
+    return {"schema": "codex.mn.objectGraphManualRelations.v1", "relations": relations, "events": events}
+
+
+def write_object_graph_relation_store(relations: list[dict[str, Any]], events: list[dict[str, Any]] | None = None) -> None:
+    clean_relations = [item for item in relations if isinstance(item, dict) and item.get("relationId")]
+    clean_events = [item for item in (events or []) if isinstance(item, dict) and item.get("eventId")]
+    write_json_file(
+        OBJECT_GRAPH_RELATIONS_PATH,
+        {
+            "schema": "codex.mn.objectGraphManualRelations.v1",
+            "updatedAt": diagnostic_timestamp(),
+            "relations": clean_relations,
+            "events": clean_events[-500:],
+        },
+    )
+
+
+def clean_object_graph_object_ref(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    source_ref = value.get("sourceRef") if isinstance(value.get("sourceRef"), dict) else {}
+    return {
+        "objectId": str(value.get("objectId") or "")[:240],
+        "kind": str(value.get("kind") or "")[:80],
+        "title": str(value.get("title") or value.get("objectId") or "")[:240],
+        "sourceRef": transaction_manager.clean_source_ref(source_ref),
+    }
+
+
+def mn_object_registry_store() -> dict[str, Any]:
+    store = read_json_file(MN_OBJECT_REGISTRY_PATH, {})
+    if not isinstance(store, dict):
+        store = {}
+    objects = store.get("objects") if isinstance(store.get("objects"), list) else []
+    clean_objects = [
+        item
+        for item in objects
+        if isinstance(item, dict)
+        and isinstance(item.get("objectRef"), dict)
+        and str(item["objectRef"].get("objectId") or "")
+    ]
+    return {
+        "schema": "codex.mn.mnObjectRegistry.v1",
+        "updatedAt": str(store.get("updatedAt") or ""),
+        "objects": clean_objects,
+    }
+
+
+def write_mn_object_registry_store(objects: list[dict[str, Any]]) -> None:
+    clean_objects = [
+        item
+        for item in objects
+        if isinstance(item, dict)
+        and isinstance(item.get("objectRef"), dict)
+        and str(item["objectRef"].get("objectId") or "")
+    ]
+    write_json_file(
+        MN_OBJECT_REGISTRY_PATH,
+        {
+            "schema": "codex.mn.mnObjectRegistry.v1",
+            "updatedAt": diagnostic_timestamp(),
+            "objects": clean_objects[-2000:],
+        },
+    )
+
+
+def register_mn_objects(
+    object_refs: list[dict[str, Any]],
+    payload: dict[str, Any],
+    evidence_type: str,
+    source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    now = diagnostic_timestamp()
+    store = mn_object_registry_store()
+    entries = store.get("objects") if isinstance(store.get("objects"), list) else []
+    by_id: dict[str, dict[str, Any]] = {
+        str(item.get("objectRef", {}).get("objectId") or ""): item
+        for item in entries
+        if isinstance(item, dict) and isinstance(item.get("objectRef"), dict)
+    }
+    changed = 0
+    for raw_ref in object_refs:
+        clean_ref = clean_object_graph_object_ref(raw_ref)
+        object_id = str(clean_ref.get("objectId") or "").strip()
+        if not object_id:
+            continue
+        previous = by_id.get(object_id) if isinstance(by_id.get(object_id), dict) else {}
+        previous_ref = previous.get("objectRef") if isinstance(previous.get("objectRef"), dict) else {}
+        merged_ref = merge_object_ref(clean_ref, previous_ref)
+        evidence_types = [
+            str(item)
+            for item in previous.get("evidenceTypes", [])
+            if isinstance(previous.get("evidenceTypes"), list) and str(item)
+        ]
+        if evidence_type and evidence_type not in evidence_types:
+            evidence_types.append(evidence_type)
+        entry = {
+            "schema": "codex.mn.mnObjectRegistryEntry.v1",
+            "objectRef": merged_ref,
+            "objectId": object_id,
+            "kind": str(merged_ref.get("kind") or ""),
+            "title": str(merged_ref.get("title") or object_id),
+            "sourceRef": merged_ref.get("sourceRef") if isinstance(merged_ref.get("sourceRef"), dict) else {},
+            "topicid": topic_id or str(previous.get("topicid") or ""),
+            "bookmd5": book_md5 or str(previous.get("bookmd5") or ""),
+            "firstSeenAt": str(previous.get("firstSeenAt") or now),
+            "lastSeenAt": now,
+            "seenCount": int(previous.get("seenCount") or 0) + 1,
+            "evidenceTypes": sorted(set(evidence_types)),
+            "source": source if isinstance(source, dict) else {},
+        }
+        by_id[object_id] = entry
+        changed += 1
+    if changed:
+        ordered = sorted(by_id.values(), key=lambda item: str(item.get("lastSeenAt") or ""), reverse=True)
+        write_mn_object_registry_store(ordered)
+    return {"ok": True, "schema": "codex.mn.mnObjectRegistry.v1", "registered": changed}
+
+
+def mn_object_registry(payload: dict[str, Any]) -> dict[str, Any]:
+    requested_topic = normalize_topic_id(payload)
+    requested_book = normalize_book_md5(payload)
+    limit = max(1, min(int(payload.get("limit") or 80), 500))
+    store = mn_object_registry_store()
+    objects: list[dict[str, Any]] = []
+    for item in store.get("objects") if isinstance(store.get("objects"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        if requested_topic and item.get("topicid") and item.get("topicid") != requested_topic:
+            continue
+        if requested_book and item.get("bookmd5") and item.get("bookmd5") != requested_book:
+            continue
+        objects.append(item)
+    objects.sort(key=lambda item: str(item.get("lastSeenAt") or item.get("firstSeenAt") or ""), reverse=True)
+    type_counts: dict[str, int] = {}
+    for item in objects:
+        kind = str(item.get("kind") or item.get("objectRef", {}).get("kind") or "unknown")
+        type_counts[kind] = type_counts.get(kind, 0) + 1
+    return {
+        "ok": True,
+        "schema": "codex.mn.mnObjectRegistry.v1",
+        "message": f"已读取 MNObject Registry：{len(objects[:limit])} / {len(objects)} 个对象。",
+        "objects": objects[:limit],
+        "counts": {"total": len(objects), "returned": len(objects[:limit]), "kinds": type_counts},
+        "updatedAt": str(store.get("updatedAt") or ""),
+    }
+
+
+def clean_object_graph_relation_type(value: Any) -> str:
+    text = re.sub(r"[^A-Za-z0-9_:-]", "_", str(value or "").strip().lower())[:64]
+    return text or "related_to"
+
+
+def object_graph_relation_id(from_object_id: str, relation: str, to_object_id: str, topicid: str, bookmd5: str) -> str:
+    raw = f"{topicid}|{bookmd5}|{from_object_id}|{relation}|{to_object_id}"
+    return operation_ledger_id("manualrel", hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24])
+
+
+def object_graph_relation_event(relation: dict[str, Any], status: str, event_id: str = "") -> dict[str, Any]:
+    now = diagnostic_timestamp()
+    relation_id = str(relation.get("relationId") or "")
+    event_seed = event_id or hashlib.sha256(f"{relation_id}|{status}|{now}|{uuid.uuid4()}".encode("utf-8")).hexdigest()[:24]
+    return {
+        "schema": "codex.mn.objectGraphManualRelationEvent.v1",
+        "eventId": event_seed,
+        "relationId": relation_id,
+        "status": str(status or "saved"),
+        "topicid": str(relation.get("topicid") or ""),
+        "bookmd5": str(relation.get("bookmd5") or ""),
+        "fromObjectId": str(relation.get("fromObjectId") or ""),
+        "toObjectId": str(relation.get("toObjectId") or ""),
+        "fromObject": relation.get("fromObject") if isinstance(relation.get("fromObject"), dict) else {},
+        "toObject": relation.get("toObject") if isinstance(relation.get("toObject"), dict) else {},
+        "relation": str(relation.get("relation") or "related_to"),
+        "label": str(relation.get("label") or ""),
+        "note": str(relation.get("note") or ""),
+        "evidenceType": "manual_relation",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def object_graph_relation_save(payload: dict[str, Any]) -> dict[str, Any]:
+    source_ref, source_id = operation_ledger_object_filter(payload)
+    target_ref = clean_object_graph_object_ref(payload.get("targetObject") or payload.get("toObject") or {})
+    target_id = str(payload.get("targetObjectId") or payload.get("toObjectId") or target_ref.get("objectId") or "").strip()
+    if target_id and not target_ref.get("objectId"):
+        target_ref = {"objectId": target_id, "kind": "", "title": target_id, "sourceRef": {}}
+    if not source_id:
+        return {"ok": False, "message": "保存对象关系失败：缺少来源 MNObject。"}
+    if not target_id:
+        return {"ok": False, "message": "保存对象关系失败：缺少目标 MNObject。"}
+    if source_id == target_id:
+        return {"ok": False, "message": "保存对象关系失败：不能把对象关联到自身。"}
+    if not source_ref.get("objectId"):
+        source_ref = merge_object_ref({"objectId": source_id}, source_ref)
+    if not target_ref.get("objectId"):
+        target_ref = merge_object_ref({"objectId": target_id}, target_ref)
+    relation_type = clean_object_graph_relation_type(payload.get("relation") or payload.get("relationType"))
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    relation_id = object_graph_relation_id(source_id, relation_type, target_id, topic_id, book_md5)
+    now = diagnostic_timestamp()
+    store = object_graph_relation_store()
+    relations = store.get("relations") if isinstance(store.get("relations"), list) else []
+    events = store.get("events") if isinstance(store.get("events"), list) else []
+    existing_by_id = {str(item.get("relationId") or ""): item for item in relations if isinstance(item, dict)}
+    previous = existing_by_id.get(relation_id) if isinstance(existing_by_id.get(relation_id), dict) else {}
+    relation = {
+        "schema": "codex.mn.objectGraphManualRelation.v1",
+        "relationId": relation_id,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "fromObjectId": source_id,
+        "toObjectId": target_id,
+        "fromObject": source_ref,
+        "toObject": target_ref,
+        "relation": relation_type,
+        "label": str(payload.get("label") or payload.get("relationLabel") or relation_type)[:160],
+        "note": str(payload.get("note") or payload.get("comment") or "")[:1200],
+        "evidenceType": "manual_relation",
+        "createdAt": str(previous.get("createdAt") or now),
+        "updatedAt": now,
+    }
+    updated = [item for item in relations if isinstance(item, dict) and item.get("relationId") != relation_id]
+    updated.append(relation)
+    event = object_graph_relation_event(relation, "saved")
+    write_object_graph_relation_store(updated, [*events, event])
+    register_mn_objects(
+        [source_ref, target_ref],
+        payload,
+        "manual_relation",
+        source={"relationId": relation_id, "eventId": str(event.get("eventId") or "")},
+    )
+    append_diagnostic_log(
+        "info",
+        "objectGraphManualRelationSaved",
+        f"{source_id} {relation_type} {target_id}",
+        extra={
+            "requestId": relation_id,
+            "topicid": topic_id,
+            "bookmd5": book_md5,
+            "targetObjectRef": target_ref,
+        },
+        object_ref=source_ref,
+        request_id=relation_id,
+    )
+    return {
+        "ok": True,
+        "schema": "codex.mn.objectGraphManualRelation.v1",
+        "message": "已保存对象图谱关系。",
+        "relation": relation,
+        "event": event,
+    }
+
+
+def object_graph_relation_delete(payload: dict[str, Any]) -> dict[str, Any]:
+    relation_id = str(payload.get("relationId") or payload.get("id") or "").strip()
+    if not relation_id:
+        return {"ok": False, "message": "删除对象关系失败：缺少 relationId。"}
+    store = object_graph_relation_store()
+    relations = store.get("relations") if isinstance(store.get("relations"), list) else []
+    events = store.get("events") if isinstance(store.get("events"), list) else []
+    removed_relation = next((item for item in relations if isinstance(item, dict) and item.get("relationId") == relation_id), None)
+    remaining = [item for item in relations if not isinstance(item, dict) or item.get("relationId") != relation_id]
+    removed = len(relations) - len(remaining)
+    event = object_graph_relation_event(removed_relation, "deleted") if isinstance(removed_relation, dict) else {}
+    write_object_graph_relation_store(remaining, [*events, event] if event else events)
+    if removed:
+        append_diagnostic_log(
+            "info",
+            "objectGraphManualRelationDeleted",
+            relation_id,
+            request_id=relation_id,
+        )
+    return {
+        "ok": True,
+        "schema": "codex.mn.objectGraphManualRelationDelete.v1",
+        "message": "已删除对象图谱关系。" if removed else "对象图谱关系已不存在。",
+        "relationId": relation_id,
+        "removed": removed,
+        "event": event,
+    }
+
+
+def object_graph_manual_relation_node_id(object_id: str) -> str:
+    return str(object_id or "")
+
+
+def object_graph_manual_relations_for_object(root_id: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    store = object_graph_relation_store()
+    relations = store.get("relations") if isinstance(store.get("relations"), list) else []
+    out: list[dict[str, Any]] = []
+    for item in relations:
+        if not isinstance(item, dict):
+            continue
+        if topic_id and item.get("topicid") and item.get("topicid") != topic_id:
+            continue
+        if book_md5 and item.get("bookmd5") and item.get("bookmd5") != book_md5:
+            continue
+        if item.get("fromObjectId") == root_id or item.get("toObjectId") == root_id:
+            out.append(item)
+    return out
+
+
+def object_graph_add_manual_relations(
+    nodes: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+    root_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    relations = object_graph_manual_relations_for_object(root_id, payload)
+    added_edges = 0
+    for relation in relations:
+        from_object = clean_object_graph_object_ref(relation.get("fromObject") if isinstance(relation.get("fromObject"), dict) else {})
+        to_object = clean_object_graph_object_ref(relation.get("toObject") if isinstance(relation.get("toObject"), dict) else {})
+        from_id = str(relation.get("fromObjectId") or from_object.get("objectId") or "")
+        to_id = str(relation.get("toObjectId") or to_object.get("objectId") or "")
+        if not from_id or not to_id:
+            continue
+        for object_id, object_ref in [(from_id, from_object), (to_id, to_object)]:
+            if object_id == root_id:
+                continue
+            node_id = object_graph_manual_relation_node_id(object_id)
+            if node_id not in nodes:
+                title = str(object_ref.get("title") or object_id)
+                nodes[node_id] = object_graph_node(
+                    node_id=node_id,
+                    node_type="manual_mn_object",
+                    title=title,
+                    status=str(object_ref.get("kind") or "manual"),
+                    summary="手工维护的对象关系",
+                    object_ref=object_ref if object_ref_has_identity(object_ref) else {"objectId": object_id},
+                    source_id=object_id,
+                    updated_at=str(relation.get("updatedAt") or ""),
+                    graph_action=object_graph_action(
+                        "删除关系",
+                        "object_graph_relation_delete",
+                        {"relationId": str(relation.get("relationId") or "")},
+                    ),
+                    extra={
+                        "relationId": str(relation.get("relationId") or ""),
+                        "relationLabel": str(relation.get("label") or ""),
+                    },
+                )
+        edge_from = root_id if from_id == root_id else object_graph_manual_relation_node_id(from_id)
+        edge_to = root_id if to_id == root_id else object_graph_manual_relation_node_id(to_id)
+        if edge_from == edge_to:
+            continue
+        edge = object_graph_edge(
+            edge_from,
+            edge_to,
+            str(relation.get("relation") or "related_to"),
+            "manual_relation",
+            str(relation.get("relationId") or ""),
+            {
+                "relationId": str(relation.get("relationId") or ""),
+                "label": str(relation.get("label") or ""),
+                "note": str(relation.get("note") or ""),
+                "editable": True,
+                "updatedAt": str(relation.get("updatedAt") or ""),
+            },
+        )
+        edges.append(edge)
+        added_edges += 1
+    return {
+        "schema": "codex.mn.objectGraphManualRelations.v1",
+        "count": len(relations),
+        "edgeCount": added_edges,
+        "relations": relations,
+    }
+
+
+def object_graph_knowledge_query(object_ref: dict[str, Any]) -> str:
+    source_ref = object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {}
+    parts = [
+        str(object_ref.get("title") or ""),
+        str(object_ref.get("kind") or ""),
+        str(source_ref.get("quote") or ""),
+        str(source_ref.get("documentTitle") or ""),
+        str(source_ref.get("path") or ""),
+    ]
+    return " ".join(part.strip() for part in parts if part and part.strip())[:1200]
+
+
+def object_graph_knowledge_node_id(match: dict[str, Any]) -> str:
+    source_id = str(match.get("noteId") or match.get("id") or match.get("title") or "")
+    return operation_ledger_id("knowledge", source_id)
+
+
+def object_graph_knowledge_node(match: dict[str, Any], object_ref: dict[str, Any]) -> dict[str, Any]:
+    note_id = str(match.get("noteId") or "")
+    title = str(match.get("title") or note_id or "知识实体")
+    query = note_id or title
+    return object_graph_node(
+        node_id=object_graph_knowledge_node_id(match),
+        node_type="knowledge_entity",
+        title=title,
+        status=str(match.get("entityType") or match.get("kind") or ""),
+        summary=str(match.get("snippet") or ""),
+        object_ref=object_ref,
+        source_id=note_id or str(match.get("id") or ""),
+        updated_at=str(match.get("ts") or ""),
+        graph_action=object_graph_action(
+            "检索知识",
+            "knowledge_index_search",
+            {"query": query, "limit": 8},
+        ),
+        extra={
+            "knowledgeId": str(match.get("id") or ""),
+            "entityType": str(match.get("entityType") or match.get("kind") or ""),
+            "noteId": note_id,
+            "sourceRef": match.get("sourceRef") if isinstance(match.get("sourceRef"), dict) else {},
+            "relations": match.get("relations") if isinstance(match.get("relations"), list) else [],
+            "score": int(match.get("score") or 0),
+        },
+    )
+
+
+def object_graph_collect_knowledge_matches(
+    payload: dict[str, Any],
+    object_ref: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    query = object_graph_knowledge_query(object_ref)
+    if not query:
+        return []
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    result = knowledge_index.search(query, topicid=topic_id, bookmd5=book_md5, limit=limit)
+    raw_matches = result.get("matches") if isinstance(result.get("matches"), list) else []
+    by_key: dict[str, dict[str, Any]] = {}
+    queue: list[dict[str, Any]] = []
+    for item in raw_matches:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("noteId") or item.get("id") or item.get("title") or "")
+        if key and key not in by_key:
+            by_key[key] = item
+            queue.append(item)
+    for item in list(queue):
+        relations = item.get("relations") if isinstance(item.get("relations"), list) else []
+        for relation in relations[:12]:
+            if not isinstance(relation, dict):
+                continue
+            target = str(relation.get("targetNoteId") or relation.get("targetId") or "").strip()
+            if not target or target in by_key:
+                continue
+            related = knowledge_index.search(target, topicid=topic_id, bookmd5=book_md5, limit=1)
+            related_matches = related.get("matches") if isinstance(related.get("matches"), list) else []
+            if related_matches and isinstance(related_matches[0], dict):
+                by_key[target] = related_matches[0]
+                queue.append(related_matches[0])
+            if len(queue) >= limit:
+                break
+        if len(queue) >= limit:
+            break
+    return queue[:limit]
+
+
+def object_graph_mn_note_node_id(note_id: str) -> str:
+    return operation_ledger_id("mnnote", note_id)
+
+
+def object_graph_flatten_mindmap_tree(tree: dict[str, Any], max_nodes: int = 160) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    def walk(node: Any, parent_note_id: str, depth: int, path: str) -> None:
+        if len(out) >= max_nodes or not isinstance(node, dict):
+            return
+        children = node.get("children") if isinstance(node.get("children"), list) else []
+        note_id = str(node.get("noteId") or node.get("id") or "").strip()
+        title = str(node.get("title") or node.get("name") or note_id or "未命名节点")
+        out.append(
+            {
+                "noteId": note_id,
+                "title": title,
+                "body": str(node.get("body") or node.get("text") or "")[:1200],
+                "parentNoteId": parent_note_id,
+                "depth": depth,
+                "path": path,
+                "childCount": len(children),
+            }
+        )
+        for index, child in enumerate(children):
+            if len(out) >= max_nodes:
+                break
+            child_path = f"{path}.{index + 1}" if path else str(index + 1)
+            walk(child, note_id, depth + 1, child_path)
+
+    walk(tree, "", 0, "1")
+    return out
+
+
+def mindmap_tree_item_object_ref(item: dict[str, Any], cache: dict[str, Any]) -> dict[str, Any]:
+    note_id = str(item.get("noteId") or "").strip()
+    title = str(item.get("title") or note_id or "MN 节点")
+    return {
+        "objectId": f"mnobj:note:{note_id}" if note_id else "",
+        "kind": "mindmap_node",
+        "title": title[:240],
+        "sourceRef": {
+            "noteId": note_id,
+            "parentNoteId": str(item.get("parentNoteId") or ""),
+            "nodePath": str(item.get("path") or ""),
+            "documentTitle": str(cache.get("rootTitle") or cache.get("selectedNoteTitle") or ""),
+        },
+    }
+
+
+def mindmap_tree_cache_object_refs(cache: dict[str, Any], max_nodes: int = 500) -> list[dict[str, Any]]:
+    tree = cache.get("currentMindmap") if isinstance(cache.get("currentMindmap"), dict) else {}
+    if not tree:
+        return []
+    refs: list[dict[str, Any]] = []
+    for item in object_graph_flatten_mindmap_tree(tree, max_nodes=max_nodes):
+        if not isinstance(item, dict) or not item.get("noteId"):
+            continue
+        refs.append(mindmap_tree_item_object_ref(item, cache))
+    return refs
+
+
+def register_mindmap_tree_cache_objects(payload: dict[str, Any], cache: dict[str, Any] | None = None) -> dict[str, Any]:
+    cache = cache if isinstance(cache, dict) else read_latest_mindmap_tree(normalize_topic_id(payload), normalize_book_md5(payload))
+    refs = mindmap_tree_cache_object_refs(cache if isinstance(cache, dict) else {})
+    if not refs:
+        return {"ok": True, "schema": "codex.mn.mnObjectRegistry.v1", "registered": 0}
+    return register_mn_objects(
+        refs,
+        payload,
+        "mindmap_tree_cache",
+        source={
+            "sourceEvent": str(cache.get("sourceEvent") or "mindmapTreeReadFinished"),
+            "updatedAt": str(cache.get("updatedAt") or ""),
+            "nodeCount": len(refs),
+        },
+    )
+
+
+def native_scan_object_ref(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    source_ref = value.get("sourceRef") if isinstance(value.get("sourceRef"), dict) else {}
+    note_id = str(source_ref.get("noteId") or value.get("noteId") or value.get("id") or "").strip()
+    raw_object_id = str(value.get("objectId") or value.get("mnObjectId") or "").strip()
+    object_id = raw_object_id or (f"mnobj:note:{note_id}" if note_id else "")
+    kind = str(value.get("kind") or value.get("objectKind") or ("mindmap_node" if note_id else "mn_object"))[:80]
+    title = str(value.get("title") or value.get("noteTitle") or value.get("name") or object_id)[:240]
+    merged_source_ref = {
+        **source_ref,
+        "noteId": str(source_ref.get("noteId") or note_id),
+        "parentNoteId": str(source_ref.get("parentNoteId") or value.get("parentNoteId") or ""),
+        "nodePath": str(source_ref.get("nodePath") or value.get("nodePath") or value.get("path") or ""),
+        "documentTitle": str(source_ref.get("documentTitle") or value.get("documentTitle") or ""),
+    }
+    return {
+        "objectId": object_id,
+        "kind": kind,
+        "title": title,
+        "sourceRef": merged_source_ref,
+    }
+
+
+def register_native_object_scan_event(record: dict[str, Any]) -> dict[str, Any]:
+    extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+    raw_objects = extra.get("objects") if isinstance(extra.get("objects"), list) else extra.get("mnObjects")
+    if not isinstance(raw_objects, list):
+        raw_objects = []
+    refs = [native_scan_object_ref(item) for item in raw_objects]
+    refs = [item for item in refs if isinstance(item, dict) and item.get("objectId")]
+    if not refs:
+        return {"ok": True, "schema": "codex.mn.mnObjectRegistry.v1", "registered": 0}
+    return register_mn_objects(
+        refs,
+        {"topicid": str(record.get("topicid") or ""), "bookmd5": str(record.get("bookmd5") or "")},
+        "native_object_scan",
+        source={
+            "sourceEvent": str(record.get("event") or "mnObjectRegistryScanFinished"),
+            "scanId": str(extra.get("scanId") or ""),
+            "objectCount": len(refs),
+            "truncatedCount": int(extra.get("truncatedCount") or 0),
+        },
+    )
+
+
+def object_graph_mn_note_node(item: dict[str, Any], object_ref: dict[str, Any], cache: dict[str, Any]) -> dict[str, Any]:
+    note_id = str(item.get("noteId") or "")
+    title = str(item.get("title") or note_id or "MN 节点")
+    note_ref = mindmap_tree_item_object_ref(item, {**cache, "rootTitle": str(cache.get("rootTitle") or object_ref.get("title") or "")})
+    source_ref = note_ref.get("sourceRef") if isinstance(note_ref.get("sourceRef"), dict) else {}
+    return object_graph_node(
+        node_id=object_graph_mn_note_node_id(note_id),
+        node_type="mn_note",
+        title=title,
+        status=f"depth {int(item.get('depth') or 0)}",
+        summary=str(item.get("body") or ""),
+        object_ref=note_ref,
+        source_id=note_id,
+        updated_at=str(cache.get("updatedAt") or ""),
+        graph_action=object_graph_action(
+            "读取子树",
+            "mn_read_tree",
+            {"selectedNoteId": note_id, "selectedNoteTitle": title},
+        ),
+        extra={
+            "noteId": note_id,
+            "parentNoteId": str(item.get("parentNoteId") or ""),
+            "depth": int(item.get("depth") or 0),
+            "path": str(item.get("path") or ""),
+            "childCount": int(item.get("childCount") or 0),
+            "sourceRef": source_ref,
+        },
+    )
+
+
+def object_graph_note_id_from_object_id(object_id: str) -> str:
+    object_id = str(object_id or "")
+    if object_id.startswith("mnobj:note:"):
+        return object_id.split("mnobj:note:", 1)[1].strip()
+    return ""
+
+
+def object_graph_registry_scan_items(payload: dict[str, Any], max_nodes: int = 160) -> list[dict[str, Any]]:
+    registry = mn_object_registry({**payload, "limit": max_nodes})
+    objects = registry.get("objects") if isinstance(registry.get("objects"), list) else []
+    items: list[dict[str, Any]] = []
+    for entry in objects:
+        if not isinstance(entry, dict):
+            continue
+        evidence_types = [str(item) for item in entry.get("evidenceTypes", []) if isinstance(entry.get("evidenceTypes"), list) and str(item)]
+        if "native_object_scan" not in evidence_types:
+            continue
+        object_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+        source_ref = object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {}
+        note_id = str(source_ref.get("noteId") or object_graph_note_id_from_object_id(str(object_ref.get("objectId") or ""))).strip()
+        if not note_id:
+            continue
+        node_path = str(source_ref.get("nodePath") or "")
+        depth = max(0, len([part for part in node_path.split(".") if part]) - 1) if node_path else 0
+        items.append(
+            {
+                "noteId": note_id,
+                "title": str(object_ref.get("title") or entry.get("title") or note_id),
+                "body": str(entry.get("summary") or ""),
+                "parentNoteId": str(source_ref.get("parentNoteId") or ""),
+                "depth": depth,
+                "path": node_path,
+                "childCount": 0,
+                "objectRef": object_ref,
+                "sourceRef": source_ref,
+                "updatedAt": str(entry.get("lastSeenAt") or entry.get("firstSeenAt") or ""),
+                "evidenceTypes": sorted(set(evidence_types)),
+            }
+        )
+    items.sort(key=lambda item: (str(item.get("path") or "zzzz"), str(item.get("noteId") or "")))
+    return items[:max_nodes]
+
+
+def object_graph_registry_scan_node(item: dict[str, Any]) -> dict[str, Any]:
+    note_id = str(item.get("noteId") or "")
+    object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+    source_ref = item.get("sourceRef") if isinstance(item.get("sourceRef"), dict) else {}
+    return object_graph_node(
+        node_id=object_graph_mn_note_node_id(note_id),
+        node_type="mn_note",
+        title=str(item.get("title") or note_id or "MN 节点"),
+        status=f"scan depth {int(item.get('depth') or 0)}",
+        summary=str(item.get("body") or ""),
+        object_ref=object_ref,
+        source_id=note_id,
+        updated_at=str(item.get("updatedAt") or ""),
+        graph_action=object_graph_action(
+            "读取子树",
+            "mn_read_tree",
+            {"selectedNoteId": note_id, "selectedNoteTitle": str(item.get("title") or note_id)},
+        ),
+        extra={
+            "noteId": note_id,
+            "parentNoteId": str(item.get("parentNoteId") or ""),
+            "depth": int(item.get("depth") or 0),
+            "path": str(item.get("path") or ""),
+            "childCount": int(item.get("childCount") or 0),
+            "sourceRef": source_ref,
+            "evidenceTypes": item.get("evidenceTypes") if isinstance(item.get("evidenceTypes"), list) else [],
+        },
+    )
+
+
+def object_graph(payload: dict[str, Any]) -> dict[str, Any]:
+    requested_object_ref, requested_object_id = operation_ledger_object_filter(payload)
+    if not requested_object_id:
+        return {
+            "ok": False,
+            "message": "对象图谱读取失败：缺少当前 MNObject。请先刷新 Agent 计划或选择一个 MarginNote 对象。",
+            "schema": "codex.mn.objectGraph.v1",
+            "root": {},
+            "nodes": [],
+            "edges": [],
+            "counts": {"nodes": 0, "edges": 0},
+        }
+
+    limit = max(1, min(int(payload.get("limit") or 8), 30))
+    activity = object_activity({**payload, "mnObjectId": requested_object_id, "limit": limit})
+    ledger = operation_ledger_list({**payload, "mnObjectId": requested_object_id, "limit": limit})
+    object_ref = merge_object_ref(requested_object_ref, activity.get("objectRef") if isinstance(activity.get("objectRef"), dict) else {})
+    object_ref = merge_object_ref(object_ref, ledger.get("objectRef") if isinstance(ledger.get("objectRef"), dict) else {})
+    if not object_ref.get("objectId"):
+        object_ref = merge_object_ref({"objectId": requested_object_id}, object_ref)
+    root_id = str(object_ref.get("objectId") or requested_object_id)
+    nodes: dict[str, dict[str, Any]] = {
+        root_id: object_graph_node(
+            node_id=root_id,
+            node_type="mn_object",
+            title=str(object_ref.get("title") or root_id),
+            status="focused",
+            summary=str(object_ref.get("kind") or "MarginNote object"),
+            object_ref=object_ref,
+            source_id=root_id,
+            updated_at="",
+        )
+    }
+    edges: list[dict[str, Any]] = []
+
+    if activity.get("ok"):
+        conversations = activity.get("conversations") if isinstance(activity.get("conversations"), list) else []
+        for item in conversations[:limit]:
+            if not isinstance(item, dict):
+                continue
+            session_id = str(item.get("sessionId") or item.get("conversationId") or "")
+            node_id = operation_ledger_id("conversation", session_id)
+            if not node_id:
+                continue
+            object_graph_add_node(
+                nodes,
+                edges,
+                root_id,
+                object_graph_node(
+                    node_id=node_id,
+                    node_type="conversation",
+                    title=str(item.get("title") or "历史对话"),
+                    status=str(item.get("updatedAt") or ""),
+                    summary=str(item.get("lastMessage") or f"{int(item.get('messageCount') or 0)} 条消息"),
+                    object_ref=item.get("objectRef") if isinstance(item.get("objectRef"), dict) else object_ref,
+                    source_id=session_id,
+                    updated_at=str(item.get("updatedAt") or ""),
+                    graph_action=object_graph_action_from_descriptor(item.get("activityAction") if isinstance(item.get("activityAction"), dict) else {}),
+                ),
+                "has_conversation",
+                "object_activity",
+            )
+
+        logs = activity.get("logs") if isinstance(activity.get("logs"), list) else []
+        for item in logs[:limit]:
+            if not isinstance(item, dict):
+                continue
+            source_id = str(item.get("requestId") or item.get("event") or item.get("ts") or "")
+            node_id = operation_ledger_id("log", source_id)
+            if not node_id:
+                continue
+            object_graph_add_node(
+                nodes,
+                edges,
+                root_id,
+                object_graph_node(
+                    node_id=node_id,
+                    node_type="diagnostic_log",
+                    title=str(item.get("event") or "诊断日志"),
+                    status=str(item.get("level") or ""),
+                    summary=str(item.get("message") or ""),
+                    object_ref=item.get("objectRef") if isinstance(item.get("objectRef"), dict) else object_ref,
+                    source_id=source_id,
+                    updated_at=str(item.get("ts") or ""),
+                    graph_action=object_graph_action_from_descriptor(item.get("activityAction") if isinstance(item.get("activityAction"), dict) else {}),
+                ),
+                "has_log",
+                "object_activity",
+            )
+
+    if ledger.get("ok"):
+        entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
+        for item in entries[:limit]:
+            if not isinstance(item, dict):
+                continue
+            ledger_id = str(item.get("ledgerId") or "")
+            if not ledger_id:
+                continue
+            object_graph_add_node(
+                nodes,
+                edges,
+                root_id,
+                object_graph_node(
+                    node_id=ledger_id,
+                    node_type=str(item.get("entryType") or "operation"),
+                    title=str(item.get("title") or item.get("sourceId") or ledger_id),
+                    status=str(item.get("status") or ""),
+                    summary=str(item.get("summary") or ""),
+                    object_ref=item.get("objectRef") if isinstance(item.get("objectRef"), dict) else object_ref,
+                    source_id=str(item.get("sourceId") or ledger_id),
+                    updated_at=str(item.get("updatedAt") or item.get("createdAt") or ""),
+                    graph_action=object_graph_action_from_descriptor(item.get("ledgerAction") if isinstance(item.get("ledgerAction"), dict) else {}),
+                ),
+                "has_operation",
+                "operation_ledger",
+            )
+
+    mindmap_cache = read_latest_mindmap_tree(normalize_topic_id(payload), normalize_book_md5(payload))
+    mindmap_evidence: dict[str, Any] = {
+        "schema": "codex.mn.nativeMindmapTreeEvidence.v1",
+        "available": False,
+        "nodeCount": 0,
+        "truncatedCount": 0,
+        "selectedNoteId": "",
+        "rootTitle": "",
+    }
+    tree = mindmap_cache.get("currentMindmap") if isinstance(mindmap_cache.get("currentMindmap"), dict) else {}
+    if tree:
+        flattened = object_graph_flatten_mindmap_tree(tree)
+        mindmap_evidence = {
+            "schema": "codex.mn.nativeMindmapTreeEvidence.v1",
+            "available": True,
+            "sourceEvent": str(mindmap_cache.get("sourceEvent") or ""),
+            "updatedAt": str(mindmap_cache.get("updatedAt") or ""),
+            "selectedNoteId": str(mindmap_cache.get("selectedNoteId") or ""),
+            "selectedNoteTitle": str(mindmap_cache.get("selectedNoteTitle") or ""),
+            "rootTitle": str(mindmap_cache.get("rootTitle") or ""),
+            "nodeCount": int(mindmap_cache.get("nodeCount") or len(flattened)),
+            "truncatedCount": int(mindmap_cache.get("truncatedCount") or 0),
+        }
+        note_ids: set[str] = set()
+        for item in flattened:
+            note_id = str(item.get("noteId") or "")
+            if not note_id:
+                continue
+            note_ids.add(note_id)
+            object_graph_add_node(
+                nodes,
+                edges,
+                root_id,
+                object_graph_mn_note_node(item, object_ref, mindmap_cache),
+                "focuses_mn_note" if int(item.get("depth") or 0) == 0 else "mentions_mn_note",
+                "mindmap_tree_cache",
+            )
+        mn_relation_edges: set[str] = set()
+        for item in flattened:
+            note_id = str(item.get("noteId") or "")
+            parent_note_id = str(item.get("parentNoteId") or "")
+            if not note_id or not parent_note_id or parent_note_id not in note_ids:
+                continue
+            edge = object_graph_edge(
+                object_graph_mn_note_node_id(parent_note_id),
+                object_graph_mn_note_node_id(note_id),
+                "contains",
+                "mindmap_tree_cache",
+                str(item.get("path") or ""),
+            )
+            edge_id = str(edge.get("edgeId") or "")
+            if edge_id in mn_relation_edges:
+                continue
+            mn_relation_edges.add(edge_id)
+            edges.append(edge)
+
+    native_scan_items = object_graph_registry_scan_items(payload, max_nodes=max(24, limit * 8))
+    if native_scan_items:
+        source_ref = object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {}
+        root_note_id = str(source_ref.get("noteId") or object_graph_note_id_from_object_id(root_id)).strip()
+        scan_note_ids = {str(item.get("noteId") or "") for item in native_scan_items if str(item.get("noteId") or "")}
+        for item in native_scan_items:
+            note_id = str(item.get("noteId") or "")
+            if not note_id:
+                continue
+            object_graph_add_node(
+                nodes,
+                edges,
+                root_id,
+                object_graph_registry_scan_node(item),
+                "focuses_mn_note" if root_note_id and note_id == root_note_id else "mentions_mn_note",
+                "native_object_scan",
+            )
+        scan_relation_edges: set[str] = set()
+        for item in native_scan_items:
+            note_id = str(item.get("noteId") or "")
+            parent_note_id = str(item.get("parentNoteId") or "")
+            if not note_id or not parent_note_id or parent_note_id not in scan_note_ids:
+                continue
+            edge = object_graph_edge(
+                object_graph_mn_note_node_id(parent_note_id),
+                object_graph_mn_note_node_id(note_id),
+                "contains",
+                "native_object_scan",
+                str(item.get("path") or ""),
+                {"source": "MNObject Registry"},
+            )
+            edge_id = str(edge.get("edgeId") or "")
+            if edge_id in scan_relation_edges:
+                continue
+            scan_relation_edges.add(edge_id)
+            edges.append(edge)
+
+    knowledge_matches = object_graph_collect_knowledge_matches(payload, object_ref, limit)
+    note_id_to_node_id: dict[str, str] = {}
+    for item in knowledge_matches:
+        if not isinstance(item, dict):
+            continue
+        node_id = object_graph_knowledge_node_id(item)
+        if not node_id:
+            continue
+        note_id = str(item.get("noteId") or "")
+        if note_id:
+            note_id_to_node_id[note_id] = node_id
+        object_graph_add_node(
+            nodes,
+            edges,
+            root_id,
+            object_graph_knowledge_node(item, object_ref),
+            "mentions_knowledge",
+            "knowledge_index",
+        )
+    relation_edge_ids: set[str] = set()
+    for item in knowledge_matches:
+        from_id = object_graph_knowledge_node_id(item)
+        if not from_id or from_id not in nodes:
+            continue
+        relations = item.get("relations") if isinstance(item.get("relations"), list) else []
+        for relation in relations:
+            if not isinstance(relation, dict):
+                continue
+            target = str(relation.get("targetNoteId") or relation.get("targetId") or "").strip()
+            to_id = note_id_to_node_id.get(target, "")
+            if not to_id or to_id not in nodes:
+                continue
+            relation_type = str(relation.get("type") or relation.get("relation") or "related_to") or "related_to"
+            edge = object_graph_edge(from_id, to_id, relation_type, "knowledge_relation", str(relation.get("label") or target))
+            edge_id = str(edge.get("edgeId") or "")
+            if edge_id in relation_edge_ids:
+                continue
+            relation_edge_ids.add(edge_id)
+            edges.append(edge)
+
+    manual_relations = object_graph_add_manual_relations(nodes, edges, root_id, payload)
+
+    type_counts: dict[str, int] = {}
+    for node in nodes.values():
+        node_type = str(node.get("nodeType") or "unknown")
+        type_counts[node_type] = type_counts.get(node_type, 0) + 1
+    evidence_counts: dict[str, int] = {}
+    for edge in edges:
+        evidence_type = str(edge.get("evidenceType") or "")
+        if evidence_type:
+            evidence_counts[evidence_type] = evidence_counts.get(evidence_type, 0) + 1
+    return {
+        "ok": True,
+        "schema": "codex.mn.objectGraph.v1",
+        "message": f"已读取对象图谱：{len(nodes)} 个节点，{len(edges)} 条关系。",
+        "root": object_ref if object_ref_has_identity(object_ref) else {"objectId": root_id},
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "counts": {"nodes": len(nodes), "edges": len(edges), **type_counts, **evidence_counts},
+        "mindmapTree": mindmap_evidence,
+        "manualRelations": manual_relations,
+        "activity": {
+            "ok": bool(activity.get("ok")),
+            "counts": activity.get("counts") if isinstance(activity.get("counts"), dict) else {},
+        },
+        "ledger": {
+            "ok": bool(ledger.get("ok")),
+            "counts": ledger.get("counts") if isinstance(ledger.get("counts"), dict) else {},
+        },
+    }
+
+
+def attach_activity_action(kind: str, item: dict[str, Any], object_id: str) -> dict[str, Any]:
+    item = dict(item)
+    action = ""
+    label = "查看"
+    payload: dict[str, Any] = {"mnObjectId": object_id}
+    if kind == "conversation":
+        action = "conversation_load"
+        label = "打开对话"
+        payload["sessionId"] = str(item.get("sessionId") or "")
+    elif kind == "workflow":
+        action = "workflow_status"
+        label = "查看工作流"
+        payload["workflowRunId"] = str(item.get("id") or item.get("workflowRunId") or "")
+    elif kind == "transaction":
+        action = "ai_edit_transaction_get"
+        label = "查看事务"
+        payload["transactionId"] = str(item.get("transactionId") or "")
+    elif kind == "log":
+        action = "log_detail"
+        label = "查看日志"
+        payload["requestId"] = str(item.get("requestId") or "")
+        payload["event"] = str(item.get("event") or "")
+    elif kind == "manual_relation":
+        action = "operation_ledger_get"
+        label = "查看关系"
+        payload["ledgerId"] = str(item.get("ledgerId") or operation_ledger_id("manualrel", item.get("eventId") or ""))
+    item["activityKind"] = kind
+    item["activityAction"] = {
+        "schema": "codex.mn.objectActivityAction.v1",
+        "label": label,
+        "action": action,
+        "payload": payload,
+    }
+    return item
+
+
+def object_activity(payload: dict[str, Any]) -> dict[str, Any]:
+    object_ref = object_ref_from_mapping(payload)
+    object_id = str(object_ref.get("objectId") or "")
+    if not object_id:
+        return {
+            "ok": False,
+            "message": "对象活动读取失败：缺少当前 MNObject。请先刷新 Agent 计划或选择一个 MarginNote 对象。",
+            "schema": "codex.mn.objectActivity.v1",
+            "objectRef": {},
+        }
+    limit = max(1, min(int(payload.get("limit") or 6), 20))
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+
+    conversations_result = list_conversations({**payload, "mnObjectId": object_id})
+    conversations = conversations_result.get("conversations") if isinstance(conversations_result.get("conversations"), list) else []
+    conversations = [attach_activity_action("conversation", item, object_id) for item in conversations[:limit] if isinstance(item, dict)]
+    for item in conversations:
+        object_ref = merge_object_ref(object_ref, item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {})
+
+    workflows_result = workflow_list({**payload, "mnObjectId": object_id, "limit": limit})
+    workflow_runs = workflows_result.get("workflowRuns") if isinstance(workflows_result.get("workflowRuns"), list) else []
+    workflow_runs = [attach_activity_action("workflow", item, object_id) for item in workflow_runs if isinstance(item, dict)]
+
+    transaction_candidates = transaction_manager.latest_summary(topicid=topic_id, bookmd5=book_md5, limit=80)
+    transactions: list[dict[str, Any]] = []
+    for item in transaction_candidates.get("items") if isinstance(transaction_candidates.get("items"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        item_object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+        if str(item_object_ref.get("objectId") or "") != object_id:
+            continue
+        object_ref = merge_object_ref(object_ref, item_object_ref)
+        transactions.append(attach_activity_action("transaction", item, object_id))
+        if len(transactions) >= limit:
+            break
+
+    logs: list[dict[str, Any]] = []
+    for item in reversed(read_recent_diagnostic_logs(160)):
+        if not isinstance(item, dict):
+            continue
+        item_object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+        if str(item_object_ref.get("objectId") or "") != object_id:
+            continue
+        object_ref = merge_object_ref(object_ref, item_object_ref)
+        logs.append(attach_activity_action("log", item, object_id))
+        if len(logs) >= limit:
+            break
+
+    manual_relations: list[dict[str, Any]] = []
+    for item in manual_relation_events_for_object(payload, object_id)[:limit]:
+        entry = manual_relation_operation_ledger_entry(item)
+        item_with_ledger = {**item, "ledgerId": entry.get("ledgerId")}
+        item_object_ref = item.get("fromObject") if isinstance(item.get("fromObject"), dict) else {}
+        if str(item.get("fromObjectId") or "") != object_id:
+            item_object_ref = item.get("toObject") if isinstance(item.get("toObject"), dict) else {}
+        object_ref = merge_object_ref(object_ref, item_object_ref)
+        manual_relations.append(attach_activity_action("manual_relation", item_with_ledger, object_id))
+
+    counts = {
+        "conversations": len(conversations),
+        "workflowRuns": len(workflow_runs),
+        "transactions": len(transactions),
+        "logs": len(logs),
+        "manualRelations": len(manual_relations),
+    }
+    total = sum(counts.values())
+    return {
+        "ok": True,
+        "schema": "codex.mn.objectActivity.v1",
+        "message": f"已读取当前对象活动：{total} 条。",
+        "objectRef": object_ref,
+        "counts": counts,
+        "conversations": conversations,
+        "workflowRuns": workflow_runs,
+        "transactions": transactions,
+        "logs": logs,
+        "manualRelations": manual_relations,
+    }
+
+
+def object_browser_action(label: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.objectBrowserAction.v1",
+        "label": str(label or "打开"),
+        "action": str(action or ""),
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def object_browser_action_from_descriptor(descriptor: dict[str, Any]) -> dict[str, Any]:
+    descriptor = descriptor if isinstance(descriptor, dict) else {}
+    return object_browser_action(
+        str(descriptor.get("label") or "打开"),
+        str(descriptor.get("action") or ""),
+        descriptor.get("payload") if isinstance(descriptor.get("payload"), dict) else {},
+    )
+
+
+def object_browser_item(
+    *,
+    browser_id: str,
+    object_type: str,
+    kind: str,
+    title: str,
+    summary: str = "",
+    status: str = "",
+    object_ref: dict[str, Any] | None = None,
+    source_ref: dict[str, Any] | None = None,
+    evidence: dict[str, Any] | None = None,
+    available_actions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    object_ref = object_ref if isinstance(object_ref, dict) else {}
+    source_ref = source_ref if isinstance(source_ref, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    actions = [item for item in (available_actions or []) if isinstance(item, dict) and item.get("action")]
+    item: dict[str, Any] = {
+        "schema": "codex.mn.objectBrowserItem.v1",
+        "browserId": browser_id,
+        "objectType": object_type,
+        "kind": kind,
+        "title": title,
+        "summary": summary,
+        "status": status,
+        "objectRef": object_ref if object_ref_has_identity(object_ref) else {},
+        "sourceRef": transaction_manager.clean_source_ref(source_ref),
+        "evidence": evidence,
+        "availableActions": actions,
+    }
+    if actions:
+        item["browserAction"] = actions[0]
+    return item
+
+
+def object_browser_filter_payload(payload: dict[str, Any]) -> dict[str, str]:
+    object_type = str(
+        payload.get("objectTypeFilter")
+        or payload.get("filterObjectType")
+        or payload.get("objectType")
+        or ""
+    ).strip()
+    kind = str(
+        payload.get("kindFilter")
+        or payload.get("filterKind")
+        or payload.get("objectKind")
+        or ""
+    ).strip()
+    query = str(
+        payload.get("query")
+        or payload.get("search")
+        or payload.get("objectQuery")
+        or ""
+    ).strip()
+    if object_type in {"*", "all", "全部"}:
+        object_type = ""
+    if kind in {"*", "all", "全部"}:
+        kind = ""
+    return {"objectType": object_type, "kind": kind, "query": query}
+
+
+def object_browser_item_text(item: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ["browserId", "objectType", "kind", "title", "summary", "status"]:
+        value = item.get(key)
+        if value:
+            parts.append(str(value))
+    object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+    source_ref = item.get("sourceRef") if isinstance(item.get("sourceRef"), dict) else {}
+    for mapping in [object_ref, source_ref]:
+        for key in ["objectId", "kind", "title", "noteId", "page", "quote", "path", "documentTitle"]:
+            value = mapping.get(key)
+            if value is not None and value != "":
+                parts.append(str(value))
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+    for key in ["schema", "relation", "label", "note", "event", "message"]:
+        value = evidence.get(key)
+        if value:
+            parts.append(str(value))
+    return "\n".join(parts).lower()
+
+
+def filter_object_browser_items(objects: list[dict[str, Any]], filters: dict[str, str]) -> list[dict[str, Any]]:
+    object_type = str(filters.get("objectType") or "")
+    kind = str(filters.get("kind") or "")
+    query = str(filters.get("query") or "").lower()
+    filtered: list[dict[str, Any]] = []
+    for item in objects:
+        if object_type and str(item.get("objectType") or "") != object_type:
+            continue
+        if kind and str(item.get("kind") or "") != kind:
+            continue
+        if query and query not in object_browser_item_text(item):
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def object_browser(payload: dict[str, Any]) -> dict[str, Any]:
+    requested_object_ref, requested_object_id = operation_ledger_object_filter(payload)
+    if not requested_object_id:
+        return {
+            "ok": False,
+            "message": "对象浏览器读取失败：缺少当前 MNObject。请先刷新 Agent 计划或选择一个 MarginNote 对象。",
+            "schema": "codex.mn.objectBrowser.v1",
+            "rootObject": {},
+            "objects": [],
+            "groups": [],
+            "counts": {"total": 0},
+        }
+
+    limit = max(1, min(int(payload.get("limit") or 12), 40))
+    scoped_payload = {**payload, "mnObjectId": requested_object_id, "limit": limit}
+    graph = object_graph(scoped_payload)
+    activity = object_activity(scoped_payload)
+    ledger = operation_ledger_list(scoped_payload)
+    object_ref = requested_object_ref
+    object_ref = merge_object_ref(object_ref, graph.get("root") if isinstance(graph.get("root"), dict) else {})
+    object_ref = merge_object_ref(object_ref, activity.get("objectRef") if isinstance(activity.get("objectRef"), dict) else {})
+    object_ref = merge_object_ref(object_ref, ledger.get("objectRef") if isinstance(ledger.get("objectRef"), dict) else {})
+    if not object_ref.get("objectId"):
+        object_ref = merge_object_ref({"objectId": requested_object_id}, object_ref)
+
+    observed_object_refs: list[dict[str, Any]] = [object_ref]
+    focus_actions = [
+        object_browser_action("打开图谱", "object_graph", {"mnObjectId": requested_object_id, "limit": limit}),
+        object_browser_action("查看活动", "object_activity", {"mnObjectId": requested_object_id, "limit": limit}),
+        object_browser_action("查看账本", "operation_ledger_list", {"mnObjectId": requested_object_id, "limit": limit}),
+    ]
+    objects: list[dict[str, Any]] = [
+        object_browser_item(
+            browser_id=str(object_ref.get("objectId") or requested_object_id),
+            object_type="focus",
+            kind=str(object_ref.get("kind") or "mn_object"),
+            title=str(object_ref.get("title") or requested_object_id),
+            summary="当前 MarginNote 焦点对象",
+            status="focused",
+            object_ref=object_ref,
+            source_ref=object_ref.get("sourceRef") if isinstance(object_ref.get("sourceRef"), dict) else {},
+            evidence={"schema": "codex.mn.objectBrowserFocusEvidence.v1", "objectRef": object_ref},
+            available_actions=focus_actions,
+        )
+    ]
+
+    graph_objects = 0
+    if graph.get("ok"):
+        for node in graph.get("nodes") if isinstance(graph.get("nodes"), list) else []:
+            if not isinstance(node, dict) or node.get("nodeType") == "mn_object":
+                continue
+            action = node.get("graphAction") if isinstance(node.get("graphAction"), dict) else {}
+            node_ref = node.get("objectRef") if isinstance(node.get("objectRef"), dict) else {}
+            node_source_ref = node.get("sourceRef") if isinstance(node.get("sourceRef"), dict) else {}
+            if not node_source_ref and isinstance(node_ref.get("sourceRef"), dict):
+                node_source_ref = node_ref["sourceRef"]
+            if object_ref_has_identity(node_ref):
+                observed_object_refs.append(node_ref)
+            objects.append(
+                object_browser_item(
+                    browser_id=str(node.get("nodeId") or node.get("sourceId") or ""),
+                    object_type="object_graph",
+                    kind=str(node.get("nodeType") or "graph_node"),
+                    title=str(node.get("title") or node.get("sourceId") or "图谱对象"),
+                    summary=str(node.get("summary") or ""),
+                    status=str(node.get("status") or ""),
+                    object_ref=node_ref,
+                    source_ref=node_source_ref,
+                    evidence={"schema": "codex.mn.objectBrowserGraphEvidence.v1", "node": node},
+                    available_actions=[object_browser_action_from_descriptor(action)] if action.get("action") else [],
+                )
+            )
+            graph_objects += 1
+            if graph_objects >= limit:
+                break
+
+    activity_objects = 0
+    if activity.get("ok"):
+        activity_lists = [
+            activity.get("conversations"),
+            activity.get("workflowRuns"),
+            activity.get("transactions"),
+            activity.get("manualRelations"),
+            activity.get("logs"),
+        ]
+        for bucket in activity_lists:
+            for item in bucket if isinstance(bucket, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                action = item.get("activityAction") if isinstance(item.get("activityAction"), dict) else {}
+                item_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+                item_source_ref = item_ref.get("sourceRef") if isinstance(item_ref.get("sourceRef"), dict) else {}
+                if object_ref_has_identity(item_ref):
+                    observed_object_refs.append(item_ref)
+                browser_id = str(
+                    item.get("sessionId")
+                    or item.get("id")
+                    or item.get("transactionId")
+                    or item.get("eventId")
+                    or item.get("requestId")
+                    or item.get("event")
+                    or ""
+                )
+                objects.append(
+                    object_browser_item(
+                        browser_id=operation_ledger_id("activity", browser_id) or browser_id,
+                        object_type="object_activity",
+                        kind=str(item.get("activityKind") or "activity"),
+                        title=str(item.get("title") or item.get("event") or item.get("label") or item.get("transactionId") or "对象活动"),
+                        summary=str(item.get("message") or item.get("lastMessage") or item.get("status") or item.get("note") or ""),
+                        status=str(item.get("status") or item.get("level") or ""),
+                        object_ref=item_ref,
+                        source_ref=item_source_ref,
+                        evidence={"schema": "codex.mn.objectBrowserActivityEvidence.v1", "activity": item},
+                        available_actions=[object_browser_action_from_descriptor(action)] if action.get("action") else [],
+                    )
+                )
+                activity_objects += 1
+                if activity_objects >= limit:
+                    break
+            if activity_objects >= limit:
+                break
+
+    ledger_objects = 0
+    if ledger.get("ok"):
+        for entry in ledger.get("entries") if isinstance(ledger.get("entries"), list) else []:
+            if not isinstance(entry, dict):
+                continue
+            action = entry.get("ledgerAction") if isinstance(entry.get("ledgerAction"), dict) else {}
+            entry_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+            if object_ref_has_identity(entry_ref):
+                observed_object_refs.append(entry_ref)
+            evidence: dict[str, Any] = {"schema": "codex.mn.objectBrowserLedgerEvidence.v1", "entry": entry}
+            if str(entry.get("entryType") or "") == "object_graph_manual_relation":
+                detail = operation_ledger_get({"ledgerId": str(entry.get("ledgerId") or "")})
+                if detail.get("ok") and isinstance(detail.get("evidence"), dict):
+                    evidence.update(detail["evidence"])
+            objects.append(
+                object_browser_item(
+                    browser_id=str(entry.get("ledgerId") or entry.get("sourceId") or ""),
+                    object_type="operation_ledger",
+                    kind=str(entry.get("entryType") or "ledger"),
+                    title=str(entry.get("title") or entry.get("sourceId") or "账本对象"),
+                    summary=str(entry.get("summary") or ""),
+                    status=str(entry.get("status") or ""),
+                    object_ref=entry_ref,
+                    source_ref=entry_ref.get("sourceRef") if isinstance(entry_ref.get("sourceRef"), dict) else {},
+                    evidence=evidence,
+                    available_actions=[object_browser_action_from_descriptor(action)] if action.get("action") else [],
+                )
+            )
+            ledger_objects += 1
+            if ledger_objects >= limit:
+                break
+
+    register_mn_objects(
+        observed_object_refs,
+        payload,
+        "object_browser",
+        source={"mnObjectId": requested_object_id},
+    )
+    registry_objects = 0
+    registry = mn_object_registry({**payload, "limit": limit})
+    if registry.get("ok"):
+        for entry in registry.get("objects") if isinstance(registry.get("objects"), list) else []:
+            if not isinstance(entry, dict):
+                continue
+            entry_ref = entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {}
+            object_id = str(entry_ref.get("objectId") or entry.get("objectId") or "")
+            if not object_id:
+                continue
+            evidence_types = [
+                str(item)
+                for item in entry.get("evidenceTypes", [])
+                if isinstance(entry.get("evidenceTypes"), list) and str(item)
+            ]
+            action_payload = {
+                "mnObjectId": object_id,
+                "mnObject": entry_ref,
+                "evidenceTypes": sorted(set(evidence_types)),
+                "limit": limit,
+            }
+            objects.append(
+                object_browser_item(
+                    browser_id=operation_ledger_id("registry", object_id),
+                    object_type="registry",
+                    kind=str(entry_ref.get("kind") or entry.get("kind") or "mn_object"),
+                    title=str(entry_ref.get("title") or entry.get("title") or object_id),
+                    summary=f"Registry seen {int(entry.get('seenCount') or 0)} 次",
+                    status="registered",
+                    object_ref=entry_ref,
+                    source_ref=entry_ref.get("sourceRef") if isinstance(entry_ref.get("sourceRef"), dict) else {},
+                    evidence={"schema": "codex.mn.objectBrowserRegistryEvidence.v1", "registryEntry": entry},
+                    available_actions=[
+                        object_browser_action("打开图谱", "object_graph", action_payload),
+                        object_browser_action("查看活动", "object_activity", action_payload),
+                        object_browser_action("查看账本", "operation_ledger_list", action_payload),
+                    ],
+                )
+            )
+            registry_objects += 1
+            if registry_objects >= limit:
+                break
+
+    filters = object_browser_filter_payload(payload)
+    filtered_objects = filter_object_browser_items(objects, filters)
+    type_counts: dict[str, int] = {}
+    for item in filtered_objects:
+        object_type = str(item.get("objectType") or "unknown")
+        type_counts[object_type] = type_counts.get(object_type, 0) + 1
+    groups = [
+        {"schema": "codex.mn.objectBrowserGroup.v1", "groupId": "focus", "label": "当前对象", "count": type_counts.get("focus", 0)},
+        {"schema": "codex.mn.objectBrowserGroup.v1", "groupId": "registry", "label": "MNObject Registry", "count": type_counts.get("registry", 0)},
+        {"schema": "codex.mn.objectBrowserGroup.v1", "groupId": "object_graph", "label": "Object Graph", "count": type_counts.get("object_graph", 0)},
+        {"schema": "codex.mn.objectBrowserGroup.v1", "groupId": "object_activity", "label": "对象活动", "count": type_counts.get("object_activity", 0)},
+        {"schema": "codex.mn.objectBrowserGroup.v1", "groupId": "operation_ledger", "label": "Operation Ledger", "count": type_counts.get("operation_ledger", 0)},
+    ]
+    return {
+        "ok": True,
+        "schema": "codex.mn.objectBrowser.v1",
+        "message": f"已读取对象浏览器：{len(filtered_objects)} / {len(objects)} 个对象。",
+        "rootObject": object_ref,
+        "filters": filters,
+        "groups": groups,
+        "counts": {
+            "total": len(filtered_objects),
+            "filteredTotal": len(filtered_objects),
+            "unfilteredTotal": len(objects),
+            **type_counts,
+        },
+        "objects": filtered_objects[: max(limit * 3, limit)],
+        "sources": {
+            "registry": registry.get("counts") if isinstance(registry.get("counts"), dict) else {},
+            "graph": graph.get("counts") if isinstance(graph.get("counts"), dict) else {},
+            "activity": activity.get("counts") if isinstance(activity.get("counts"), dict) else {},
+            "ledger": ledger.get("counts") if isinstance(ledger.get("counts"), dict) else {},
+        },
     }
 
 
@@ -3308,6 +7225,21 @@ def append_event(payload: dict[str, Any]) -> dict[str, Any]:
     }
     with EVENTS_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    transaction_result = transaction_manager.apply_native_event(record)
+    if transaction_result.get("ok"):
+        record["transaction"] = transaction_manager.transaction_summary(transaction_result["transaction"])
+    if record["event"] == "mindmapTreeReadFinished":
+        cache_result = write_latest_mindmap_tree(record)
+        if cache_result.get("ok"):
+            record["mindmapTreeCache"] = {
+                "schema": cache_result["cache"].get("schema"),
+                "nodeCount": cache_result["cache"].get("nodeCount"),
+                "updatedAt": cache_result["cache"].get("updatedAt"),
+            }
+            if isinstance(cache_result.get("mnObjectRegistry"), dict):
+                record["mnObjectRegistry"] = cache_result["mnObjectRegistry"]
+    if record["event"] == "mnObjectRegistryScanFinished":
+        record["mnObjectRegistry"] = register_native_object_scan_event(record)
     return {"ok": True, "message": "event recorded", "event": record}
 
 
@@ -3327,6 +7259,61 @@ def read_recent_events(limit: int = 12) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             events.append(item)
     return events
+
+
+def latest_mindmap_diff_apply_status(topic_id: str = "", book_md5: str = "", limit: int = 120) -> dict[str, Any]:
+    def safe_count(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except Exception:
+            return 0
+
+    topic_id = str(topic_id or "")
+    book_md5 = str(book_md5 or "")
+    for item in reversed(read_recent_events(limit)):
+        if str(item.get("event") or "") != "mindmapDiffApplyFinished":
+            continue
+        if topic_id and str(item.get("topicid") or "") != topic_id:
+            continue
+        if book_md5 and str(item.get("bookmd5") or "") != book_md5:
+            continue
+        extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
+        verification = extra.get("verification") if isinstance(extra.get("verification"), dict) else {}
+        failed_count = safe_count(extra.get("failedCount"))
+        applied_count = safe_count(extra.get("appliedCount"))
+        status = str(verification.get("status") or ("block" if failed_count else ("pass" if applied_count else "unknown")))
+        summary = str(
+            verification.get("summary")
+            or f"脑图 Diff 验证：通过 {safe_count(verification.get('verifiedCount')) or applied_count}，失败 {safe_count(verification.get('failedVerificationCount')) or failed_count}。"
+        )
+        return {
+            "schema": "codex.mn.mindmapDiffApplyStatus.v1",
+            "available": True,
+            "status": status,
+            "summary": summary,
+            "topicid": str(item.get("topicid") or ""),
+            "bookmd5": str(item.get("bookmd5") or ""),
+            "updatedAt": str(item.get("ts") or ""),
+            "appliedCount": applied_count,
+            "failedCount": failed_count,
+            "createdNoteIds": extra.get("createdNoteIds") if isinstance(extra.get("createdNoteIds"), list) else [],
+            "appliedOperations": extra.get("appliedOperations") if isinstance(extra.get("appliedOperations"), list) else [],
+            "verification": verification,
+        }
+    return {
+        "schema": "codex.mn.mindmapDiffApplyStatus.v1",
+        "available": False,
+        "status": "unknown",
+        "summary": "还没有收到脑图 Diff 局部执行验证结果。",
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "updatedAt": "",
+        "appliedCount": 0,
+        "failedCount": 0,
+        "createdNoteIds": [],
+        "appliedOperations": [],
+        "verification": {},
+    }
 
 
 def event_epoch(event: dict[str, Any] | None) -> float:
@@ -3600,6 +7587,10 @@ def native_api_capability_matrix(extra: dict[str, Any], candidate_methods: list[
         highlight_evidence.append("unverified-highlightFromSelection-call")
 
     create_note_ready = bool(extra.get("canCreateNote") or extra.get("canCreateCards") or extra.get("canCreateMindmap"))
+    update_mindmap_ready = bool(extra.get("canUpdateMindmapNode") or extra.get("canUpdateMindmap"))
+    merge_mindmap_ready = bool(extra.get("canMergeMindmapNode") or extra.get("canMergeMindmap"))
+    move_mindmap_ready = bool(extra.get("canMoveMindmapNode") or extra.get("canMoveMindmap"))
+    delete_mindmap_ready = bool(extra.get("canDeleteMindmapNode") or extra.get("canDeleteMindmap"))
     undo_ready = bool(extra.get("canGroupUndo") or extra.get("hasUndoManager"))
     refresh_ready = bool(extra.get("canRefreshAfterDBChanged") or extra.get("hasRefreshAfterDBChanged"))
     popup_ready = bool(extra.get("canInstallSelectionPopupMenu"))
@@ -3645,6 +7636,46 @@ def native_api_capability_matrix(extra: dict[str, Any], candidate_methods: list[
                 "blockedReason": "" if create_note_ready else "unverified-note-api",
                 "nextStep": "生成脑图草稿后点“写入 MarginNote”；合并会追加到当前选中节点下。",
                 "evidence": ["Note.createWithTitleNotebookDocument", "addChild"] if create_note_ready else [],
+            },
+            "nativeMindmapUpdate": {
+                "label": "更新 MN 原生脑图节点",
+                "available": update_mindmap_ready,
+                "ready": update_mindmap_ready,
+                "entryAction": "request_mindmap_diff_apply",
+                "nativeAction": "apply_mindmap_diff_operations",
+                "blockedReason": "" if update_mindmap_ready else "unverified-note-update-api",
+                "nextStep": "刷新 MN 原生能力；确认 noteTitle/comment 更新路径可用后再局部更新。",
+                "evidence": ["noteTitle", "appendMarkdownComment"] if update_mindmap_ready else [],
+            },
+            "nativeMindmapMerge": {
+                "label": "合并 MN 原生脑图节点",
+                "available": merge_mindmap_ready,
+                "ready": merge_mindmap_ready,
+                "entryAction": "request_mindmap_diff_apply",
+                "nativeAction": "apply_mindmap_diff_operations",
+                "blockedReason": "" if merge_mindmap_ready else "unverified-note-merge-api",
+                "nextStep": "刷新 MN 原生能力；确认合并策略可用后再执行。",
+                "evidence": ["appendMarkdownComment"] if merge_mindmap_ready else [],
+            },
+            "nativeMindmapMove": {
+                "label": "移动 MN 原生脑图节点",
+                "available": move_mindmap_ready,
+                "ready": move_mindmap_ready,
+                "entryAction": "request_mindmap_diff_apply",
+                "nativeAction": "apply_mindmap_diff_operations",
+                "blockedReason": "" if move_mindmap_ready else "unverified-note-move-api",
+                "nextStep": "刷新 MN 原生能力；确认 addChild 迁移父节点路径可用后再移动。",
+                "evidence": ["addChild"] if move_mindmap_ready else [],
+            },
+            "nativeMindmapDelete": {
+                "label": "删除 MN 原生脑图节点",
+                "available": delete_mindmap_ready,
+                "ready": delete_mindmap_ready,
+                "entryAction": "request_mindmap_diff_apply",
+                "nativeAction": "apply_mindmap_diff_operations",
+                "blockedReason": "" if delete_mindmap_ready else "unverified-note-delete-api",
+                "nextStep": "删除类操作必须显式确认并通过事务验证后才能执行。",
+                "evidence": ["deleteNote"] if delete_mindmap_ready else [],
             },
             "undoGroupedWrites": {
                 "label": "MN Undo 分组写入",
@@ -3764,12 +7795,14 @@ def status_payload() -> dict[str, Any]:
     proxy_url = settings.get("proxyUrl", "")
     proxy_scheme = urlparse(proxy_url).scheme if proxy_url else ""
     ai_status = ai_status_fields(settings)
+    mn_api_status = mn_api_status_fields(settings)
     return {
         "ok": True,
         "message": "Codex MarginNote Companion is running.",
         "pid": os.getpid(),
         "pluginVersion": CURRENT_PLUGIN_VERSION,
         **ai_status,
+        **mn_api_status,
         "model": settings["model"],
         "speed": settings["speed"],
         "permission": settings["permission"],
@@ -3781,6 +7814,10 @@ def status_payload() -> dict[str, Any]:
         "run": active_run_status(),
         "mnRuntime": mn4_runtime_status(),
         "nativeApiCapabilities": latest_native_api_capabilities(),
+        "mindmapTreeCache": latest_mindmap_tree_cache_status(),
+        "mindmapDiffApply": latest_mindmap_diff_apply_status(),
+        "aiEditTransactions": transaction_manager.latest_summary(limit=8),
+        "aiEditTransactionStatus": transaction_manager.latest_status(),
         "update": update_manager.read_update_status(ROOT),
         "session_count": len(list(SESSIONS_DIR.glob("*.json"))) if SESSIONS_DIR.exists() else 0,
         "recent_events": read_recent_events(),
@@ -5063,6 +9100,76 @@ def wants_defense_guidance(payload: dict[str, Any], task: str, goal: dict[str, s
     return bool(DEFENSE_REQUEST_RE.search(text))
 
 
+def should_include_knowledge_index(payload: dict[str, Any], task: str) -> bool:
+    if truthy_payload_flag(payload.get("includeKnowledgeIndex")):
+        return True
+    if str(payload.get("includeKnowledgeIndex") or "").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    text = combined_user_request(payload)
+    if task == "goal_run" and has_explicit_goal_payload(payload):
+        goal = goal_payload_from_request(payload)
+        text = "\n".join(part for part in [text, goal.get("title", ""), goal.get("detail", "")] if part)
+    return bool(KNOWLEDGE_INDEX_REQUEST_RE.search(text))
+
+
+def knowledge_index_scope(payload: dict[str, Any]) -> tuple[str, str, str]:
+    requested = str(payload.get("knowledgeScope") or payload.get("knowledge_scope") or "").strip().lower()
+    text = combined_user_request(payload)
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if requested in {"notebook", "topic"} or re.search(r"跨文档|整个\s*notebook|notebook", text, re.I):
+        return topic_id, "", "notebook"
+    return topic_id, book_md5, "document"
+
+
+def knowledge_index_context_for_model(payload: dict[str, Any], query: str, task: str = "chat", max_chars: int = 2400) -> str:
+    if not should_include_knowledge_index(payload, task):
+        return ""
+    topic_id, book_md5, scope_label = knowledge_index_scope(payload)
+    search_query = repair_pdf_extracted_math_text(str(query or combined_user_request(payload) or "")).strip()
+    result = knowledge_index.search(search_query, topicid=topic_id, bookmd5=book_md5, limit=5)
+    if not result.get("ok"):
+        if truthy_payload_flag(payload.get("includeKnowledgeIndex")):
+            return f"本地知识索引：检索失败：{result.get('message') or '缺少关键词'}"
+        return ""
+    matches = result.get("matches") if isinstance(result.get("matches"), list) else []
+    if not matches:
+        if truthy_payload_flag(payload.get("includeKnowledgeIndex")):
+            return f"本地知识索引：当前{('notebook' if scope_label == 'notebook' else '文档')}范围未命中。"
+        return ""
+    lines = [
+        "本地知识索引检索片段：",
+        f"范围：{scope_label}；说明：以下来自 Companion 本地索引，不代表当前 PDF 原文。",
+    ]
+    used = len("\n".join(lines))
+    for item in matches:
+        if not isinstance(item, dict):
+            continue
+        source_ref = item.get("sourceRef") if isinstance(item.get("sourceRef"), dict) else {}
+        source_bits = []
+        if item.get("noteId"):
+            source_bits.append(f"noteId={item.get('noteId')}")
+        if source_ref.get("page"):
+            source_bits.append(f"p.{source_ref.get('page')}")
+        if source_ref.get("quote"):
+            source_bits.append(f"quote={source_ref.get('quote')}")
+        source_line = (" / " + " / ".join(source_bits)) if source_bits else ""
+        block = (
+            f"\n[{item.get('kind') or 'context'}] {item.get('title') or '未命名索引项'}{source_line}\n"
+            f"{item.get('snippet') or ''}"
+        )
+        if used + len(block) > max_chars:
+            remaining = max_chars - used
+            if remaining <= 160:
+                break
+            block = block[:remaining].rstrip()
+        lines.append(block)
+        used += len(block)
+        if used >= max_chars:
+            break
+    return "\n".join(lines).strip()
+
+
 def is_mindmap_append_request(payload: dict[str, Any]) -> bool:
     text = combined_user_request(payload).lower()
     return any(hint in text for hint in MINDMAP_APPEND_HINTS)
@@ -5469,6 +9576,7 @@ def build_model_input(payload: dict[str, Any], task: str) -> str:
             context_blocks.append(f"全文读取状态：{document_context.get('error') or '无法读取当前文档全文。'}")
     goal = goal_context_for_model(payload, task)
     files_context = uploaded_context_excerpt()
+    knowledge_context = knowledge_index_context_for_model(payload, combined_user_request(payload), task=task)
     task_desc = {
         "chat": "回答用户关于当前内容、选中文本或 MN 节点的问题。",
         "goal_run": "启动并推进用户给出的一次性目标；目标上下文只用于本次目标执行和显式目标队列任务。",
@@ -5516,6 +9624,8 @@ def build_model_input(payload: dict[str, Any], task: str) -> str:
             goal_lines.append(goal["detail"])
         sections.append("\n".join(goal_lines))
     sections.append("\n\n".join(context_blocks).strip() or "没有选中文本。")
+    if knowledge_context:
+        sections.append(knowledge_context)
     if files_context and (scope != "document" or truthy_payload_flag(payload.get("includeUploadedContext"))):
         sections.append(f"用户上传文件：\n{files_context}")
     elif files_context and scope == "document":
@@ -5904,14 +10014,137 @@ def build_card_body(section_body: str, source_text: str, backend: str, payload: 
     return truncate_text(final, CARD_BODY_MAX_CHARS)
 
 
-def build_short_cards(text: str, reply: str, backend: str, payload: dict[str, Any]) -> list[dict[str, str]]:
+def card_factory_source_ref(payload: dict[str, Any], source_text: str) -> dict[str, Any]:
+    source: dict[str, Any] = {}
+    page = payload.get("pageNumber") or payload.get("page") or payload.get("pageLabel")
+    if page not in (None, ""):
+        source["page"] = page
+    note_id = str(payload.get("selectedNoteId") or payload.get("noteId") or payload.get("noteid") or "").strip()
+    if note_id:
+        source["noteId"] = note_id
+    note_title = str(payload.get("selectedNoteTitle") or payload.get("noteTitle") or "").strip()
+    if note_title:
+        source["noteTitle"] = truncate_text(note_title, 120)
+    document_title = str(payload.get("documentTitle") or payload.get("docTitle") or payload.get("bookTitle") or "").strip()
+    if document_title:
+        source["documentTitle"] = truncate_text(document_title, 180)
+    quote = plain_context_excerpt(
+        str(payload.get("selectionText") or payload.get("selectedText") or payload.get("sourceExcerpt") or source_text or ""),
+        240,
+    )
+    if quote:
+        source["quote"] = quote
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if topic_id:
+        source["topicid"] = topic_id
+    if book_md5:
+        source["bookmd5"] = book_md5
+    return source
+
+
+def infer_card_factory_type(title: str, body: str) -> str:
+    title_value = str(title or "").lower()
+    if re.search(r"概念|定义|定位|concept", title_value):
+        return "concept"
+    if re.search(r"公式|符号|notation|equation|变量|计算", title_value):
+        return "formula"
+    if re.search(r"实验|证据|结果|数据|figure|table|evidence", title_value):
+        return "evidence"
+    body_without_source = str(body or "").split("## 来源线索", 1)[0]
+    value = f"{title}\n{body_without_source}".lower()
+    if re.search(r"公式|符号|notation|equation|mask|score|log\s*pi|gradient|坐标|变量", value):
+        return "formula"
+    if re.search(r"实验|证据|结果|数据|第\s*\d+\s*页|figure|table|real robot|benchmark|ablation", value):
+        return "evidence"
+    if re.search(r"方法|算法|流程|模型|policy|pipeline|architecture|filter", value):
+        return "method"
+    if re.search(r"局限|失败|边界|风险|limitation|failure|不能|不保证", value):
+        return "limitation"
+    if re.search(r"对比|区别|相同|不同|compare|versus|vs\\.", value):
+        return "comparison"
+    if re.search(r"复习|问题|quiz|review", value):
+        return "review"
+    return "concept"
+
+
+def card_factory_learning_goal(card_type: str) -> str:
+    goals = {
+        "concept": "说清这个概念的定义、作用和边界。",
+        "formula": "解释关键符号、变量关系和公式用途。",
+        "method": "复述方法流程、输入输出和关键假设。",
+        "evidence": "说明这条证据支持了什么结论，以及支持边界。",
+        "limitation": "指出失败条件、适用边界和误用风险。",
+        "comparison": "比较对象之间的相同点、差异和取舍。",
+        "review": "把内容转成可自测的问题和答案线索。",
+    }
+    return goals.get(card_type, goals["concept"])
+
+
+def card_factory_review_prompt(title: str, card_type: str) -> str:
+    title = clean_mindmap_node_title(title, 60)
+    if card_type == "formula":
+        return f"不用看原文，解释“{title}”里的符号关系和它解决的问题。"
+    if card_type == "evidence":
+        return f"“{title}”这条证据具体支持了哪个结论？支持边界是什么？"
+    if card_type == "method":
+        return f"按输入、步骤、输出复述“{title}”。"
+    if card_type == "limitation":
+        return f"“{title}”在什么条件下不成立或容易被误用？"
+    if card_type == "comparison":
+        return f"比较“{title}”涉及对象的关键差异和取舍。"
+    return f"用自己的话解释“{title}”的核心含义。"
+
+
+def card_factory_summary(cards: list[dict[str, Any]], source_ref: dict[str, Any]) -> dict[str, Any]:
+    quality = operation_runtime.audit_card_quality(cards)
+    return {
+        "schema": CARD_FACTORY_SCHEMA,
+        "cardCount": len(cards),
+        "typeCounts": quality.get("typeCounts", {}),
+        "sourceRef": source_ref,
+        "reviewPromptCount": len([card for card in cards if card.get("reviewPrompt")]),
+        "learningGoalCount": len([card for card in cards if card.get("learningGoal")]),
+    }
+
+
+def enrich_card_factory_cards(cards: list[dict[str, Any]], source_text: str, backend: str, payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    source_ref = card_factory_source_ref(payload, source_text)
+    enriched: list[dict[str, Any]] = []
+    for index, card in enumerate(cards, start=1):
+        item = dict(card)
+        title = str(item.get("title") or f"Codex短卡 {index:02d}").strip()
+        body = str(item.get("body") or "").strip()
+        card_type = str(item.get("cardType") or item.get("type") or "").strip() or infer_card_factory_type(title, body)
+        item["cardType"] = card_type
+        item["source"] = {**source_ref, **(item.get("source") if isinstance(item.get("source"), dict) else {})}
+        item["learningGoal"] = str(item.get("learningGoal") or card_factory_learning_goal(card_type))
+        item["reviewPrompt"] = str(item.get("reviewPrompt") or card_factory_review_prompt(title, card_type))
+        item["factory"] = {
+            "schema": CARD_FACTORY_CARD_SCHEMA,
+            "index": index,
+            "backend": backend,
+            "sourceLinked": bool(item["source"]),
+        }
+        enriched.append(item)
+    return enriched, card_factory_summary(enriched, source_ref)
+
+
+def build_short_cards(text: str, reply: str, backend: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     sections = markdown_heading_sections(reply) or bullet_sections(reply) or fallback_card_sections(reply)
-    cards: list[dict[str, str]] = []
+    cards: list[dict[str, Any]] = []
     for index, section in enumerate(sections[:6], 1):
         title = clean_mindmap_node_title(section.get("title") or f"精读笔记 {index}", 34)
         body = build_card_body(section.get("body") or reply, text, backend, payload)
         cards.append({"title": f"Codex短卡 {index:02d}：{title}", "body": body})
-    return cards or [{"title": "Codex短卡 01：精读笔记", "body": build_card_body(reply, text, backend, payload)}]
+    if not cards:
+        cards = [{"title": "Codex短卡 01：精读笔记", "body": build_card_body(reply, text, backend, payload)}]
+    enriched, _factory = enrich_card_factory_cards(cards, text, backend, payload)
+    return enriched
+
+
+def with_mn_object(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    return {**result, "mnObject": agent_workbench.build_mn_object(payload)}
 
 
 def generate_card(payload: dict[str, Any]) -> dict[str, Any]:
@@ -5932,14 +10165,18 @@ def generate_card(payload: dict[str, Any]) -> dict[str, Any]:
             "backend": backend,
         }
     cards = build_short_cards(text, reply, backend, payload)
+    card_factory = card_factory_summary(cards, card_factory_source_ref(payload, text))
+    card_quality = operation_runtime.audit_card_quality(cards)
     append_history(payload, text, reply)
-    return {
+    return with_mn_object(payload, {
         "ok": True,
         "message": f"已返回 {len(cards)} 张可写入 MN4 的短卡片（{backend}）。",
         "reply": reply,
         "backend": backend,
         "cards": cards,
-    }
+        "cardFactory": card_factory,
+        "cardQuality": card_quality,
+    })
 
 
 def clean_mindmap_node_title(text: str, limit: int = 64) -> str:
@@ -6378,7 +10615,7 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if isinstance(tree.get("writeTarget"), dict):
         result["writeTarget"] = tree["writeTarget"]
-    return result
+    return with_mn_object(payload, result)
 
 
 def has_selected_node_context(payload: dict[str, Any]) -> bool:
@@ -6429,7 +10666,7 @@ def generate_current_node_mindmap(
     if task == "reorganize_mindmap":
         tree["replaceChildren"] = False
     append_history(payload, text, reply)
-    return {
+    return with_mn_object(payload, {
         "ok": True,
         "message": f"已返回可写入 MN4 的{message_label}（{backend}，{stats.get('nodeCount', 0)} 个节点，{stats.get('maxDepth', 0)} 层）。",
         "reply": reply,
@@ -6437,7 +10674,7 @@ def generate_current_node_mindmap(
         "mindmap": tree,
         "writeTarget": write_target,
         "mindmapStats": stats,
-    }
+    })
 
 
 def expand_node(payload: dict[str, Any]) -> dict[str, Any]:
@@ -6504,6 +10741,8 @@ def generate_full_reading(payload: dict[str, Any]) -> dict[str, Any]:
         tree["codexId"] = root_codex_id
     if write_target:
         tree["writeTarget"] = write_target
+    card_factory = card_factory_summary(cards, card_factory_source_ref(payload, text or "完整精读"))
+    card_quality = operation_runtime.audit_card_quality(cards)
     append_history(payload, text or "完整精读", reply)
     result = {
         "ok": True,
@@ -6511,11 +10750,13 @@ def generate_full_reading(payload: dict[str, Any]) -> dict[str, Any]:
         "reply": reply,
         "backend": backend,
         "cards": cards,
+        "cardFactory": card_factory,
+        "cardQuality": card_quality,
         "mindmap": tree,
     }
     if write_target:
         result["writeTarget"] = write_target
-    return result
+    return with_mn_object(payload, result)
 
 
 def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
@@ -6530,6 +10771,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             "pluginVersion": CURRENT_PLUGIN_VERSION,
             "settings": settings,
             **ai_status_fields(settings),
+            **mn_api_status_fields(settings),
             "goal": active_goal(),
             "files": uploaded_files(),
             "queue": queue_status_payload(topic_id, book_md5),
@@ -6552,13 +10794,16 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 f"速度：{settings['speed']}\n"
                 f"默认上下文：{settings['defaultContextScope']}\n"
                 f"AI 后端：{ai_backend_label(settings['aiBackend'])}\n"
+                f"MN API：{mn_api_status_fields(settings)['mn_api_backend_label']}\n"
                 f"代理：{'已配置' if settings.get('proxyUrl') else '未配置'}\n"
                 f"OpenAI：{'已配置' if get_setting('OPENAI_API_KEY') else '未配置'}\n"
+                f"URL API：{'已配置' if get_setting('MN_URL_API_SECRET') else '未配置'}\n"
                 f"文件路径：{len(settings.get('fileSearchRoots') or [])} 个\n"
                 f"自定义按钮：{len(settings.get('customButtons') or [])}"
             ),
             "settings": settings,
             **ai_status_fields(settings),
+            **mn_api_status_fields(settings),
             "goal": active_goal(),
             "files": uploaded_files(),
             "queue": queue_status_payload(topic_id, book_md5),
@@ -6570,6 +10815,94 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "message": update.get("message") or "已读取更新状态。", "update": update}
     if action == "open_url":
         return open_external_url(payload)
+    if action == "mn_api_status":
+        settings = runtime_settings()
+        return {
+            "ok": True,
+            "message": "已读取 MarginNote API 适配器状态。",
+            **mn_api_status_fields(settings),
+        }
+    if action == "mn_url_api_build_request":
+        try:
+            request_preview = marginnote_api_adapter.build_url_api_request(
+                action=str(payload.get("urlApiAction") or payload.get("urlAction") or "ping"),
+                secret=get_setting("MN_URL_API_SECRET"),
+                payload=payload.get("urlPayload") if isinstance(payload.get("urlPayload"), dict) else {},
+                callback_base_url=str(
+                    payload.get("callbackBaseUrl")
+                    or f"http://{HOST}:{PORT}/mn-url-api/callback"
+                ),
+                request_id=str(payload.get("requestId") or ""),
+            )
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "message": f"构造 MarginNote URL API 请求失败：{exc}",
+                **mn_api_status_fields(runtime_settings()),
+            }
+        return {
+            "ok": True,
+            "message": "已构造 MarginNote URL API 请求预览。",
+            "request": {
+                "requestId": request_preview.request_id,
+                "action": request_preview.action,
+                "payload": request_preview.payload,
+                "redactedUrl": request_preview.redacted_url,
+            },
+            **mn_api_status_fields(runtime_settings()),
+        }
+    if action == "agent_plan":
+        return agent_plan(payload)
+    if action == "operation_plan_preview":
+        return operation_plan_preview(payload)
+    if action == "mindmap_diff_preview":
+        return mindmap_diff_preview(payload)
+    if action == "request_mindmap_diff_apply":
+        return request_mindmap_diff_apply(payload)
+    if action == "workflow_templates":
+        return {
+            "ok": True,
+            "message": "已读取工作流模板。",
+            "workflowTemplates": workflow_engine.list_workflow_templates(),
+        }
+    if action == "workflow_preview":
+        return workflow_preview(payload)
+    if action == "workflow_start":
+        return workflow_start(payload)
+    if action == "workflow_status":
+        return load_workflow_run(str(payload.get("workflowRunId") or payload.get("id") or ""))
+    if action == "workflow_list":
+        return workflow_list(payload)
+    if action == "workflow_cancel":
+        return workflow_cancel(payload)
+    if action == "workflow_retry_step":
+        return workflow_retry_step(payload)
+    if action == "external_gateway_start_workflow":
+        return external_gateway_start_workflow(payload)
+    if action == "external_gateway_request_status":
+        return external_gateway_request_status(payload)
+    if action == "external_gateway_callback":
+        return external_gateway_callback_update(payload)
+    if action == "skill_marketplace_status":
+        return skill_marketplace.status()
+    if action == "skill_install":
+        return skill_marketplace.install(str(payload.get("skillId") or payload.get("id") or ""))
+    if action == "skill_uninstall":
+        return skill_marketplace.uninstall(str(payload.get("skillId") or payload.get("id") or ""))
+    if action == "knowledge_index_status":
+        return knowledge_index.status(normalize_topic_id(payload), normalize_book_md5(payload))
+    if action == "knowledge_index_search":
+        return knowledge_index_search_action(payload)
+    if action == "knowledge_index_ingest_context":
+        return knowledge_index_ingest_context(payload)
+    if action == "knowledge_index_clear":
+        return knowledge_index.clear(normalize_topic_id(payload), normalize_book_md5(payload))
+    if action == "review_queue_add":
+        return review_queue_add(payload)
+    if action == "review_queue_list":
+        return review_queue_list(payload)
+    if action == "mn_object_registry":
+        return mn_object_registry(payload)
     if action == "update_check":
         if payload.get("githubRepo"):
             save_runtime_settings({"githubRepo": payload.get("githubRepo")})
@@ -6614,6 +10947,10 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return cache_pdf_from_marginnote(payload)
     if action == "request_pdf_cache":
         return request_pdf_cache(payload)
+    if action == "mn_read_tree":
+        return request_mindmap_tree(payload)
+    if action == "request_mn_object_registry_scan":
+        return request_mn_object_registry_scan(payload)
     if action == "request_web_panel_reload":
         return request_web_panel_reload(payload)
     if action == "request_native_capability_probe":
@@ -6679,6 +11016,20 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return history_payload(payload)
     if action == "history_clear":
         return clear_history(payload)
+    if action == "object_browser":
+        return object_browser(payload)
+    if action == "object_graph":
+        return object_graph(payload)
+    if action == "object_graph_relation_save":
+        return object_graph_relation_save(payload)
+    if action == "object_graph_relation_delete":
+        return object_graph_relation_delete(payload)
+    if action == "object_activity":
+        return object_activity(payload)
+    if action == "operation_ledger_list":
+        return operation_ledger_list(payload)
+    if action == "operation_ledger_get":
+        return operation_ledger_get(payload)
     if action == "logs_recent":
         try:
             limit = int(payload.get("limit") or 80)
@@ -6701,6 +11052,48 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             "logs": [],
             "logPath": str(DIAGNOSTIC_LOG_PATH),
             "eventsPath": str(EVENTS_PATH),
+        }
+    if action == "ai_edit_transaction_list":
+        transactions = transaction_manager.latest_summary(
+            topicid=normalize_topic_id(payload),
+            bookmd5=normalize_book_md5(payload),
+            limit=int(payload.get("limit") or 8),
+        )
+        return {
+            "ok": True,
+            "message": f"已读取最近 {transactions['count']} 个 AI 编辑事务。",
+            "transactions": transactions,
+        }
+    if action == "ai_edit_transaction_get":
+        transaction_id = str(payload.get("transactionId") or payload.get("id") or "")
+        transaction = transaction_manager.load_transaction(transaction_id)
+        if not transaction:
+            return {
+                "ok": False,
+                "message": "未找到该 AI 编辑事务。",
+                "transactionId": transaction_id,
+            }
+        return {
+            "ok": True,
+            "message": "已读取 AI 编辑事务。",
+            "transaction": transaction,
+        }
+    if action == "ai_edit_transaction_verify":
+        transaction_id = str(payload.get("transactionId") or payload.get("id") or "")
+        transaction = transaction_manager.load_transaction(transaction_id)
+        if not transaction:
+            return {
+                "ok": False,
+                "message": "未找到该 AI 编辑事务，无法生成验证报告。",
+                "transactionId": transaction_id,
+            }
+        verification = transaction_manager.verification_report(transaction)
+        return {
+            "ok": True,
+            "message": "已生成 AI 编辑验证报告。",
+            "reply": verification.get("summary") or "回滚验证：无报告内容。",
+            "transaction": transaction,
+            "verification": verification,
         }
     if action == "conversation_new":
         return new_conversation(payload)
@@ -6730,6 +11123,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "message": permission_error, "reply": permission_error, "permission": runtime_settings()["permission"]}
     if action == "request_draft_write":
         return request_draft_write(payload)
+    if action == "request_mindmap_delete_confirmation":
+        return request_mindmap_delete_confirmation(payload)
     if action == "native_highlight_wizard_start":
         return start_native_highlight_wizard(payload)
     queued_for_web_busy = web_busy_queue_response_if_needed(payload, action)
@@ -6770,7 +11165,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def action_log_result_summary(result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    summary = {
         "ok": bool(result.get("ok")),
         "message": str(result.get("message") or "")[:500],
         "hasReply": bool(result.get("reply")),
@@ -6782,6 +11177,11 @@ def action_log_result_summary(result: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
     }
+    object_ref = object_ref_from_mapping(result)
+    if object_ref_has_identity(object_ref):
+        summary["objectRef"] = object_ref
+        summary["mnObjectId"] = str(object_ref.get("objectId") or "")
+    return summary
 
 
 def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
@@ -6791,12 +11191,14 @@ def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
     request_id = str(payload.get("_request_id") or payload.get("requestId") or uuid.uuid4().hex[:12])
     payload["_request_id"] = request_id
     action = str(payload.get("action") or "").strip()
+    object_ref = object_ref_from_mapping(payload)
     started = time.time()
     append_diagnostic_log(
         "info",
         "action.start",
         f"开始动作：{action or '(empty)'}",
         payload=payload,
+        object_ref=object_ref if object_ref_has_identity(object_ref) else None,
         request_id=request_id,
     )
     try:
@@ -6808,12 +11210,14 @@ def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
             f"动作异常：{exc}",
             payload=payload,
             extra={"durationMs": int((time.time() - started) * 1000), "error": repr(exc)},
+            object_ref=object_ref if object_ref_has_identity(object_ref) else None,
             request_id=request_id,
         )
         raise
     if not isinstance(result, dict):
         result = {"ok": False, "message": "动作没有返回可用结果。"}
     result["requestId"] = request_id
+    result_object_ref = object_ref_from_mapping(result, object_ref)
     append_diagnostic_log(
         "info" if result.get("ok") else "warn",
         "action.end",
@@ -6823,6 +11227,7 @@ def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
             "durationMs": int((time.time() - started) * 1000),
             "result": action_log_result_summary(result),
         },
+        object_ref=result_object_ref if object_ref_has_identity(result_object_ref) else None,
         request_id=request_id,
     )
     return result
@@ -6901,6 +11306,43 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"ok": False, "message": f"draft failed: {exc}"}
             self._send_json(200 if result.get("ok") else 400, result)
             return
+        if self.path == "/external/workflow/start":
+            external_payload = dict(payload) if isinstance(payload, dict) else {}
+            external_payload.update({"action": "external_gateway_start_workflow"})
+            try:
+                result = handle_action_logged(external_payload)
+            except Exception as exc:
+                append_diagnostic_log(
+                    "error",
+                    "external_gateway.http_exception",
+                    f"外部 workflow 请求失败：{exc}",
+                    payload=external_payload,
+                    extra={"path": self.path, "error": repr(exc)},
+                )
+                result = {"ok": False, "message": f"外部 workflow 请求失败：{exc}"}
+            self._send_json(200 if result.get("ok") else 400, result)
+            return
+        if self.path in {"/external/callback/success", "/external/callback/error"}:
+            callback_payload = dict(payload) if isinstance(payload, dict) else {}
+            callback_payload.update(
+                {
+                    "action": "external_gateway_callback",
+                    "callbackStatus": "success" if self.path.endswith("/success") else "error",
+                }
+            )
+            try:
+                result = handle_action_logged(callback_payload)
+            except Exception as exc:
+                append_diagnostic_log(
+                    "error",
+                    "external_gateway.callback_exception",
+                    f"外部 callback 请求失败：{exc}",
+                    payload=callback_payload,
+                    extra={"path": self.path, "error": repr(exc)},
+                )
+                result = {"ok": False, "message": f"外部 callback 请求失败：{exc}"}
+            self._send_json(200 if result.get("ok") else 400, result)
+            return
         if self.path != "/marginnote/action":
             self._send_json(404, {"ok": False, "message": "Not found"})
             return
@@ -6930,6 +11372,7 @@ def main() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     CONTROL_DIR.mkdir(parents=True, exist_ok=True)
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
+    WORKFLOW_RUNS_DIR.mkdir(parents=True, exist_ok=True)
     load_env_file()
     (ROOT / "companion.pid").write_text(str(os.getpid()), encoding="utf-8")
     server = ThreadingHTTPServer((HOST, PORT), Handler)

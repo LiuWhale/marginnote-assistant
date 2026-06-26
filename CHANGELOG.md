@@ -2,6 +2,35 @@
 
 All notable changes to Codex Companion are documented here.
 
+## Unreleased
+
+No changes yet.
+
+## 0.4.28 - 2026-06-27
+
+### Added
+
+- Added the first visible dual-mode shell: the WebView now has `Chat Mode` for lightweight reading conversation and `Agent Workspace` for object, operation, knowledge, and workflow workspaces. Switching to chat focuses the dialog panel; switching to workspace restores the last non-chat workspace pane.
+- Added the first `Workspace Navigator` in Agent Workspace, exposing `Knowledge Console`, `Mindmap Studio`, `Card Factory`, `Operation Ledger`, `Knowledge Graph`, `Workflow Builder`, and `Skill Center` as first-class product entries instead of hidden tab details.
+- Added the first operational `Mindmap Studio` panel. It is not a renamed answer button: the operation workspace now exposes `读取现有脑图`, `预览 Diff`, `应用所选`, `验证事务`, and `回滚事务`, and summarizes the current tree, latest Diff, apply status, and transaction state in one place.
+- Added External Automation Gateway callback ledger updates: `POST /external/callback/success` and `POST /external/callback/error` now update the matching request ledger with callback status, payload, history, and received count.
+- Added the first Knowledge Console risk panel: `agent_plan` now returns `codex.mn.riskRegister.v1` with permission, context scope, target mind map, dry-run, and confirmation risk items, and the object workspace renders those items before Object Browser, Graph, Activity, and Ledger.
+- Added the first object-scoped Object Browser: `object_browser` aggregates the current focus `MNObject`, Object Graph nodes, Object Activity items, and Operation Ledger entries into a browsable object list with per-object actions. The Web object workspace now has an Object Browser panel above Object Graph.
+- Added Object Browser filtering: the Web object workspace now exposes object type, kind, and keyword controls, and `object_browser` returns `filters`, `filteredTotal`, and `unfilteredTotal` so users can narrow the current object list without leaving the Knowledge Console.
+- Added the first persistent `MNObject Registry`: `mn_object_registry` stores seen MarginNote objects as `codex.mn.mnObjectRegistry.v1` entries, registers manual relation endpoints, ingests native `mindmapTreeReadFinished` tree-cache nodes as `mnobj:note:<noteId>` objects, and lets Object Browser show a Registry group alongside graph, activity, and ledger objects.
+- Added active native object scanning for the Object Browser: `objectRegistryScanButton` / `扫描 MN` calls `request_mn_object_registry_scan`, enqueues `scan_mn_objects`, ingests `mnObjectRegistryScanFinished` payloads as `native_object_scan` evidence in `MNObject Registry`, promotes scanned notes into Object Graph as `mn_note` nodes with `native_object_scan` parent-child `contains` edges, and lets clicking a scanned registry object open that object's graph, activity feed, and ledger with its own `mnObject` payload.
+- Added the first Card Factory metadata layer: `generate_card` and full-reading card generation now return a `codex.mn.cardFactory.v1` summary, add `cardType`, source, `learningGoal`, `reviewPrompt`, and `codex.mn.cardFactoryCard.v1` metadata to each generated card, preserve `card_factory` in saved drafts, and show card type/source/length/duplicate-title quality signals in the AI edit confirmation panel.
+- Added the first Card Factory Review Queue: `review_queue_add/list` stores deduplicated draft cards as `codex.mn.reviewQueue.v1`, scopes queue entries by topic/book/current `MNObject`, adds a `加入复习队列` action to the AI edit confirmation panel, and shows queued review cards in the Knowledge workspace.
+- Added the first object-scoped Object Graph: `object_graph` links the current `MNObject` to related conversations, workflow runs, AI edit transactions, external gateway requests, diagnostic logs, Knowledge Index entities/relations, and cached native MarginNote mind-map tree nodes with `contains` relationships. The Web object workspace now shows these graph nodes as navigation into evidence.
+- Added the first editable Object Graph relationship layer: `object_graph_relation_save/delete` persists user-maintained `manual_relation` edges between `MNObject` IDs, records saved/deleted events as `object_graph_manual_relation` Operation Ledger entries with `manualRelation` evidence, and surfaces those relationship events in Object Activity. The Web object workspace now includes a compact relationship editor and opens the relationship ledger detail from the activity feed.
+- Added an object-scoped Operation Ledger API and Web panel: `operation_ledger_list/get` aggregates workflow runs, AI edit transactions, external gateway requests, and manual Object Graph relationship events for the current `MNObject`, and selecting a ledger item now opens an object-workspace evidence panel with transaction verification, native command/event timeline, operation-chain evidence, workflow confirmation state, external callback evidence, and manual relationship evidence.
+- Added Operation Ledger filtering: the Web object workspace now exposes entry type, status, and keyword controls, and `operation_ledger_list` returns `filters`, `filteredTotal`, and `unfilteredTotal` so users can narrow audit evidence without scrolling through unrelated workflow, transaction, external, or manual-relation entries.
+- Added the first recoverable Workflow Run Inspector: `workflow_status` now returns `codex.mn.workflowRunInspector.v1` with per-step status, tone, queue IDs, confirmation points, next actions, and retry metadata. The Workflow Runtime page can open a recent run, inspect each step, and retry recoverable failed/blocked direct or queueable steps without jumping back into the chat stream.
+
+### Changed
+
+- Rewrote the ultimate design boundary as a dual-mode product: `Chat Mode` remains the lightweight reading conversation, while `Agent Workspace Mode` becomes the object-first, operation-first, evidence-first production system instead of a larger chat panel with more buttons.
+
 ## 0.4.27 - 2026-06-25
 
 ### Added

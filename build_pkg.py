@@ -14,8 +14,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_ZIP = ROOT / "release/CodexCompanion-0.4.27-latest-dist.zip"
-DEFAULT_OUTPUT = ROOT / "release/CodexCompanion-0.4.27-latest.pkg"
+DEFAULT_ZIP = ROOT / "release/CodexCompanion-0.4.28-latest-dist.zip"
+DEFAULT_OUTPUT = ROOT / "release/CodexCompanion-0.4.28-latest.pkg"
 ONEDRIVE_DIR = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 PACKAGE_IDENTIFIER = "com.codex.marginnote-companion"
 SHARED_INSTALL_PARENT = Path("Users/Shared/Codex Companion")
@@ -42,6 +42,29 @@ def write_sha256_manifest(paths: list[Path], target: Path) -> None:
     target.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
+def matching_mnaddon_for_zip(zip_path: Path) -> Path | None:
+    zip_path = zip_path.expanduser().resolve()
+    name = zip_path.name
+    candidates: list[Path] = []
+    if name.endswith("-latest-dist.zip"):
+        candidates.append(zip_path.with_name(name.replace("-latest-dist.zip", "-latest.mnaddon")))
+    if name.endswith("-dist.zip"):
+        candidates.append(zip_path.with_name(name[: -len("-dist.zip")] + ".mnaddon"))
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def release_manifest_paths(zip_path: Path, pkg_path: Path) -> list[Path]:
+    paths = [zip_path]
+    mnaddon_path = matching_mnaddon_for_zip(zip_path)
+    if mnaddon_path:
+        paths.append(mnaddon_path)
+    paths.append(pkg_path)
+    return paths
+
+
 def sync_release_artifacts(zip_path: Path, pkg_path: Path, onedrive_dir: Path = ONEDRIVE_DIR) -> dict[str, object]:
     zip_path = zip_path.expanduser().resolve()
     pkg_path = pkg_path.expanduser().resolve()
@@ -50,14 +73,23 @@ def sync_release_artifacts(zip_path: Path, pkg_path: Path, onedrive_dir: Path = 
     cloud_zip = onedrive_dir / zip_path.name
     cloud_pkg = onedrive_dir / pkg_path.name
     shutil.copy2(zip_path, cloud_zip)
+    mnaddon_path = matching_mnaddon_for_zip(zip_path)
+    cloud_mnaddon = onedrive_dir / mnaddon_path.name if mnaddon_path else None
+    if mnaddon_path and cloud_mnaddon:
+        shutil.copy2(mnaddon_path, cloud_mnaddon)
     shutil.copy2(pkg_path, cloud_pkg)
     local_manifest = pkg_path.parent / "SHA256SUMS.txt"
     cloud_manifest = onedrive_dir / "SHA256SUMS.txt"
-    write_sha256_manifest([zip_path, pkg_path], local_manifest)
-    write_sha256_manifest([cloud_zip, cloud_pkg], cloud_manifest)
+    write_sha256_manifest(release_manifest_paths(zip_path, pkg_path), local_manifest)
+    cloud_manifest_paths = [cloud_zip]
+    if cloud_mnaddon:
+        cloud_manifest_paths.append(cloud_mnaddon)
+    cloud_manifest_paths.append(cloud_pkg)
+    write_sha256_manifest(cloud_manifest_paths, cloud_manifest)
     return {
         "onedriveDir": str(onedrive_dir),
         "onedriveZip": str(cloud_zip),
+        "onedriveMnaddon": str(cloud_mnaddon) if cloud_mnaddon else "",
         "onedrivePkg": str(cloud_pkg),
         "localManifest": str(local_manifest),
         "onedriveManifest": str(cloud_manifest),
@@ -343,7 +375,7 @@ def build_pkg(
             if sync_onedrive:
                 result["releaseSync"] = sync_release_artifacts(zip_path, output_path, onedrive_dir)
             else:
-                write_sha256_manifest([zip_path, output_path], output_path.parent / "SHA256SUMS.txt")
+                write_sha256_manifest(release_manifest_paths(zip_path, output_path), output_path.parent / "SHA256SUMS.txt")
         return result
 
 
@@ -351,7 +383,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build a macOS pkg wrapper for Codex Companion.")
     parser.add_argument("zip", nargs="?", default=str(DEFAULT_ZIP), help="CodexCompanion release zip.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output .pkg path.")
-    parser.add_argument("--version", default="0.4.27", help="pkg version string.")
+    parser.add_argument("--version", default="0.4.28", help="pkg version string.")
     parser.add_argument("--sign-identity", default="", help="Developer ID Installer identity for productbuild --sign.")
     parser.add_argument("--auto-sign", action="store_true", help="Use the single Developer ID Installer identity found in the current keychain.")
     parser.add_argument("--dry-run", action="store_true", help="Stage payload and scripts without invoking pkgbuild/productbuild.")

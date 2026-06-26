@@ -14,12 +14,17 @@
     queue: {pending: 0},
     pdfCache: {state: 'unknown'},
     mindmapTarget: {state: 'unknown', target: {}, options: []},
+    mindmapTreeCache: {schema: 'codex.mn.mindmapTreeCache.v1', available: false},
+    mindmapDiffApply: {schema: 'codex.mn.mindmapDiffApplyStatus.v1', available: false},
+    latestMindmapDiff: null,
+    aiEditTransactionStatus: {schema: 'codex.mn.aiEditTransactionStatus.v1', available: false},
     contextDocumentKey: '',
     autoPdfCacheRequestedKey: '',
     openaiConfigured: false,
     codexCliAvailable: false,
     codexCliPath: '',
     aiBackend: 'auto',
+    mnApi: {},
     draft: null,
     pendingAiEditDrafts: {},
     progressTimer: null,
@@ -49,15 +54,162 @@
     pluginVersion: '',
     conversationId: '',
     sessionId: '',
+    conversationHistoryScope: 'document',
     conversations: [],
-    diagnosticLogs: []
+    objectBrowser: {schema: 'codex.mn.objectBrowser.v1', available: false},
+    objectBrowserInFlight: false,
+    objectRegistryScanInFlight: false,
+    objectBrowserLastId: '',
+    objectGraph: {schema: 'codex.mn.objectGraph.v1', available: false},
+    objectGraphInFlight: false,
+    objectGraphLastId: '',
+    objectActivity: {schema: 'codex.mn.objectActivity.v1', available: false},
+    objectActivityInFlight: false,
+    objectActivityLastId: '',
+    operationLedger: {schema: 'codex.mn.operationLedger.v1', available: false},
+    operationLedgerDetail: null,
+    operationLedgerInFlight: false,
+    operationLedgerLastId: '',
+    diagnosticLogs: [],
+    agentOperation: null,
+    agentPlanInFlight: false,
+    agentPlanRefreshTimer: null,
+    agentPlanLastKey: '',
+    knowledgeWorkspace: {schema: 'codex.mn.knowledgeWorkspace.v1', available: false},
+    workflowWorkspace: {schema: 'codex.mn.workflowWorkspace.v1', available: false},
+    workflowRunInspector: null,
+    activeProductMode: 'workspace',
+    lastWorkspacePane: 'object',
+    activeWorkspaceSurface: 'console',
+    activeWorkbenchPane: 'object'
   };
   var MAIN_PINNED_BUTTON_LIMIT = 4;
   var requiredControlIds = [
     'aiChatShell',
+    'modeSwitchBar',
+    'chatModeButton',
+    'agentWorkspaceModeButton',
+    'modeIntentLine',
+    'workspaceNavigator',
+    'workspaceNavigatorSummary',
+    'workspaceNavConsoleButton',
+    'workspaceNavMindmapStudioButton',
+    'workspaceNavCardFactoryButton',
+    'workspaceNavLedgerExplorerButton',
+    'workspaceNavKnowledgeGraphButton',
+    'workspaceNavWorkflowBuilderButton',
+    'workspaceNavSkillCenterButton',
+    'workbenchTabs',
+    'workbenchTabObject',
+    'workbenchTabDialog',
+    'workbenchTabOperation',
+    'workbenchTabKnowledge',
+    'workbenchTabWorkflow',
+    'workbenchLayout',
+    'objectWorkspacePanel',
+    'dialogWorkspacePanel',
+    'operationWorkspacePanel',
+    'knowledgeWorkspacePanel',
+    'workflowWorkspacePanel',
+    'objectWorkspaceTitle',
+    'objectWorkspaceMeta',
+    'objectWorkspaceScope',
+    'objectRiskPanel',
+    'objectRiskSummary',
+    'objectRiskList',
+    'objectBrowserPanel',
+    'objectBrowserRefreshButton',
+    'objectRegistryScanButton',
+    'objectBrowserTypeFilterSelect',
+    'objectBrowserKindFilterInput',
+    'objectBrowserSearchInput',
+    'objectBrowserFilterButton',
+    'objectBrowserSummary',
+    'objectBrowserList',
+    'objectGraphPanel',
+    'objectGraphRefreshButton',
+    'objectGraphRelationAddButton',
+    'objectGraphSummary',
+    'objectGraphNodes',
+    'objectGraphRelationEditor',
+    'objectGraphRelationTargetInput',
+    'objectGraphRelationTypeInput',
+    'objectGraphRelationLabelInput',
+    'objectGraphRelationNoteInput',
+    'objectGraphRelationSaveButton',
+    'objectGraphRelationCancelButton',
+    'objectActivityPanel',
+    'objectActivityRefreshButton',
+    'objectActivitySummary',
+    'objectActivityList',
+    'operationLedgerPanel',
+    'operationLedgerRefreshButton',
+    'operationLedgerSummary',
+    'operationLedgerTypeFilterSelect',
+    'operationLedgerStatusFilterInput',
+    'operationLedgerSearchInput',
+    'operationLedgerFilterButton',
+    'operationLedgerList',
+    'operationLedgerDetailPanel',
+    'operationLedgerDetailTitle',
+    'operationLedgerDetailMeta',
+    'operationLedgerDetailEvidence',
+    'operationLedgerDetailCloseButton',
+    'operationWorkspaceTitle',
+    'operationWorkspaceMeta',
+    'operationWorkspaceNextActions',
+    'mindmapStudioPanel',
+    'mindmapStudioSummary',
+    'mindmapStudioCurrentTree',
+    'mindmapStudioDiffStage',
+    'mindmapStudioApplyStage',
+    'mindmapStudioTransactionStage',
+    'mindmapStudioReadTreeButton',
+    'mindmapStudioPreviewDiffButton',
+    'mindmapStudioApplySelectedButton',
+    'mindmapStudioVerifyButton',
+    'mindmapStudioRollbackButton',
+    'mindmapStudioStatusLine',
+    'knowledgeWorkspaceTitle',
+    'knowledgeWorkspaceSummary',
+    'knowledgeWorkspaceScope',
+    'knowledgeWorkspaceEntities',
+    'knowledgeWorkspaceRelations',
+    'knowledgeWorkspaceReviewQueue',
+    'knowledgeWorkspaceReviewList',
+    'knowledgeWorkspaceSearchInput',
+    'knowledgeWorkspaceSearchButton',
+    'knowledgeWorkspaceResults',
+    'knowledgeWorkspaceActions',
+    'workflowWorkspaceTitle',
+    'workflowWorkspaceSummary',
+    'workflowWorkspaceRuns',
+    'workflowWorkspaceGateway',
+    'workflowWorkspaceSkills',
+    'workflowWorkspaceSkillsList',
+    'workflowWorkspaceTemplates',
+    'workflowWorkspaceRecentRuns',
+    'workflowRunInspectorPanel',
+    'workflowRunInspectorTitle',
+    'workflowRunInspectorSummary',
+    'workflowRunInspectorSteps',
+    'workflowRunInspectorCloseButton',
+    'workflowWorkspaceActions',
+    'mindmapTreeCacheStatus',
+    'mindmapTreeCacheText',
+    'mindmapTreeRefreshButton',
+    'mindmapTreePreviewList',
+    'mindmapDiffWorkbench',
+    'mindmapDiffWorkbenchTitle',
+    'mindmapDiffWorkbenchSummary',
+    'mindmapDiffWorkbenchPreview',
+    'operationWorkspaceVerification',
     'settingsButton',
     'newConversationButton',
     'conversationHistoryButton',
+    'conversationHistoryScopeLine',
+    'conversationHistoryAllButton',
+    'conversationHistoryObjectButton',
     'promptInput',
     'sendButton',
     'stopButton',
@@ -84,8 +236,24 @@
     'mindmapTargetLight',
     'mindmapTargetSelect',
     'mindmapTargetRefreshButton',
+    'agentWorkbenchBar',
+    'agentWorkbenchLight',
+    'agentWorkbenchLine',
+    'agentWorkbenchDetail',
+    'agentPlanRefreshButton',
+    'mindmapDiffApplyStatus',
+    'mindmapDiffApplyLight',
+    'mindmapDiffApplyText',
+    'aiEditTransactionCenter',
+    'aiEditTransactionTitle',
+    'aiEditTransactionSummary',
+    'aiEditTransactionNotes',
     'contextLine',
     'readinessPanel',
+    'mnApiStatusLine',
+    'mnApiBackendSelect',
+    'mnUrlApiSecretInput',
+    'clearMnUrlApiSecretButton',
     'conversationHistoryPage',
     'conversationHistoryList',
     'conversationHistoryCloseButton',
@@ -192,6 +360,17 @@
     return el ? el.value : '';
   }
 
+  function valueOf(id) {
+    return getValue(id);
+  }
+
+  function textNode(tag, className, text) {
+    var node = document.createElement(tag || 'div');
+    if (className) node.className = className;
+    node.textContent = text || '';
+    return node;
+  }
+
   function setChecked(id, checked) {
     var el = byId(id);
     if (el) el.checked = !!checked;
@@ -229,6 +408,7 @@
     renderContextSourceLine(state.context || {});
     renderContextPreview();
     renderSettingsContextMeta(state.context || {});
+    scheduleAgentPlanRefresh();
     updateActionAvailability();
   }
 
@@ -372,7 +552,7 @@
     var replyText = String(text || '');
     state.latestAssistantReply = replyText;
     return addMessageWithExtra('assistant', replyText, function(article) {
-      article.appendChild(buildReplyMindmapControls(replyText));
+      article.appendChild(buildReplyAgentActions(replyText));
     });
   }
 
@@ -383,23 +563,964 @@
       '\n' + outlineRule + '\n\n上面的回答：\n' + answer;
   }
 
-  function runReplyMindmapAction(replyText) {
-    var prompt = buildReplyMindmapPrompt(replyText);
-    executeAction('generate_mindmap', prompt, '生成脑图树');
+  function defaultReplyAgentActions() {
+    return [
+      {
+        id: 'create_card_tree',
+        label: '生成脑图树',
+        action: 'generate_mindmap',
+        scope: 'latest_reply'
+      }
+    ];
   }
 
-  function buildReplyMindmapControls(replyText) {
+  function agentNextActionsForReply() {
+    var actions = state.agentOperation && state.agentOperation.nextActions ? state.agentOperation.nextActions : [];
+    if (!actions.length) actions = defaultReplyAgentActions();
+    return actions.slice(0, 3);
+  }
+
+  function formatKnowledgeSearchResult(result) {
+    result = result || {};
+    var matches = result.matches || [];
+    if (!matches.length) return result.message || '知识索引没有命中相关内容。';
+    var lines = [result.message || ('知识索引命中 ' + matches.length + ' 条。')];
+    for (var i = 0; i < matches.length && i < 5; i++) {
+      var item = matches[i] || {};
+      lines.push('- ' + (item.title || item.kind || '索引项') + '：' + clip(item.snippet || '', 160));
+    }
+    return lines.join('\n');
+  }
+
+  function formatMindmapDiffResult(result) {
+    result = result || {};
+    var diff = result.mindmapDiff || {};
+    var summary = diff.summary || {};
+    return result.reply || (
+      '脑图 Diff 预览\n' +
+      '新增 ' + (summary.createCount || 0) +
+      ' / 更新 ' + (summary.updateCount || 0) +
+      ' / 合并 ' + (summary.mergeCount || 0) +
+      ' / 重复 ' + (summary.duplicateCount || 0)
+    );
+  }
+
+  function mindmapDiffSummaryLine(result) {
+    result = result || {};
+    var diff = result.mindmapDiff || {};
+    var summary = diff.summary || {};
+    return '新增 ' + (summary.createCount || 0) +
+      ' / 更新 ' + (summary.updateCount || 0) +
+      ' / 合并 ' + (summary.mergeCount || 0) +
+      ' / 重复 ' + (summary.duplicateCount || 0);
+  }
+
+  function mindmapDiffMetaText(result) {
+    result = result || {};
+    var diff = result.mindmapDiff || {};
+    var summary = diff.summary || {};
+    var operations = diff.operations && diff.operations.length ? diff.operations : [];
+    var lines = [
+      '拟写入节点 ' + (summary.proposedCount || 0) + '，当前树节点 ' + (summary.currentCount || 0) + '。'
+    ];
+    if (result.mindmapTreeCache && result.mindmapTreeCache.nodeCount) {
+      lines.push('已使用最新读取的当前脑图缓存：' + result.mindmapTreeCache.nodeCount + ' 个节点。');
+    }
+    for (var i = 0; i < operations.length && i < 6; i++) {
+      var op = operations[i] || {};
+      lines.push('- ' + (op.op || 'op') + '：' + clip(op.title || '未命名节点', 72));
+    }
+    if (operations.length > 6) lines.push('- 还有 ' + (operations.length - 6) + ' 个变更未展开。');
+    return lines.join('\n');
+  }
+
+  function mindmapDiffPlanText(result) {
+    result = result || {};
+    var plan = result.mindmapDiffOperationPlan || {};
+    var capabilities = plan.requiredCapabilities && plan.requiredCapabilities.length ? plan.requiredCapabilities : [];
+    return '局部操作 ' + (plan.operationCount || 0) +
+      ' / 跳过 ' + (plan.skippedCount || 0) +
+      ' / 能力 ' + (capabilities.length ? capabilities.join(', ') : '无额外能力');
+  }
+
+  function mindmapDiffApplyBoundaryText(result) {
+    result = result || {};
+    var plan = result.mindmapDiffOperationPlan || {};
+    var boundary = plan.applyBoundary || {};
+    var blocked = boundary.blockedLocalMutations && boundary.blockedLocalMutations.length ? boundary.blockedLocalMutations : [];
+    var executable = boundary.directlyExecutableMutations && boundary.directlyExecutableMutations.length ? boundary.directlyExecutableMutations : [];
+    return '局部执行：' + (boundary.localApplyStatus || 'unknown') +
+      ' / 当前写入：' + (boundary.currentApplyPath || 'draft_tree_write') +
+      ' / 接受按钮：' + (boundary.acceptButtonBehavior || 'writes_pruned_proposed_tree') +
+      ' / 可直接执行：' + (executable.length ? executable.join(', ') : '无') +
+      ' / 未接原生执行器：' + (blocked.length ? blocked.join(', ') : '无');
+  }
+
+  function renderMindmapDiffRows(result) {
+    result = result || {};
+    var diff = result.mindmapDiff || {};
+    var operations = diff.operations && diff.operations.length ? diff.operations : [];
+    var list = document.createElement('div');
+    list.className = 'mindmap-diff-row-list';
+    for (var i = 0; i < operations.length; i++) {
+      var op = operations[i] || {};
+      var proposedPath = String(op.proposedPath || '');
+      var row = document.createElement('div');
+      row.className = 'mindmap-diff-row';
+      row.setAttribute('data-proposed-path', proposedPath);
+      row.setAttribute('data-selection-state', 'included');
+
+      var checkbox = document.createElement('input');
+      checkbox.className = 'mindmap-diff-checkbox';
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      checkbox.value = proposedPath;
+      checkbox.setAttribute('data-proposed-path', proposedPath);
+      if (proposedPath === '0') checkbox.disabled = true;
+      checkbox.addEventListener('change', function(ev) {
+        var current = ev.currentTarget;
+        var parent = current && current.closest ? current.closest('.mindmap-diff-row') : null;
+        if (parent) parent.setAttribute('data-selection-state', current.checked ? 'included' : 'excluded_by_user');
+        updateMindmapDiffSelectionSummary(current ? current.closest('.mindmap-diff-operation') : null);
+      });
+      row.appendChild(checkbox);
+
+      var text = document.createElement('div');
+      text.className = 'mindmap-diff-row-text';
+
+      var title = document.createElement('div');
+      title.className = 'mindmap-diff-row-title';
+      title.textContent = (op.op || 'op') + ' · ' + (op.title || '未命名节点');
+      text.appendChild(title);
+
+      var titleInput = document.createElement('input');
+      titleInput.className = 'mindmap-diff-title-input';
+      titleInput.type = 'text';
+      titleInput.value = op.title || '未命名节点';
+      titleInput.setAttribute('data-proposed-path', proposedPath);
+      titleInput.setAttribute('data-original-title', op.title || '未命名节点');
+      text.appendChild(titleInput);
+
+      var body = document.createElement('div');
+      body.className = 'mindmap-diff-row-body';
+      body.textContent = [
+        op.reason || '',
+        op.targetParent ? ('目标：' + op.targetParent) : '',
+        op.shortBody ? clip(op.shortBody, 92) : ''
+      ].filter(Boolean).join(' / ');
+      text.appendChild(body);
+
+      var originalBody = op.shortBody || op.bodyPreview || '';
+      var bodyInput = document.createElement('textarea');
+      bodyInput.className = 'mindmap-diff-body-input';
+      bodyInput.value = originalBody;
+      bodyInput.setAttribute('data-proposed-path', proposedPath);
+      bodyInput.setAttribute('data-original-body', originalBody);
+      text.appendChild(bodyInput);
+
+      row.appendChild(text);
+      list.appendChild(row);
+    }
+    if (!operations.length) {
+      var empty = document.createElement('div');
+      empty.className = 'mindmap-diff-row empty';
+      empty.textContent = '没有可逐项预览的脑图变更。';
+      list.appendChild(empty);
+    }
+    return list;
+  }
+
+  function updateMindmapDiffSelectionSummary(panel) {
+    if (!panel) return;
+    var summary = panel.querySelector ? panel.querySelector('.mindmap-diff-selection-summary') : null;
+    if (!summary) return;
+    var boxes = panel.querySelectorAll ? panel.querySelectorAll('.mindmap-diff-checkbox') : [];
+    var total = boxes.length;
+    var selected = 0;
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].checked) selected += 1;
+    }
+    summary.textContent = '节点选择：保留 ' + selected + ' / 跳过 ' + (total - selected);
+  }
+
+  function setMindmapDiffBusy(panel, busy) {
+    if (!panel) return;
+    var controls = panel.querySelectorAll('button, input');
+    for (var i = 0; i < controls.length; i++) {
+      controls[i].disabled = !!busy || controls[i].getAttribute('data-proposed-path') === '0';
+    }
+  }
+
+  function setMindmapDiffStatus(panel, text, stateName) {
+    if (!panel) return;
+    if (stateName) panel.setAttribute('data-state', stateName);
+    var status = panel.querySelector('.mindmap-diff-status');
+    if (status) status.textContent = text || '';
+  }
+
+  function mindmapDiffDraftId(panel) {
+    if (panel) {
+      var panelDraftId = panel.getAttribute('data-draft-id') || '';
+      if (panelDraftId) return panelDraftId;
+    }
+    return state.draft && state.draft.id ? state.draft.id : '';
+  }
+
+  function selectedMindmapDiffExclusions(panel) {
+    var exclusions = [];
+    if (!panel) return exclusions;
+    var inputs = panel.querySelectorAll('.mindmap-diff-checkbox');
+    for (var i = 0; i < inputs.length; i++) {
+      var path = inputs[i].getAttribute('data-proposed-path') || inputs[i].value || '';
+      if (!path || inputs[i].checked || inputs[i].disabled) continue;
+      exclusions.push(path);
+    }
+    return exclusions;
+  }
+
+  function mindmapDiffNodeEdits(panel) {
+    var edits = [];
+    if (!panel) return edits;
+    var rows = panel.querySelectorAll('.mindmap-diff-row');
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var checkbox = row.querySelector ? row.querySelector('.mindmap-diff-checkbox') : null;
+      if (checkbox && (!checkbox.checked || checkbox.disabled)) continue;
+      var titleInput = row.querySelector ? row.querySelector('.mindmap-diff-title-input') : null;
+      var bodyInput = row.querySelector ? row.querySelector('.mindmap-diff-body-input') : null;
+      var proposedPath = row.getAttribute('data-proposed-path') || '';
+      if (!proposedPath) continue;
+      var title = titleInput ? String(titleInput.value || '').replace(/^\s+|\s+$/g, '') : '';
+      var body = bodyInput ? String(bodyInput.value || '').replace(/^\s+|\s+$/g, '') : '';
+      var originalTitle = titleInput ? String(titleInput.getAttribute('data-original-title') || '').replace(/^\s+|\s+$/g, '') : '';
+      var originalBody = bodyInput ? String(bodyInput.getAttribute('data-original-body') || '').replace(/^\s+|\s+$/g, '') : '';
+      var edit = {proposedPath: proposedPath};
+      if (title && title !== originalTitle) edit.title = title;
+      if (body !== originalBody) edit.body = body;
+      if (edit.title !== undefined || edit.body !== undefined) edits.push(edit);
+    }
+    return edits;
+  }
+
+  function applyMindmapDiffDraftEdits(draftId, panel, done) {
+    var exclusions = selectedMindmapDiffExclusions(panel);
+    var nodeEdits = mindmapDiffNodeEdits(panel);
+    if (!exclusions.length && !nodeEdits.length) {
+      done();
+      return;
+    }
+    if (!draftId) {
+      done();
+      return;
+    }
+    setMindmapDiffBusy(panel, true);
+    setMindmapDiffStatus(panel, '正在保存逐节点编辑...', 'pending');
+    postCompanion('draft_update', {
+      id: draftId,
+      excludedMindmapPaths: exclusions,
+      mindmapNodeEdits: nodeEdits
+    }, function(result) {
+      if (!result || !result.ok) {
+        setMindmapDiffBusy(panel, false);
+        setMindmapDiffStatus(panel, result && result.message ? result.message : '保存逐节点编辑失败。', 'error');
+        addFailureMessage('保存脑图 Diff 编辑失败', result);
+        return;
+      }
+      if (result.draft) state.draft = result.draft;
+      setMindmapDiffStatus(panel, '已保存 ' + exclusions.length + ' 个排除项、' + nodeEdits.length + ' 个节点编辑，准备写入。', 'pending');
+      done();
+    }, {showReply: false});
+  }
+
+  function applyMindmapDiffExclusions(draftId, panel, done) {
+    applyMindmapDiffDraftEdits(draftId, panel, done);
+  }
+
+  function mindmapDiffPlanAfterExclusions(panel) {
+    var plan = panel && panel._mindmapDiffOperationPlan ? panel._mindmapDiffOperationPlan : null;
+    if (!plan) return null;
+    var exclusions = selectedMindmapDiffExclusions(panel);
+    var excluded = {};
+    for (var i = 0; i < exclusions.length; i++) excluded[exclusions[i]] = true;
+    var operations = plan.operations && plan.operations.length ? plan.operations : [];
+    var kept = [];
+    for (var j = 0; j < operations.length; j++) {
+      var proposedPath = String(operations[j].proposedPath || '');
+      if (proposedPath && excluded[proposedPath]) continue;
+      kept.push(operations[j]);
+    }
+    var cloned = {};
+    for (var key in plan) {
+      if (Object.prototype.hasOwnProperty.call(plan, key)) cloned[key] = plan[key];
+    }
+    cloned.operations = kept;
+    cloned.operationCount = kept.length;
+    cloned.skippedCount = (plan.skippedCount || 0) + exclusions.length;
+    return cloned;
+  }
+
+  function mindmapDiffPlanAfterUserEdits(panel) {
+    var plan = mindmapDiffPlanAfterExclusions(panel);
+    if (!plan) return null;
+    var nodeEdits = mindmapDiffNodeEdits(panel);
+    if (!nodeEdits.length) return plan;
+    var editsByPath = {};
+    for (var i = 0; i < nodeEdits.length; i++) editsByPath[nodeEdits[i].proposedPath] = nodeEdits[i];
+    var operations = [];
+    var sourceOperations = plan.operations && plan.operations.length ? plan.operations : [];
+    for (var j = 0; j < sourceOperations.length; j++) {
+      var operation = {};
+      for (var key in sourceOperations[j]) {
+        if (Object.prototype.hasOwnProperty.call(sourceOperations[j], key)) operation[key] = sourceOperations[j][key];
+      }
+      var edit = editsByPath[String(operation.proposedPath || '')];
+      if (edit) {
+        if (edit.title !== undefined) operation.title = edit.title;
+        if (edit.body !== undefined) operation.bodyPreview = edit.body;
+        operation.userEdited = true;
+      }
+      operations.push(operation);
+    }
+    plan.operations = operations;
+    return plan;
+  }
+
+  function isMindmapDiffDeleteSuggestionOperation(operation) {
+    operation = operation || {};
+    var mutation = String(operation.mutation || '');
+    var op = String(operation.op || '');
+    return mutation === 'delete_suggest' || mutation === 'delete' || op === 'suggest_delete_mindmap_node';
+  }
+
+  function mindmapDiffApplyOperations(panel) {
+    var plan = mindmapDiffPlanAfterUserEdits(panel);
+    var operations = plan && plan.operations && plan.operations.length ? plan.operations : [];
+    var out = [];
+    for (var i = 0; i < operations.length; i++) {
+      var operation = operations[i] || {};
+      if (!isMindmapDiffDeleteSuggestionOperation(operation)) out.push(operation);
+    }
+    return out;
+  }
+
+  function mindmapDiffApplyPlan(panel) {
+    var plan = mindmapDiffPlanAfterUserEdits(panel);
+    if (!plan) return null;
+    var applyOperations = mindmapDiffApplyOperations(panel);
+    var deleteOperations = mindmapDiffDeleteSuggestionOperations(panel);
+    var nextPlan = {};
+    for (var key in plan) {
+      if (Object.prototype.hasOwnProperty.call(plan, key)) nextPlan[key] = plan[key];
+    }
+    nextPlan.operations = applyOperations;
+    nextPlan.operationCount = applyOperations.length;
+    nextPlan.skippedDeleteSuggestionCount = deleteOperations.length;
+    nextPlan.applyBoundary = {};
+    var boundary = plan.applyBoundary && typeof plan.applyBoundary === 'object' ? plan.applyBoundary : {};
+    for (var boundaryKey in boundary) {
+      if (Object.prototype.hasOwnProperty.call(boundary, boundaryKey)) nextPlan.applyBoundary[boundaryKey] = boundary[boundaryKey];
+    }
+    nextPlan.applyBoundary.skippedDeleteSuggestionCount = deleteOperations.length;
+    return nextPlan;
+  }
+
+  function canApplyMindmapDiffLocally(panel) {
+    var operations = mindmapDiffApplyOperations(panel);
+    if (!operations.length) return false;
+    for (var i = 0; i < operations.length; i++) {
+      var operation = operations[i] || {};
+      if (!mindmapDiffOperationCanApplyLocally(operation)) return false;
+    }
+    return true;
+  }
+
+  function mindmapDiffDeleteSuggestionOperations(panel) {
+    var plan = mindmapDiffPlanAfterUserEdits(panel);
+    var operations = plan && plan.operations && plan.operations.length ? plan.operations : [];
+    var out = [];
+    for (var i = 0; i < operations.length; i++) {
+      var operation = operations[i] || {};
+      if (isMindmapDiffDeleteSuggestionOperation(operation)) out.push(operation);
+    }
+    return out;
+  }
+
+  function requestMindmapDeleteConfirmation(panel) {
+    var deleteOperations = mindmapDiffDeleteSuggestionOperations(panel);
+    if (!deleteOperations.length) return;
+    var plan = mindmapDiffPlanAfterUserEdits(panel);
+    if (!plan) return;
+    var confirmationPlan = {};
+    for (var key in plan) {
+      if (Object.prototype.hasOwnProperty.call(plan, key)) confirmationPlan[key] = plan[key];
+    }
+    confirmationPlan.operations = deleteOperations;
+    confirmationPlan.operationCount = deleteOperations.length;
+    postCompanion('request_mindmap_delete_confirmation', {
+      mindmapDiffOperationPlan: confirmationPlan,
+      draftId: mindmapDiffDraftId(panel)
+    }, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('创建删除建议确认事务失败', result || {});
+        return;
+      }
+      if (result.aiEditTransactionStatus) renderAiEditTransactionCenter(result.aiEditTransactionStatus);
+      setMindmapDiffStatus(panel, '删除建议已进入事务中心，需二次确认。', 'pending');
+    }, {showReply: false});
+  }
+
+  function mindmapDiffOperationCanApplyLocally(operation) {
+    var mutation = String(operation.mutation || '');
+    var op = String(operation.op || '');
+    if (mutation === 'delete_suggest' || mutation === 'delete' || op === 'suggest_delete_mindmap_node') return false;
+    if (mutation === 'create' || op === 'create_mindmap_node') return true;
+    if (!(mutation === 'update' || mutation === 'merge' || mutation === 'move' ||
+        op === 'update_mindmap_node' || op === 'merge_mindmap_node' || op === 'move_mindmap_node')) {
+      return false;
+    }
+    return mindmapDiffOperationRequirementsReady(operation);
+  }
+
+  function mindmapDiffOperationRequirementsReady(operation) {
+    var requirements = operation && operation.requires && operation.requires.length ? operation.requires : [];
+    if (!requirements.length) return false;
+    for (var i = 0; i < requirements.length; i++) {
+      var requirement = String(requirements[i] || '');
+      if (!requirement || requirement === 'nativeMindmap') continue;
+      if (!nativeCapabilityReady(requirement)) return false;
+    }
+    return true;
+  }
+
+  function mindmapDiffOperationMutation(operation) {
+    operation = operation || {};
+    var mutation = String(operation.mutation || '');
+    var op = String(operation.op || '');
+    if (mutation) return mutation;
+    if (op.indexOf('create') >= 0) return 'create';
+    if (op.indexOf('update') >= 0) return 'update';
+    if (op.indexOf('merge') >= 0) return 'merge';
+    if (op.indexOf('move') >= 0) return 'move';
+    if (op.indexOf('delete') >= 0) return 'delete_suggest';
+    return op || 'unknown';
+  }
+
+  function mindmapDiffMutationLabel(mutation) {
+    mutation = String(mutation || '');
+    if (mutation === 'create') return '新增';
+    if (mutation === 'update') return '更新';
+    if (mutation === 'merge') return '合并';
+    if (mutation === 'move') return '移动';
+    if (mutation === 'delete_suggest' || mutation === 'delete') return '建议删除';
+    return mutation || '未知';
+  }
+
+  function mindmapDiffWorkbenchOperations(result) {
+    result = result || {};
+    var plan = result.mindmapDiffOperationPlan || {};
+    if (plan.operations && plan.operations.length) return plan.operations;
+    var diff = result.mindmapDiff || {};
+    return diff.operations && diff.operations.length ? diff.operations : [];
+  }
+
+  function mindmapDiffWorkbenchCounts(result, operations) {
+    result = result || {};
+    operations = operations || [];
+    var summary = (result.mindmapDiff && result.mindmapDiff.summary) || {};
+    var operationCounts = {
+      create: 0,
+      update: 0,
+      merge: 0,
+      move: 0,
+      suggestDelete: 0
+    };
+    for (var i = 0; i < operations.length; i++) {
+      var mutation = mindmapDiffOperationMutation(operations[i]);
+      if (mutation === 'create') operationCounts.create += 1;
+      else if (mutation === 'update') operationCounts.update += 1;
+      else if (mutation === 'merge') operationCounts.merge += 1;
+      else if (mutation === 'move') operationCounts.move += 1;
+      else if (mutation === 'delete_suggest' || mutation === 'delete') operationCounts.suggestDelete += 1;
+    }
+    return {
+      create: summary.createCount !== undefined ? summary.createCount : operationCounts.create,
+      update: summary.updateCount !== undefined ? summary.updateCount : operationCounts.update,
+      merge: summary.mergeCount !== undefined ? summary.mergeCount : operationCounts.merge,
+      move: summary.moveCount !== undefined ? summary.moveCount : operationCounts.move,
+      suggestDelete: summary.suggestDeleteCount !== undefined ? summary.suggestDeleteCount : (
+        summary.deleteSuggestCount !== undefined ? summary.deleteSuggestCount : operationCounts.suggestDelete
+      )
+    };
+  }
+
+  function renderMindmapDiffWorkbench(result) {
+    if (arguments.length && result && result.mindmapDiff) {
+      state.latestMindmapDiff = {
+        mindmapDiff: result.mindmapDiff,
+        mindmapDiffOperationPlan: result.mindmapDiffOperationPlan || null,
+        draftId: result.draftId || (state.draft && state.draft.id ? state.draft.id : ''),
+        mindmapTreeCache: result.mindmapTreeCache || null
+      };
+    }
+    result = state.latestMindmapDiff || null;
+    var panel = byId('mindmapDiffWorkbench');
+    var preview = byId('mindmapDiffWorkbenchPreview');
+    if (!panel || !preview) return;
+    if (!result || !result.mindmapDiff) {
+      panel.className = 'mindmap-diff-workbench idle';
+      setText('mindmapDiffWorkbenchTitle', '脑图 Diff 编辑台');
+      setText('mindmapDiffWorkbenchSummary', '等待 AI 生成脑图 Diff 预览。');
+      var empty = document.createElement('div');
+      empty.className = 'mindmap-diff-workbench-row empty';
+      empty.textContent = '生成脑图树后，这里会保留最近一次新增、更新、合并、移动和建议删除的变更预览。';
+      replaceElementChildren(preview, [empty]);
+      renderMindmapStudioPanel();
+      return;
+    }
+    var operations = mindmapDiffWorkbenchOperations(result);
+    var counts = mindmapDiffWorkbenchCounts(result, operations);
+    var boundary = (result.mindmapDiffOperationPlan && result.mindmapDiffOperationPlan.applyBoundary) || {};
+    var localReadyCount = 0;
+    for (var i = 0; i < operations.length; i++) {
+      var operation = operations[i] || {};
+      if (mindmapDiffOperationCanApplyLocally(operation)) localReadyCount += 1;
+    }
+    var blockedCount = Math.max(0, operations.length - localReadyCount);
+    var localStatus = boundary.localApplyStatus || (operations.length && !blockedCount ? 'all_local' : 'draft_tree_write');
+    panel.className = 'mindmap-diff-workbench ' + (blockedCount ? 'pending' : 'ready');
+    setText('mindmapDiffWorkbenchTitle', '脑图 Diff 编辑台 / 最近一次预览');
+    setText(
+      'mindmapDiffWorkbenchSummary',
+      '新增 ' + counts.create +
+      ' / 更新 ' + counts.update +
+      ' / 合并 ' + counts.merge +
+      ' / 移动 ' + counts.move +
+      ' / 建议删除 ' + counts.suggestDelete +
+      ' / 局部执行 ' + localReadyCount + '/' + operations.length +
+      ' / 状态 ' + localStatus
+    );
+    var rows = [];
+    for (var j = 0; j < operations.length && j < 8; j++) {
+      var item = operations[j] || {};
+      var mutation = mindmapDiffOperationMutation(item);
+      var row = document.createElement('div');
+      row.className = 'mindmap-diff-workbench-row';
+      row.setAttribute('data-mutation', mutation);
+      var title = document.createElement('div');
+      title.className = 'mindmap-diff-workbench-row-title';
+      title.textContent = mindmapDiffMutationLabel(mutation) + ' · ' + clip(item.title || item.targetTitle || '未命名节点', 64);
+      row.appendChild(title);
+      var body = document.createElement('div');
+      body.className = 'mindmap-diff-workbench-row-body';
+      body.textContent = [
+        item.targetParent ? ('目标：' + clip(item.targetParent, 46)) : '',
+        item.reason ? clip(item.reason, 72) : '',
+        mindmapDiffOperationCanApplyLocally(item) ? '可局部执行' : '需草稿写入或人工确认'
+      ].filter(Boolean).join(' / ');
+      row.appendChild(body);
+      rows.push(row);
+    }
+    if (!rows.length) {
+      var noRows = document.createElement('div');
+      noRows.className = 'mindmap-diff-workbench-row empty';
+      noRows.textContent = '本次 Diff 没有可显示的节点级操作。';
+      rows.push(noRows);
+    } else if (operations.length > rows.length) {
+      var more = document.createElement('div');
+      more.className = 'mindmap-diff-workbench-row empty';
+      more.textContent = '还有 ' + (operations.length - rows.length) + ' 个变更未展开。';
+      rows.push(more);
+    }
+    replaceElementChildren(preview, rows);
+    renderMindmapStudioPanel();
+  }
+
+  function applyMindmapDiffLocalOperations(panel) {
+    var plan = mindmapDiffApplyPlan(panel);
+    if (!plan || !plan.operations || !plan.operations.length) {
+      setMindmapDiffStatus(panel, '没有可局部应用的脑图操作。', 'error');
+      requestMindmapDeleteConfirmation(panel);
+      return;
+    }
+    setMindmapDiffBusy(panel, true);
+    setMindmapDiffStatus(panel, '正在排队局部脑图操作...', 'pending');
+    postCompanion('request_mindmap_diff_apply', {
+      mindmapDiffOperationPlan: plan,
+      draftId: mindmapDiffDraftId(panel)
+    }, function(result) {
+      if (!result || !result.ok) {
+        setMindmapDiffBusy(panel, false);
+        setMindmapDiffStatus(panel, result && result.message ? result.message : '局部脑图操作排队失败。', 'error');
+        addFailureMessage('局部应用脑图 Diff 失败', result);
+        return;
+      }
+      setMindmapDiffStatus(panel, '已排队局部脑图操作，等待 MN4 插件执行。', 'accepted');
+      renderQueue(result.queue || state.queue || {});
+      requestMindmapDeleteConfirmation(panel);
+    }, {showReply: false});
+  }
+
+  function acceptMindmapDiff(panel) {
+    var draftId = mindmapDiffDraftId(panel);
+    var applyOperations = mindmapDiffApplyOperations(panel);
+    var deleteOperations = mindmapDiffDeleteSuggestionOperations(panel);
+    if (canApplyMindmapDiffLocally(panel)) {
+      applyMindmapDiffDraftEdits(draftId, panel, function() {
+        applyMindmapDiffLocalOperations(panel);
+      });
+      return;
+    }
+    if (!applyOperations.length && deleteOperations.length) {
+      requestMindmapDeleteConfirmation(panel);
+      return;
+    }
+    if (!draftId) {
+      setMindmapDiffStatus(panel, '没有可写入的脑图草稿。', 'error');
+      addMessage('assistant', '没有可写入的脑图草稿。');
+      return;
+    }
+    applyMindmapDiffDraftEdits(draftId, panel, function() {
+      writeAcceptedDraft(draftId, panel);
+      requestMindmapDeleteConfirmation(panel);
+    });
+  }
+
+  function rejectMindmapDiff(panel) {
+    var draftId = mindmapDiffDraftId(panel);
+    if (!draftId) {
+      setMindmapDiffStatus(panel, '没有可丢弃的脑图草稿。', 'error');
+      addMessage('assistant', '没有可丢弃的脑图草稿。');
+      return;
+    }
+    setMindmapDiffBusy(panel, true);
+    setMindmapDiffStatus(panel, '正在丢弃脑图草稿...', 'rejected');
+    postCompanion('draft_delete', {id: draftId}, function(result) {
+      if (!result || result.ok === false) {
+        setMindmapDiffBusy(panel, false);
+        setMindmapDiffStatus(panel, result && result.message ? result.message : '丢弃草稿失败。', 'error');
+        addFailureMessage('丢弃脑图草稿失败', result);
+        return;
+      }
+      if (state.draft && state.draft.id === draftId) renderDraft(null);
+      setMindmapDiffStatus(panel, '已拒绝并丢弃脑图草稿。', 'rejected');
+    }, {showReply: false});
+  }
+
+  function buildMindmapDiffOperationPanel(result) {
+    result = result || {};
+    var panel = document.createElement('section');
+    panel.className = 'mindmap-diff-operation';
+    panel.setAttribute('data-state', 'pending');
+    panel.setAttribute('data-draft-id', result.draftId || (state.draft && state.draft.id ? state.draft.id : ''));
+    panel._mindmapDiffOperationPlan = result.mindmapDiffOperationPlan || null;
+
+    var title = document.createElement('div');
+    title.className = 'mindmap-diff-title';
+    title.textContent = '脑图 Diff 预览';
+    panel.appendChild(title);
+
+    var summary = document.createElement('div');
+    summary.className = 'mindmap-diff-summary';
+    summary.textContent = mindmapDiffSummaryLine(result);
+    panel.appendChild(summary);
+
+    var meta = document.createElement('div');
+    meta.className = 'mindmap-diff-meta';
+    meta.textContent = mindmapDiffMetaText(result);
+    panel.appendChild(meta);
+
+    var plan = document.createElement('div');
+    plan.className = 'mindmap-diff-plan';
+    plan.textContent = mindmapDiffPlanText(result);
+    panel.appendChild(plan);
+
+    var boundary = document.createElement('div');
+    boundary.className = 'mindmap-diff-boundary';
+    boundary.textContent = mindmapDiffApplyBoundaryText(result);
+    panel.appendChild(boundary);
+
+    var selectionSummary = document.createElement('div');
+    selectionSummary.className = 'mindmap-diff-selection-summary';
+    selectionSummary.textContent = '节点选择：保留 0 / 跳过 0';
+    panel.appendChild(selectionSummary);
+
+    panel.appendChild(renderMindmapDiffRows(result));
+    window.setTimeout(function() {
+      updateMindmapDiffSelectionSummary(panel);
+    }, 0);
+
+    var actions = document.createElement('div');
+    actions.className = 'mindmap-diff-actions';
+
+    var accept = document.createElement('button');
+    accept.className = 'mindmap-diff-accept';
+    accept.type = 'button';
+    accept.textContent = '接受';
+    accept.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      acceptMindmapDiff(panel);
+    });
+    actions.appendChild(accept);
+
+    var reject = document.createElement('button');
+    reject.className = 'mindmap-diff-reject';
+    reject.type = 'button';
+    reject.textContent = '拒绝';
+    reject.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      rejectMindmapDiff(panel);
+    });
+    actions.appendChild(reject);
+    panel.appendChild(actions);
+
+    var status = document.createElement('div');
+    status.className = 'mindmap-diff-status';
+    status.textContent = '等待确认';
+    panel.appendChild(status);
+    return panel;
+  }
+
+  function renderMindmapDiffOperation(result) {
+    renderMindmapDiffWorkbench(result);
+    addMessageWithExtra('assistant', '', function(article, body) {
+      if (body) body.className = 'message-body empty';
+      article.appendChild(buildMindmapDiffOperationPanel(result));
+    });
+  }
+
+  function operationPlanSummaryLine(result) {
+    result = result || {};
+    var dryRun = result.dryRun || {};
+    return 'Dry-run：' + (dryRun.status || 'unknown') +
+      ' / 操作数 ' + (dryRun.operationCount || 0) +
+      ' / 阻断 ' + (dryRun.blockedCount || 0) +
+      ' / 未确认 ' + (dryRun.unknownCount || 0);
+  }
+
+  function operationPlanMetaText(result) {
+    result = result || {};
+    var dryRun = result.dryRun || {};
+    var operationPlan = result.operationPlan || {};
+    var target = operationPlan.target || {};
+    var checks = dryRun.checks && dryRun.checks.length ? dryRun.checks : [];
+    var lines = [
+      dryRun.message || result.message || '已生成写入计划预览。',
+      '目标：' + (target.label || target.rootTitle || target.mode || '当前 MN 上下文')
+    ];
+    for (var i = 0; i < checks.length && i < 6; i++) {
+      var check = checks[i] || {};
+      var detail = check.status || 'unknown';
+      if (check.reason) detail += ' / ' + check.reason;
+      lines.push('- ' + (check.op || check.opId || 'operation') + '：' + detail);
+    }
+    if (checks.length > 6) lines.push('- 还有 ' + (checks.length - 6) + ' 个检查未展开。');
+    return lines.join('\n');
+  }
+
+  function setOperationPlanBusy(panel, busy) {
+    if (!panel) return;
+    var buttons = panel.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = !!busy;
+    }
+  }
+
+  function setOperationPlanStatus(panel, text, stateName) {
+    if (!panel) return;
+    if (stateName) panel.setAttribute('data-state', stateName);
+    var status = panel.querySelector('.operation-plan-status');
+    if (status) status.textContent = text || '';
+  }
+
+  function operationPlanDraftId(panel) {
+    if (panel) {
+      var panelDraftId = panel.getAttribute('data-draft-id') || '';
+      if (panelDraftId) return panelDraftId;
+    }
+    return state.draft && state.draft.id ? state.draft.id : '';
+  }
+
+  function acceptOperationPlan(panel) {
+    var draftId = operationPlanDraftId(panel);
+    if (!draftId) {
+      setOperationPlanStatus(panel, '没有可写入的草稿。', 'error');
+      addMessage('assistant', '没有可写入的草稿。');
+      return;
+    }
+    writeAcceptedDraft(draftId, panel);
+  }
+
+  function rejectOperationPlan(panel) {
+    var draftId = operationPlanDraftId(panel);
+    if (!draftId) {
+      setOperationPlanStatus(panel, '没有可丢弃的草稿。', 'error');
+      addMessage('assistant', '没有可丢弃的草稿。');
+      return;
+    }
+    setOperationPlanBusy(panel, true);
+    setOperationPlanStatus(panel, '正在丢弃写入草稿...', 'rejected');
+    postCompanion('draft_delete', {id: draftId}, function(result) {
+      if (!result || result.ok === false) {
+        setOperationPlanBusy(panel, false);
+        setOperationPlanStatus(panel, result && result.message ? result.message : '丢弃草稿失败。', 'error');
+        addFailureMessage('丢弃写入草稿失败', result);
+        return;
+      }
+      if (state.draft && state.draft.id === draftId) renderDraft(null);
+      setOperationPlanStatus(panel, '已拒绝并丢弃写入草稿。', 'rejected');
+    }, {showReply: false});
+  }
+
+  function buildOperationPlanPanel(result) {
+    result = result || {};
+    var dryRun = result.dryRun || {};
+    var blocked = parseInt(dryRun.blockedCount || 0, 10) || 0;
+    var panel = document.createElement('section');
+    panel.className = 'operation-plan-panel';
+    panel.setAttribute('data-state', blocked ? 'blocked' : 'pending');
+    panel.setAttribute('data-draft-id', result.draftId || (state.draft && state.draft.id ? state.draft.id : ''));
+
+    var title = document.createElement('div');
+    title.className = 'operation-plan-title';
+    title.textContent = '写入计划预览';
+    panel.appendChild(title);
+
+    var summary = document.createElement('div');
+    summary.className = 'operation-plan-summary';
+    summary.textContent = operationPlanSummaryLine(result);
+    panel.appendChild(summary);
+
+    var meta = document.createElement('div');
+    meta.className = 'operation-plan-meta';
+    meta.textContent = operationPlanMetaText(result);
+    panel.appendChild(meta);
+
+    var actions = document.createElement('div');
+    actions.className = 'operation-plan-actions';
+
+    var accept = document.createElement('button');
+    accept.className = 'operation-plan-accept';
+    accept.type = 'button';
+    accept.textContent = blocked ? '已阻断' : '接受';
+    accept.disabled = !!blocked;
+    accept.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      acceptOperationPlan(panel);
+    });
+    actions.appendChild(accept);
+
+    var reject = document.createElement('button');
+    reject.className = 'operation-plan-reject';
+    reject.type = 'button';
+    reject.textContent = '拒绝';
+    reject.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      rejectOperationPlan(panel);
+    });
+    actions.appendChild(reject);
+    panel.appendChild(actions);
+
+    var status = document.createElement('div');
+    status.className = 'operation-plan-status';
+    status.textContent = blocked ? 'dry-run 已阻断，不能写入。' : '等待确认';
+    panel.appendChild(status);
+    return panel;
+  }
+
+  function renderOperationPlanPreview(result) {
+    addMessageWithExtra('assistant', '', function(article, body) {
+      if (body) body.className = 'message-body empty';
+      article.appendChild(buildOperationPlanPanel(result));
+    });
+  }
+
+  function runAgentNextAction(item, replyText) {
+    item = item || {};
+    var actionId = String(item.id || '');
+    var action = String(item.action || '');
+    var label = item.label || actionLabel(action);
+    if (actionId === 'create_card_tree' || action === 'generate_mindmap') {
+      executeAction('generate_mindmap', buildReplyMindmapPrompt(replyText), label || '生成脑图树');
+      return;
+    }
+    if (action === 'operation_plan_preview') {
+      var draftId = state.draft && state.draft.id ? state.draft.id : '';
+      if (!draftId) {
+        addMessage('assistant', '需要先生成并保存一个待写入草稿，才能预览写入计划。');
+        return;
+      }
+      postCompanion('operation_plan_preview', {draftId: draftId}, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('预览写入计划失败', result);
+          return;
+        }
+        renderOperationPlanPreview(result);
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'mindmap_diff_preview') {
+      var mindmapDraftId = state.draft && state.draft.id ? state.draft.id : '';
+      if (!mindmapDraftId) {
+        addMessage('assistant', '需要先生成并保存一个待写入脑图草稿，才能预览脑图 Diff。');
+        return;
+      }
+      postCompanion('mindmap_diff_preview', {
+        draftId: mindmapDraftId,
+        mindmapTarget: state.mindmapTarget && state.mindmapTarget.target ? state.mindmapTarget.target : {}
+      }, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('预览脑图 Diff 失败', result);
+          return;
+        }
+        renderMindmapDiffOperation(result);
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'knowledge_index_search') {
+      postCompanion('knowledge_index_search', {query: replyText || state.latestAssistantReply || promptValue()}, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('检索相关知识失败', result);
+          return;
+        }
+        addMessage('assistant', formatKnowledgeSearchResult(result));
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'workflow_start') {
+      postCompanion('workflow_start', {
+        workflowId: item.workflowId || (state.agentOperation && state.agentOperation.intent ? state.agentOperation.intent.workflowId : ''),
+        prompt: replyText || state.latestAssistantReply || promptValue()
+      }, function(result) {
+        renderControls(result || {});
+        if (!result || !result.ok) addFailureMessage('启动工作流失败', result);
+      });
+      return;
+    }
+    if (action) {
+      executeAction(action, replyText || state.latestAssistantReply || promptValue(), label);
+    }
+  }
+
+  function buildReplyAgentActions(replyText) {
     var wrapper = document.createElement('div');
     wrapper.className = 'reply-mindmap-actions';
-    var button = document.createElement('button');
-    button.className = 'small-button reply-mindmap-tree-button';
-    button.type = 'button';
-    button.textContent = '生成脑图树';
-    button.addEventListener('click', function(ev) {
-      releaseButtonFocus(ev.currentTarget);
-      runReplyMindmapAction(replyText);
-    });
-    wrapper.appendChild(button);
+    var actions = agentNextActionsForReply();
+    for (var i = 0; i < actions.length; i++) {
+      (function(item) {
+        item = item || {};
+        var button = document.createElement('button');
+        var actionId = String(item.id || '');
+        button.className = 'small-button ' + (actionId === 'create_card_tree' ? 'reply-mindmap-tree-button' : 'reply-agent-action-button');
+        button.type = 'button';
+        button.textContent = item.label || actionLabel(item.action || '');
+        button.setAttribute('data-agent-next-action', actionId || item.action || 'action');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runAgentNextAction(item, replyText);
+        });
+        wrapper.appendChild(button);
+      })(actions[i]);
+    }
     return wrapper;
   }
 
@@ -507,14 +1628,64 @@
     state.sessionId = String(conversation.sessionId || '');
   }
 
+  function currentMnObjectRef() {
+    var operation = state.agentOperation || {};
+    var mnObject = operation.mnObject || {};
+    var object = operation.object || {};
+    var sourceRef = mnObject.sourceRef || object.sourceRef || {};
+    return {
+      objectId: String(mnObject.objectId || object.mnObjectId || ''),
+      kind: String(mnObject.kind || object.kind || ''),
+      title: String(mnObject.title || object.title || ''),
+      sourceRef: sourceRef || {}
+    };
+  }
+
+  function renderConversationHistoryScope() {
+    var objectRef = currentMnObjectRef();
+    var objectReady = !!objectRef.objectId;
+    var objectButton = byId('conversationHistoryObjectButton');
+    var allButton = byId('conversationHistoryAllButton');
+    if (allButton) allButton.className = 'scope-button' + (state.conversationHistoryScope !== 'object' ? ' active' : '');
+    if (objectButton) {
+      objectButton.className = 'scope-button' + (state.conversationHistoryScope === 'object' ? ' active' : '');
+      objectButton.disabled = !objectReady;
+      objectButton.title = objectReady ? '只看当前对象相关历史' : '等待当前 MNObject';
+    }
+    if (state.conversationHistoryScope === 'object' && !objectReady) {
+      state.conversationHistoryScope = 'document';
+      if (allButton) allButton.className = 'scope-button active';
+      if (objectButton) objectButton.className = 'scope-button';
+    }
+    var label = '历史范围：当前文档';
+    if (state.conversationHistoryScope === 'object' && objectReady) {
+      label = '历史范围：当前对象 / ' + (objectRef.kind || 'object') + ' / ' + clip(objectRef.title || objectRef.objectId, 64);
+    }
+    setText('conversationHistoryScopeLine', label);
+  }
+
+  function conversationHistoryPayload() {
+    var payload = {};
+    if (state.conversationHistoryScope === 'object') {
+      var objectRef = currentMnObjectRef();
+      if (objectRef.objectId) payload.mnObjectId = objectRef.objectId;
+    }
+    return payload;
+  }
+
+  function refreshConversationHistory() {
+    renderConversationHistoryScope();
+    postCompanion('conversation_list', conversationHistoryPayload(), function(result) {
+      state.conversations = result.conversations || [];
+      renderConversationList(state.conversations);
+    }, {showReply: false});
+  }
+
   function openConversationHistory() {
     closeConfigPage();
     var page = byId('conversationHistoryPage');
     if (page) page.className = 'config-page';
-    postCompanion('conversation_list', {}, function(result) {
-      state.conversations = result.conversations || [];
-      renderConversationList(state.conversations);
-    }, {showReply: false});
+    refreshConversationHistory();
   }
 
   function closeConversationHistory() {
@@ -553,6 +1724,14 @@
         main.appendChild(title);
         main.appendChild(meta);
         main.appendChild(preview);
+        var objectRef = item.objectRef || {};
+        if (objectRef.objectId || objectRef.kind || objectRef.title) {
+          var objectLine = document.createElement('div');
+          objectLine.className = 'conversation-list-object';
+          objectLine.setAttribute('data-mn-object-id', String(objectRef.objectId || ''));
+          objectLine.textContent = '对象：' + (objectRef.kind || 'object') + ' / ' + clip(objectRef.title || objectRef.objectId, 64);
+          main.appendChild(objectLine);
+        }
         var actions = document.createElement('div');
         actions.className = 'conversation-list-actions';
         var loadButton = document.createElement('button');
@@ -595,7 +1774,9 @@
   function loadConversation(item) {
     item = item || {};
     if (!item.sessionId) return;
-    postCompanion('conversation_load', {sessionId: item.sessionId}, function(result) {
+    var payload = conversationHistoryPayload();
+    payload.sessionId = item.sessionId;
+    postCompanion('conversation_load', payload, function(result) {
       if (!result || !result.ok) {
         addFailureMessage('加载历史对话失败', result);
         return;
@@ -610,7 +1791,9 @@
     item = item || {};
     if (!item.sessionId) return;
     if (window.confirm && !window.confirm('删除这条历史对话？')) return;
-    postCompanion('conversation_delete', {sessionId: item.sessionId}, function(result) {
+    var payload = conversationHistoryPayload();
+    payload.sessionId = item.sessionId;
+    postCompanion('conversation_delete', payload, function(result) {
       if (!result || !result.ok) {
         addFailureMessage('删除历史对话失败', result);
         return;
@@ -620,7 +1803,7 @@
         state.sessionId = '';
         renderNewConversationMessage();
       }
-      openConversationHistory();
+      refreshConversationHistory();
     }, {showReply: false});
   }
 
@@ -686,6 +1869,8 @@
     }
     if (!payload.conversationId && state.conversationId) payload.conversationId = state.conversationId;
     if (!payload.sessionId && state.sessionId) payload.sessionId = state.sessionId;
+    var mnObject = state.agentOperation && state.agentOperation.mnObject ? state.agentOperation.mnObject : null;
+    if (mnObject && mnObject.objectId && !payload.mnObject && !payload.mnObjectId) payload.mnObject = mnObject;
     payload.action = action;
     payload.source = payload.source || 'marginnote4-web-panel';
     payload.contextScope = currentContextScope();
@@ -798,6 +1983,2465 @@
     xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
     xhr.send(JSON.stringify(companionPayload(action, extra)));
+  }
+
+  function agentObjectLabel(kind) {
+    var labels = {
+      selection: 'PDF 选区',
+      note: '卡片/节点',
+      document: '当前文档',
+      mindmap: '目标脑图',
+      unknown: '未识别对象'
+    };
+    return labels[kind] || kind || '未识别对象';
+  }
+
+  function agentRiskLabel(status) {
+    var labels = {
+      read_only: '只读',
+      write_pending_confirmation: '写入需确认',
+      blocked: '已阻断',
+      not_available: '未检查'
+    };
+    return labels[status] || status || '未检查';
+  }
+
+  function workspaceSurfacePane(surface) {
+    var map = {
+      console: 'object',
+      mindmap_studio: 'operation',
+      card_factory: 'knowledge',
+      ledger_explorer: 'object',
+      knowledge_graph: 'knowledge',
+      workflow_builder: 'workflow',
+      skill_center: 'workflow'
+    };
+    return map[surface] || 'object';
+  }
+
+  function workspaceSurfaceAnchor(surface) {
+    var map = {
+      console: 'objectWorkspacePanel',
+      mindmap_studio: 'mindmapDiffWorkbench',
+      card_factory: 'knowledgeWorkspaceReviewQueue',
+      ledger_explorer: 'operationLedgerPanel',
+      knowledge_graph: 'knowledgeWorkspacePanel',
+      workflow_builder: 'workflowWorkspaceTemplates',
+      skill_center: 'workflowWorkspaceSkills'
+    };
+    return map[surface] || 'objectWorkspacePanel';
+  }
+
+  function workspaceSurfaceFromPane(pane) {
+    var map = {
+      object: 'console',
+      operation: 'mindmap_studio',
+      knowledge: 'knowledge_graph',
+      workflow: 'workflow_builder'
+    };
+    return map[pane] || 'console';
+  }
+
+  function workspaceSurfaceSummary(surface) {
+    var map = {
+      console: 'Knowledge Console：当前对象、风险、关系和账本入口。',
+      mindmap_studio: 'Mindmap Studio：围绕目标脑图、Diff、局部执行和验证工作。',
+      card_factory: 'Card Factory：查看卡型质量、复习队列和学习目标。',
+      ledger_explorer: 'Operation Ledger：查看写入证据、回滚状态和残留对象。',
+      knowledge_graph: 'Knowledge Graph：查看实体、关系、索引范围和检索结果。',
+      workflow_builder: 'Workflow Builder：查看模板、最近 run、确认点和重试入口。',
+      skill_center: 'Skill Center：查看技能包权限、安装状态、回滚和验收规则。'
+    };
+    return map[surface] || map.console;
+  }
+
+  function focusWorkspaceSurfaceAnchor(anchorId) {
+    var anchor = byId(anchorId);
+    if (!anchor) return;
+    anchor.classList.add('workspace-surface-focus');
+    try {
+      anchor.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    } catch (err) {
+      anchor.scrollIntoView();
+    }
+    window.setTimeout(function() {
+      anchor.classList.remove('workspace-surface-focus');
+    }, 900);
+  }
+
+  function renderWorkspaceNavigator() {
+    var surface = state.activeWorkspaceSurface || 'console';
+    var buttons = document.querySelectorAll('.workspace-nav-card');
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute('data-workspace-surface') === surface;
+      if (active) buttons[i].classList.add('active');
+      else buttons[i].classList.remove('active');
+      buttons[i].setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+    setText('workspaceNavigatorSummary', workspaceSurfaceSummary(surface));
+  }
+
+  function switchWorkspaceSurface(surface) {
+    surface = String(surface || 'console');
+    var valid = {
+      console: true,
+      mindmap_studio: true,
+      card_factory: true,
+      ledger_explorer: true,
+      knowledge_graph: true,
+      workflow_builder: true,
+      skill_center: true
+    };
+    if (!valid[surface]) surface = 'console';
+    state.activeWorkspaceSurface = surface;
+    state.activeProductMode = 'workspace';
+    switchWorkbenchPane(workspaceSurfacePane(surface), {fromWorkspaceSurface: true});
+    renderWorkspaceNavigator();
+    var anchorId = workspaceSurfaceAnchor(surface);
+    window.setTimeout(function() {
+      focusWorkspaceSurfaceAnchor(anchorId);
+    }, 0);
+  }
+
+  function renderProductMode() {
+    var mode = state.activeProductMode === 'chat' ? 'chat' : 'workspace';
+    var shell = byId('aiChatShell');
+    if (shell) shell.setAttribute('data-product-mode', mode);
+    var buttons = document.querySelectorAll('.mode-switch-button');
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute('data-product-mode') === mode;
+      if (active) buttons[i].classList.add('active');
+      else buttons[i].classList.remove('active');
+      buttons[i].setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+    setText(
+      'modeIntentLine',
+      mode === 'chat'
+        ? '当前：Chat Mode，保持轻量对话、选区解释和回答后续动作。'
+        : '当前：Agent Workspace，围绕 MNObject、脑图、知识、账本和 workflow 操作。'
+    );
+  }
+
+  function switchProductMode(mode) {
+    mode = String(mode || 'workspace') === 'chat' ? 'chat' : 'workspace';
+    state.activeProductMode = mode;
+    if (mode === 'chat') {
+      switchWorkbenchPane('dialog', {fromProductMode: true});
+    } else {
+      var pane = state.activeWorkbenchPane === 'dialog' ? state.lastWorkspacePane : state.activeWorkbenchPane;
+      switchWorkbenchPane(pane || state.lastWorkspacePane || 'object', {fromProductMode: true});
+    }
+    renderProductMode();
+  }
+
+  function switchWorkbenchPane(pane, options) {
+    pane = String(pane || 'object');
+    if (pane !== 'object' && pane !== 'dialog' && pane !== 'operation' && pane !== 'knowledge' && pane !== 'workflow') pane = 'object';
+    if (pane === 'dialog') {
+      state.activeProductMode = 'chat';
+    } else {
+      state.activeProductMode = 'workspace';
+      state.lastWorkspacePane = pane;
+      if (!options || !options.fromWorkspaceSurface) {
+        state.activeWorkspaceSurface = workspaceSurfaceFromPane(pane);
+      }
+    }
+    state.activeWorkbenchPane = pane;
+    var panels = document.querySelectorAll('.workbench-panel');
+    for (var i = 0; i < panels.length; i++) {
+      var active = panels[i].getAttribute('data-workbench-pane') === pane;
+      if (active) panels[i].classList.add('active');
+      else panels[i].classList.remove('active');
+    }
+    var tabs = document.querySelectorAll('.workbench-tab');
+    for (var t = 0; t < tabs.length; t++) {
+      var tabActive = tabs[t].getAttribute('data-workbench-pane') === pane;
+      if (tabActive) tabs[t].classList.add('active');
+      else tabs[t].classList.remove('active');
+    }
+    renderProductMode();
+    renderWorkspaceNavigator();
+  }
+
+  function renderKnowledgeSearchResults(result) {
+    var target = byId('knowledgeWorkspaceResults');
+    if (!target) return;
+    result = result || state.knowledgeWorkspace || {};
+    var matches = result.matches || result.searchMatches || [];
+    if (!matches.length) {
+      replaceElementChildren(target, [
+        textNode('div', 'knowledge-workspace-result empty', result.message || '暂无知识命中；可以先索引当前选区、节点或文档。')
+      ]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(matches.length, 8); i++) {
+      (function(match) {
+        match = match || {};
+        var row = document.createElement('div');
+        row.className = 'knowledge-workspace-result';
+        var title = document.createElement('div');
+        title.className = 'knowledge-workspace-result-title';
+        title.textContent = (match.title || '未命名知识') + (match.entityType ? (' / ' + match.entityType) : '');
+        var snippet = document.createElement('div');
+        snippet.className = 'knowledge-workspace-result-snippet';
+        snippet.textContent = clip(match.snippet || match.text || '', 220);
+        var meta = document.createElement('div');
+        meta.className = 'knowledge-workspace-result-meta';
+        var sourceRef = match.sourceRef || {};
+        meta.textContent = [
+          match.source || 'index',
+          sourceRef.documentTitle || match.bookmd5 || '',
+          sourceRef.page !== undefined ? ('p.' + sourceRef.page) : '',
+          match.score !== undefined ? ('score ' + match.score) : ''
+        ].filter(Boolean).join(' / ');
+        var actions = document.createElement('div');
+        actions.className = 'knowledge-workspace-result-actions';
+        var useButton = document.createElement('button');
+        useButton.className = 'small-button knowledge-workspace-use';
+        useButton.type = 'button';
+        useButton.textContent = '引用提问';
+        useButton.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          setValue('promptInput', '结合这条知识解释：' + (match.title || '') + '\n' + (match.snippet || ''));
+          switchWorkbenchPane('dialog');
+          byId('promptInput').focus();
+        });
+        actions.appendChild(useButton);
+        row.appendChild(title);
+        if (snippet.textContent) row.appendChild(snippet);
+        row.appendChild(meta);
+        row.appendChild(actions);
+        nodes.push(row);
+      })(matches[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function renderKnowledgeReviewQueue(queue) {
+    queue = queue || {};
+    if (queue.reviewQueue) queue = queue.reviewQueue;
+    var summary = queue.summary || queue.reviewQueueSummary || {};
+    var items = queue.items || queue.reviewItems || [];
+    var total = summary.totalCount !== undefined ? summary.totalCount : items.length;
+    var due = summary.dueCount !== undefined ? summary.dueCount : 0;
+    var newCount = summary.newCount !== undefined ? summary.newCount : 0;
+    setText('knowledgeWorkspaceReviewQueue', '复习队列：' + total + ' 张 / 到期 ' + due + ' / 新卡 ' + newCount);
+    var target = byId('knowledgeWorkspaceReviewList');
+    if (!target) return;
+    if (!items.length) {
+      replaceElementChildren(target, [
+        textNode('div', 'knowledge-review-item empty', 'Card Factory 复习卡会显示在这里。')
+      ]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(items.length, 6); i++) {
+      var item = items[i] || {};
+      var source = item.source || {};
+      var row = document.createElement('div');
+      row.className = 'knowledge-review-item';
+      var title = document.createElement('div');
+      title.className = 'knowledge-review-title';
+      title.textContent = clip(item.title || item.reviewPrompt || '未命名复习卡', 90);
+      var prompt = document.createElement('div');
+      prompt.className = 'knowledge-review-prompt';
+      prompt.textContent = clip(item.reviewPrompt || item.body || '', 150);
+      var meta = document.createElement('div');
+      meta.className = 'knowledge-review-meta';
+      meta.textContent = [
+        item.cardType || 'card',
+        item.state || 'new',
+        item.mnObjectId || '',
+        source.noteId ? ('note ' + source.noteId) : '',
+        source.page !== undefined ? ('p.' + source.page) : ''
+      ].filter(Boolean).join(' / ');
+      row.appendChild(title);
+      if (prompt.textContent) row.appendChild(prompt);
+      row.appendChild(meta);
+      nodes.push(row);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function searchKnowledgeWorkspace(query) {
+    query = String(query || valueOf('knowledgeWorkspaceSearchInput') || state.latestAssistantReply || promptValue() || '').trim();
+    if (!query) {
+      renderKnowledgeSearchResults({ok: false, message: '请输入检索关键词，或先在对话里提出问题。', matches: []});
+      return;
+    }
+    setValue('knowledgeWorkspaceSearchInput', query);
+    postCompanion('knowledge_index_search', {query: query}, function(result) {
+      if (result && result.ok !== false) {
+        state.knowledgeWorkspace = Object.assign({}, state.knowledgeWorkspace || {}, {lastQuery: query, matches: result.matches || []});
+        renderKnowledgeSearchResults(result);
+      } else {
+        renderKnowledgeSearchResults(result || {ok: false, message: '知识检索失败。', matches: []});
+      }
+    }, {showReply: false});
+  }
+
+  function renderKnowledgeWorkspace(data) {
+    if (arguments.length) state.knowledgeWorkspace = data || {};
+    data = state.knowledgeWorkspace || {};
+    var operation = state.agentOperation || {};
+    var knowledge = operation.knowledge || {};
+    var ctx = state.context || {};
+    var status = data.status || data.index || {};
+    var entityTypes = status.entityTypes || data.entityTypes || {};
+    var entityCount = data.entityCount || status.entityCount || status.totalEntities || knowledge.count || 0;
+    var relationCount = data.relationCount || status.relationCount || 0;
+    var scope = data.scope || status.scope || ctx.topicid || ctx.bookmd5 || '当前文档';
+    setText('knowledgeWorkspaceTitle', 'Knowledge Graph');
+    setText(
+      'knowledgeWorkspaceSummary',
+      knowledge.enabled
+        ? ('知识索引：启用 / 命中 ' + (knowledge.count || 0) + ' 条。')
+        : '知识索引默认不注入；只有显式要求相关、历史、跨文档或 notebook 时启用。'
+    );
+    setText('knowledgeWorkspaceScope', '范围：' + scope + ' / 策略：显式启用');
+    var typeParts = [];
+    for (var key in entityTypes) {
+      if (Object.prototype.hasOwnProperty.call(entityTypes, key)) typeParts.push(key + ':' + entityTypes[key]);
+    }
+    setText('knowledgeWorkspaceEntities', '实体：' + entityCount + (typeParts.length ? ' / ' + typeParts.join(' / ') : ' / 等待索引状态'));
+    setText('knowledgeWorkspaceRelations', '关系：' + relationCount + ' / 支持、反驳、对比和来源回链仍按授权范围显示');
+    renderKnowledgeReviewQueue(data.reviewQueue || data.review_queue || data);
+    renderKnowledgeSearchResults(data);
+    var actions = byId('knowledgeWorkspaceActions');
+    if (actions) {
+      replaceElementChildren(actions, [
+        buildWorkbenchActionButton('检索相关知识', 'knowledge_index_search', '围绕当前对象检索索引', 'knowledge'),
+        buildWorkbenchActionButton('刷新知识状态', 'knowledge_index_status', '读取实体和关系统计', 'knowledge')
+      ]);
+    }
+  }
+
+  function renderWorkflowTemplates(data) {
+    var target = byId('workflowWorkspaceTemplates');
+    if (!target) return;
+    data = data || state.workflowWorkspace || {};
+    var templates = data.workflowTemplates || data.templates || [];
+    if (!templates.length) {
+      replaceElementChildren(target, [
+        textNode('div', 'workflow-workspace-template empty', '等待 workflow 模板列表。')
+      ]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(templates.length, 6); i++) {
+      (function(item) {
+        item = item || {};
+        var row = document.createElement('div');
+        row.className = 'workflow-workspace-template';
+        row.setAttribute('data-workflow-template-id', String(item.id || ''));
+        var title = document.createElement('div');
+        title.className = 'workflow-workspace-template-title';
+        title.textContent = item.title || item.id || '未命名工作流';
+        var meta = document.createElement('div');
+        meta.className = 'workflow-workspace-template-meta';
+        meta.textContent = [
+          item.trigger || 'manual',
+          (item.stepCount || 0) + ' steps',
+          (item.confirmationPoints || []).length + ' confirm'
+        ].join(' / ');
+        var button = document.createElement('button');
+        button.className = 'small-button workflow-workspace-start';
+        button.type = 'button';
+        button.textContent = '启动';
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          startWorkflowTemplate(item.id || '');
+        });
+        row.appendChild(title);
+        row.appendChild(meta);
+        row.appendChild(button);
+        nodes.push(row);
+      })(templates[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function renderWorkflowRuns(data) {
+    var target = byId('workflowWorkspaceRecentRuns');
+    if (!target) return;
+    data = data || state.workflowWorkspace || {};
+    var runs = data.workflowRuns || data.runs || [];
+    if (!runs.length) {
+      replaceElementChildren(target, [
+        textNode('div', 'workflow-workspace-run empty', '最近启动的 workflow run 会显示在这里。')
+      ]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(runs.length, 5); i++) {
+      (function(run) {
+      run = run || {};
+      var row = document.createElement('div');
+      row.className = 'workflow-workspace-run';
+      row.setAttribute('data-workflow-run-id', String(run.id || ''));
+      var title = document.createElement('div');
+      title.className = 'workflow-workspace-run-title';
+      title.textContent = run.title || run.workflowTitle || run.workflowId || run.id || 'workflow run';
+      var meta = document.createElement('div');
+      meta.className = 'workflow-workspace-run-meta';
+      meta.textContent = [
+        run.status || 'unknown',
+        run.queuedCount !== undefined ? ('queued ' + run.queuedCount) : '',
+        run.waitingConfirmationCount !== undefined ? ('confirm ' + run.waitingConfirmationCount) : '',
+        run.mnObjectKind || ''
+      ].filter(Boolean).join(' / ');
+      var button = document.createElement('button');
+      button.className = 'small-button workflow-workspace-open-run';
+      button.type = 'button';
+      button.textContent = '查看';
+      button.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        openWorkflowRunInspector(run.id || '');
+      });
+      row.appendChild(title);
+      row.appendChild(meta);
+      row.appendChild(button);
+      nodes.push(row);
+      })(runs[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function workflowRunInspectorStep(step) {
+    step = step || {};
+    var row = document.createElement('div');
+    var tone = step.statusTone || 'idle';
+    row.className = 'workflow-run-inspector-step ' + tone;
+    row.setAttribute('data-workflow-step-id', String(step.stepId || ''));
+    row.setAttribute('data-workflow-step-action', String(step.action || ''));
+    var title = document.createElement('div');
+    title.className = 'workflow-run-inspector-step-title';
+    title.textContent = (step.index ? (step.index + '. ') : '') + (step.title || step.action || '工作流步骤');
+    var status = document.createElement('div');
+    status.className = 'workflow-run-inspector-step-status ' + tone;
+    status.textContent = [
+      step.status || 'unknown',
+      step.nextAction ? ('next ' + step.nextAction) : '',
+      step.queueId ? ('queue ' + step.queueId) : ''
+    ].filter(Boolean).join(' / ');
+    var message = document.createElement('div');
+    message.className = 'workflow-run-inspector-step-message';
+    message.textContent = step.message || (step.requiresConfirmation ? '等待确认。' : '等待运行状态更新。');
+    row.appendChild(title);
+    row.appendChild(status);
+    row.appendChild(message);
+    if (step.retryable) {
+      var actions = document.createElement('div');
+      actions.className = 'workflow-run-inspector-step-actions';
+      var retryButton = document.createElement('button');
+      retryButton.className = 'small-button workflow-run-inspector-retry';
+      retryButton.type = 'button';
+      retryButton.textContent = '重试';
+      retryButton.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        retryWorkflowRunStep(step.retryAction || {
+          workflowRunId: state.workflowRunInspector && state.workflowRunInspector.workflowRunId,
+          workflowStepId: step.stepId || ''
+        });
+      });
+      actions.appendChild(retryButton);
+      row.appendChild(actions);
+    }
+    return row;
+  }
+
+  function renderWorkflowRunInspector(inspector) {
+    if (arguments.length) state.workflowRunInspector = inspector || null;
+    inspector = state.workflowRunInspector || {};
+    var panel = byId('workflowRunInspectorPanel');
+    var stepsTarget = byId('workflowRunInspectorSteps');
+    if (!panel || !stepsTarget) return;
+    if (!inspector || !inspector.workflowRunId) {
+      panel.className = 'workflow-run-inspector-panel idle';
+      setText('workflowRunInspectorTitle', '选择 workflow run 查看步骤');
+      setText('workflowRunInspectorSummary', '排队、确认点、阻塞和下一步动作会显示在这里。');
+      replaceElementChildren(stepsTarget, [
+        textNode('div', 'workflow-run-inspector-step empty', '尚未打开 workflow run。')
+      ]);
+      return;
+    }
+    panel.className = 'workflow-run-inspector-panel ' + (inspector.statusTone || 'idle');
+    var counts = inspector.stepCounts || {};
+    setText(
+      'workflowRunInspectorTitle',
+      (inspector.title || inspector.workflowId || 'workflow run') + ' / ' + clip(inspector.workflowRunId || '', 16)
+    );
+    setText(
+      'workflowRunInspectorSummary',
+      '状态：' + (inspector.status || 'unknown') +
+        ' / 步骤 ' + (counts.total || 0) +
+        ' / 排队 ' + (counts.queued || 0) +
+        ' / 待确认 ' + (counts.waitingConfirmation || 0) +
+        ' / 手动 ' + (counts.manual || 0)
+    );
+    var steps = inspector.steps || [];
+    if (!steps.length) {
+      replaceElementChildren(stepsTarget, [
+        textNode('div', 'workflow-run-inspector-step empty', '该 workflow run 没有步骤记录。')
+      ]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < steps.length; i++) nodes.push(workflowRunInspectorStep(steps[i]));
+    replaceElementChildren(stepsTarget, nodes);
+  }
+
+  function openWorkflowRunInspector(runId) {
+    var cleanId = String(runId || '');
+    if (!cleanId) return;
+    postCompanion('workflow_status', {workflowRunId: cleanId}, function(result) {
+      if (!result || result.ok === false) {
+        addFailureMessage('读取 workflow run 失败', result || {});
+        return;
+      }
+      renderWorkflowRunInspector(result.runInspector || {});
+      switchWorkbenchPane('workflow');
+    }, {showReply: false});
+  }
+
+  function retryWorkflowRunStep(payload) {
+    payload = payload || {};
+    if (!payload.workflowRunId && state.workflowRunInspector) {
+      payload.workflowRunId = state.workflowRunInspector.workflowRunId || '';
+    }
+    postCompanion('workflow_retry_step', payload, function(result) {
+      if (!result || result.ok === false) {
+        addFailureMessage('重试 workflow step 失败', result || {});
+        if (result && result.runInspector) renderWorkflowRunInspector(result.runInspector);
+        return;
+      }
+      renderWorkflowRunInspector(result.runInspector || {});
+      refreshWorkflowWorkspace(false);
+    }, {showReply: false});
+  }
+
+  function closeWorkflowRunInspector() {
+    state.workflowRunInspector = null;
+    renderWorkflowRunInspector(null);
+  }
+
+  function startWorkflowTemplate(workflowId) {
+    var prompt = promptValue() || state.latestAssistantReply || state.lastPromptFromSelection || '';
+    postCompanion('workflow_start', {workflowId: workflowId || '', prompt: prompt}, function(result) {
+      renderControls(result || {});
+      if (!result || result.ok === false) addFailureMessage('启动工作流失败', result || {});
+      else refreshWorkflowWorkspace(false);
+    }, {showReply: true});
+  }
+
+  function renderWorkflowSkills(data) {
+    var target = byId('workflowWorkspaceSkillsList');
+    if (!target) return;
+    data = data || state.workflowWorkspace || {};
+    var skills = data.workflowSkills || data.skills || [];
+    if (!skills.length) {
+      replaceElementChildren(target, [
+        textNode('div', 'workflow-workspace-skill empty', '等待 Skill Marketplace 技能包清单。')
+      ]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(skills.length, 6); i++) {
+      (function(skill) {
+        skill = skill || {};
+        var row = document.createElement('div');
+        row.className = 'workflow-workspace-skill' + (skill.installed ? ' installed' : '');
+        row.setAttribute('data-workflow-skill-id', String(skill.id || ''));
+        var title = document.createElement('div');
+        title.className = 'workflow-workspace-skill-title';
+        title.textContent = (skill.installed ? '已安装 · ' : '') + (skill.title || skill.id || '未命名技能');
+        var meta = document.createElement('div');
+        meta.className = 'workflow-workspace-skill-meta';
+        meta.textContent = [
+          skill.permission || 'read_only',
+          skill.requiresConfirmation ? '需确认' : '只读/无需确认',
+          skill.rollback && skill.rollback.strategy ? ('rollback ' + skill.rollback.strategy) : ''
+        ].filter(Boolean).join(' / ');
+        var button = document.createElement('button');
+        button.className = 'small-button workflow-workspace-install';
+        button.type = 'button';
+        button.textContent = skill.installed ? '已安装' : '安装';
+        button.disabled = !!skill.installed;
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          installWorkflowSkill(skill.id || '');
+        });
+        row.appendChild(title);
+        row.appendChild(meta);
+        row.appendChild(button);
+        nodes.push(row);
+      })(skills[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function installWorkflowSkill(skillId) {
+    postCompanion('skill_install', {skillId: skillId || ''}, function(result) {
+      if (result && result.ok !== false) {
+        var marketplace = result.marketplace || {};
+        state.workflowWorkspace = Object.assign({}, state.workflowWorkspace || {}, {
+          workflowSkills: marketplace.skills || [],
+          skillCount: marketplace.skillCount || 0,
+          installedSkillCount: marketplace.installedCount || 0
+        });
+        renderWorkflowWorkspace(state.workflowWorkspace);
+      } else {
+        addFailureMessage('安装技能失败', result || {});
+      }
+    }, {showReply: false});
+  }
+
+  function renderWorkflowWorkspace(data) {
+    if (arguments.length) state.workflowWorkspace = data || {};
+    data = state.workflowWorkspace || {};
+    if (Array.isArray(data)) {
+      data = {workflowRuns: data};
+      state.workflowWorkspace = data;
+    }
+    var operation = state.agentOperation || {};
+    var workflow = operation.workflow || {};
+    var runs = data.runs || data.workflowRuns || [];
+    var runCount = data.runCount !== undefined ? data.runCount : runs.length;
+    var mnApi = state.mnApi || {};
+    var gatewayBackend = mnApi.backend || mnApi.mn_api_backend || 'auto';
+    var skillCount = data.skillCount || (data.workflowSkills && data.workflowSkills.length) || (data.skills && data.skills.length) || 0;
+    setText('workflowWorkspaceTitle', 'Workflow Runtime');
+    setText(
+      'workflowWorkspaceSummary',
+      '当前 workflow：' + (workflow.title || workflow.id || '等待匹配') + ' / 可保存、排队、确认和验证。'
+    );
+    setText('workflowWorkspaceRuns', '运行：' + runCount + ' 个 workflow run / 最近状态：' + (data.latestStatus || data.status || '等待状态'));
+    setText('workflowWorkspaceGateway', 'External Automation Gateway：' + gatewayBackend + ' / requestId、权限和回调会进入 ledger');
+    setText('workflowWorkspaceSkills', 'Skill Marketplace：' + skillCount + ' 个技能包 / 已安装 ' + (data.installedSkillCount || data.installedCount || 0) + ' 个 / 写入技能需声明权限、回滚和验收规则');
+    renderWorkflowSkills(data);
+    renderWorkflowTemplates(data);
+    renderWorkflowRuns(data);
+    renderWorkflowRunInspector(state.workflowRunInspector);
+    var actions = byId('workflowWorkspaceActions');
+    if (actions) {
+      replaceElementChildren(actions, [
+        buildWorkbenchActionButton('启动工作流', 'workflow_start', '基于当前对象启动推荐工作流', 'workflow'),
+        buildWorkbenchActionButton('刷新运行状态', 'workflow_list', '读取 workflow run 列表', 'workflow')
+      ]);
+    }
+  }
+
+  function refreshKnowledgeWorkspace(manual) {
+    postCompanion('knowledge_index_status', {}, function(result) {
+      if (result && result.ok !== false) {
+        renderKnowledgeWorkspace(Object.assign({}, state.knowledgeWorkspace || {}, result));
+      }
+      else if (manual) addFailureMessage('刷新知识状态失败', result || {});
+    }, {showReply: false});
+    var objectRef = currentMnObjectRef();
+    postCompanion('review_queue_list', {mnObject: objectRef, mnObjectId: objectRef.objectId || ''}, function(result) {
+      if (result && result.ok !== false) {
+        renderKnowledgeWorkspace(Object.assign({}, state.knowledgeWorkspace || {}, {
+          reviewQueue: result,
+          reviewQueueSummary: result.summary || {},
+          reviewItems: result.items || []
+        }));
+      } else if (manual) {
+        addFailureMessage('刷新复习队列失败', result || {});
+      }
+    }, {showReply: false});
+  }
+
+  function refreshWorkflowWorkspace(manual) {
+    postCompanion('workflow_list', {}, function(result) {
+      if (result && result.ok !== false) renderWorkflowWorkspace(result);
+      else if (manual) addFailureMessage('刷新工作流状态失败', result || {});
+    }, {showReply: false});
+    postCompanion('mn_api_status', {}, function(result) {
+      if (result && result.ok !== false) {
+        renderMnApiStatus(result);
+        renderWorkflowWorkspace(state.workflowWorkspace || {});
+      } else if (manual) {
+        addFailureMessage('刷新外部自动化网关状态失败', result || {});
+      }
+    }, {showReply: false});
+    postCompanion('skill_marketplace_status', {}, function(result) {
+      if (result && result.ok !== false) {
+        state.workflowWorkspace = Object.assign({}, state.workflowWorkspace || {}, {
+          workflowSkills: result.skills || [],
+          skillCount: result.skillCount || 0,
+          installedSkillCount: result.installedCount || 0
+        });
+        renderWorkflowWorkspace(state.workflowWorkspace || {});
+      } else if (manual) {
+        addFailureMessage('刷新技能市场失败', result || {});
+      }
+    }, {showReply: false});
+  }
+
+  function renderWorkbenchPanels() {
+    var operation = state.agentOperation || {};
+    var mnObject = operation.mnObject || {};
+    var object = operation.object || {};
+    var workflow = operation.workflow || {};
+    var intent = operation.intent || {};
+    var policy = operation.operationPolicy || {};
+    var risk = policy.risk || {};
+    var contextPolicy = operation.contextPolicy || {};
+    var ctx = state.context || {};
+    var objectKind = object.kind || (ctx.selectionText ? 'selection' : (ctx.selectedNoteTitle ? 'note' : (ctx.documentTitle ? 'document' : 'unknown')));
+    var objectTitle = object.title || ctx.selectedNoteTitle || ctx.documentTitle || agentObjectLabel(objectKind);
+    var visibleScope = contextPolicy.visibleScope || currentContextScope() || 'auto';
+    var topic = ctx.topicid || ctx.notebookid || '';
+    var doc = ctx.documentTitle || ctx.bookTitle || ctx.bookmd5 || '';
+    var target = state.mindmapTarget && state.mindmapTarget.target ? state.mindmapTarget.target : {};
+    var targetLabel = target.label || target.rootTitle || target.selectedNoteTitle || '未确认目标脑图';
+    var workflowTitle = workflow.title || intent.workflowTitle || intent.workflowId || '等待 workflow';
+    var riskLabel = agentRiskLabel(risk.status);
+
+    setText('objectWorkspaceTitle', agentObjectLabel(objectKind) + ' / ' + clip(objectTitle, 42));
+    setText('objectWorkspaceMeta', 'Notebook：' + (topic || '未识别') + ' / 文档：' + (doc ? clip(doc, 80) : '未识别'));
+    setText('objectWorkspaceScope', '上下文范围：' + visibleScope + ' / 目标脑图：' + clip(targetLabel, 48));
+    setText('operationWorkspaceTitle', workflowTitle);
+    setText('operationWorkspaceMeta',
+      '风险：' + riskLabel +
+      ' / Dry-run：' + (risk.dryRunStatus || 'not_available') +
+      ' / 确认点：' + ((risk.confirmationPoints || []).length || 0)
+    );
+    renderObjectWorkspaceMnObject(mnObject, object);
+    renderObjectRiskPanel(policy.riskRegister || {}, risk);
+    renderObjectWorkspaceEvidence(objectKind, ctx);
+    renderObjectWorkspaceActions(objectKind);
+    renderObjectBrowser();
+    renderObjectGraph();
+    renderObjectActivity();
+    renderOperationLedger();
+    renderOperationLedgerDetail();
+    var currentObjectId = mnObject.objectId || object.mnObjectId || '';
+    if (currentObjectId && currentObjectId !== state.objectBrowserLastId) {
+      state.objectBrowserLastId = currentObjectId;
+      refreshObjectBrowser(false);
+    }
+    if (currentObjectId && currentObjectId !== state.objectGraphLastId) {
+      state.objectGraphLastId = currentObjectId;
+      refreshObjectGraph(false);
+    }
+    if (currentObjectId && currentObjectId !== state.objectActivityLastId) {
+      state.objectActivityLastId = currentObjectId;
+      refreshObjectActivity(false);
+    }
+    if (currentObjectId && currentObjectId !== state.operationLedgerLastId) {
+      state.operationLedgerLastId = currentObjectId;
+      state.operationLedgerDetail = null;
+      renderOperationLedgerDetail();
+      refreshOperationLedger(false);
+    }
+    renderOperationWorkspaceActions(operation);
+    renderOperationWorkspaceVerification();
+    renderKnowledgeWorkspace();
+    renderWorkflowWorkspace();
+  }
+
+  function replaceElementChildren(node, children) {
+    if (!node) return;
+    while (node.firstChild) node.removeChild(node.firstChild);
+    children = children || [];
+    for (var i = 0; i < children.length; i++) node.appendChild(children[i]);
+  }
+
+  function buildWorkbenchEvidenceItem(label, ready) {
+    var item = document.createElement('div');
+    item.className = 'workbench-evidence-item' + (ready ? ' ready' : '');
+    item.textContent = label;
+    return item;
+  }
+
+  function renderObjectWorkspaceMnObject(mnObject, object) {
+    mnObject = mnObject || {};
+    object = object || {};
+    var sourceRef = mnObject.sourceRef || object.sourceRef || {};
+    var actionCount = (mnObject.availableActions || []).length || object.availableActionCount || 0;
+    var objectId = mnObject.objectId || object.mnObjectId || '';
+    var idLine = objectId ? ('MNObject：' + objectId + ' / 动作 ' + actionCount) : 'MNObject：等待对象 ID';
+    var sourceParts = [];
+    if (sourceRef.page !== null && sourceRef.page !== undefined && sourceRef.page !== '') sourceParts.push('第 ' + sourceRef.page + ' 页');
+    if (sourceRef.documentTitle) sourceParts.push(clip(sourceRef.documentTitle, 42));
+    if (sourceRef.quote) sourceParts.push('quote: ' + clip(sourceRef.quote, 64));
+    if (sourceRef.path) sourceParts.push('path: ' + clip(sourceRef.path, 72));
+    setText('objectWorkspaceObjectId', idLine);
+    setText('objectWorkspaceSourceRef', sourceParts.length ? ('来源：' + sourceParts.join(' / ')) : '来源：等待 sourceRef');
+  }
+
+  function objectRiskItem(item) {
+    item = item || {};
+    var row = document.createElement('div');
+    var tone = String(item.tone || '');
+    row.className = 'object-risk-row' + (tone ? (' ' + tone) : '');
+    row.setAttribute('data-risk-id', String(item.id || 'risk'));
+    var badge = document.createElement('span');
+    badge.className = 'object-risk-badge';
+    badge.textContent = item.label || '风险';
+    var body = document.createElement('span');
+    body.className = 'object-risk-text';
+    body.textContent = (item.status || 'unknown') + (item.detail ? (' / ' + item.detail) : '');
+    row.appendChild(badge);
+    row.appendChild(body);
+    return row;
+  }
+
+  function renderObjectRiskPanel(riskRegister, fallbackRisk) {
+    riskRegister = riskRegister || {};
+    fallbackRisk = fallbackRisk || {};
+    var panel = byId('objectRiskPanel');
+    var summary = byId('objectRiskSummary');
+    var list = byId('objectRiskList');
+    if (!panel || !summary || !list) return;
+    var items = riskRegister.items || [];
+    var registerSummary = riskRegister.summary || {};
+    if (!items.length) {
+      panel.className = 'object-risk-panel idle';
+      summary.textContent = '风险：等待对象风险评估。';
+      replaceElementChildren(list, [objectRiskItem({
+        id: 'waiting',
+        label: '等待',
+        status: fallbackRisk.status || 'unknown',
+        detail: '刷新 Agent 计划后显示权限、上下文、目标脑图、dry-run 和确认点。'
+      })]);
+      return;
+    }
+    var blocked = registerSummary.blockedCount || 0;
+    var warnings = registerSummary.warningCount || 0;
+    panel.className = 'object-risk-panel ' + (blocked ? 'blocked' : (warnings ? 'warn' : 'ready'));
+    summary.textContent =
+      '风险：' + agentRiskLabel(registerSummary.status || fallbackRisk.status) +
+      ' / 阻断 ' + blocked +
+      ' / 提醒 ' + warnings +
+      ' / 项 ' + (registerSummary.itemCount || items.length);
+    var nodes = [];
+    for (var i = 0; i < items.length && nodes.length < 6; i++) {
+      nodes.push(objectRiskItem(items[i]));
+    }
+    replaceElementChildren(list, nodes);
+  }
+
+  function renderObjectWorkspaceEvidence(objectKind, ctx) {
+    var target = byId('objectWorkspaceEvidence');
+    if (!target) return;
+    ctx = ctx || state.context || {};
+    var items = [
+      buildWorkbenchEvidenceItem('选区：' + (compactText(ctx.selectionText || ctx.selectedText || ctx.activeSelectionText) ? '可用' : '未选中'), objectKind === 'selection'),
+      buildWorkbenchEvidenceItem('节点：' + (compactText(ctx.selectedNoteTitle || ctx.selectedNoteText || ctx.selectedNoteId || ctx.noteId || ctx.noteid) ? '可用' : '未选中'), objectKind === 'note'),
+      buildWorkbenchEvidenceItem('文档：' + (compactText(ctx.documentTitle || ctx.bookmd5 || ctx.docmd5 || ctx.pdfPath || ctx.documentPath) ? '可用' : '未识别'), objectKind === 'document')
+    ];
+    replaceElementChildren(target, items);
+  }
+
+  function objectWorkspaceActionsForKind(objectKind) {
+    var basePrompt = state.latestAssistantReply || state.lastPromptFromSelection || promptValue();
+    return [
+      {id: 'object_explain', label: '解释对象', action: 'chat', prompt: basePrompt || '解释当前 MarginNote 对象。'},
+      {id: 'object_mindmap', label: '生成脑图树', action: 'generate_mindmap', prompt: basePrompt},
+      {id: 'object_related', label: '找相关知识', action: 'knowledge_index_search', prompt: basePrompt}
+    ].slice(0, objectKind === 'unknown' ? 1 : 3);
+  }
+
+  function renderObjectWorkspaceActions(objectKind) {
+    var target = byId('objectWorkspaceActions');
+    if (!target) return;
+    var actions = objectWorkspaceActionsForKind(objectKind);
+    var nodes = [];
+    for (var i = 0; i < actions.length; i++) {
+      (function(item, index) {
+        var button = document.createElement('button');
+        button.className = 'workbench-action-button' + (index === 0 ? ' primary' : '');
+        button.type = 'button';
+        button.textContent = item.label;
+        button.setAttribute('data-object-workbench-action', item.id || item.action || 'action');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          if (item.action === 'knowledge_index_search') {
+            runAgentNextAction(item, item.prompt || state.latestAssistantReply || promptValue());
+            return;
+          }
+          executeAction(item.action || 'chat', item.prompt || promptValue(), item.label);
+        });
+        nodes.push(button);
+      })(actions[i], i);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function buildWorkbenchActionButton(label, action, hint, pane) {
+    var button = document.createElement('button');
+    button.className = 'workbench-action-button';
+    button.type = 'button';
+    button.textContent = label || actionLabel(action || '');
+    button.title = hint || '';
+    button.setAttribute('data-' + (pane || 'generic') + '-workbench-action', action || 'action');
+    button.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      if (action === 'knowledge_index_status') {
+        refreshKnowledgeWorkspace(true);
+        return;
+      }
+      if (action === 'workflow_list') {
+        refreshWorkflowWorkspace(true);
+        return;
+      }
+      if (action === 'workflow_start' || action === 'knowledge_index_search') {
+        runAgentNextAction({label: label, action: action}, state.latestAssistantReply || promptValue());
+        return;
+      }
+      executeAction(action || 'chat', promptValue(), label || actionLabel(action || ''));
+    });
+    return button;
+  }
+
+  function objectBrowserKindLabel(objectType, kind) {
+    var type = String(objectType || '');
+    var value = String(kind || '');
+    if (type === 'focus') return '当前';
+    if (type === 'registry') return 'Registry';
+    if (type === 'object_graph') return objectGraphKindLabel(value);
+    if (type === 'object_activity') return '活动';
+    if (type === 'operation_ledger') return operationLedgerKindLabel(value);
+    return '对象';
+  }
+
+  function objectBrowserSearchQuery() {
+    return String(valueOf('objectBrowserSearchInput') || '').trim();
+  }
+
+  function objectBrowserFilterPayload() {
+    return {
+      objectTypeFilter: String(valueOf('objectBrowserTypeFilterSelect') || '').trim(),
+      kindFilter: String(valueOf('objectBrowserKindFilterInput') || '').trim(),
+      query: objectBrowserSearchQuery()
+    };
+  }
+
+  function objectBrowserRow(kind, title, meta, item) {
+    item = item || {};
+    var browserAction = item.browserAction || {};
+    var row = document.createElement('div');
+    row.className = 'object-browser-row';
+    row.setAttribute('data-browser-kind', String(kind || 'object'));
+    var badge = document.createElement('span');
+    badge.className = 'object-browser-badge';
+    badge.textContent = kind || '对象';
+    var body = document.createElement('span');
+    body.className = 'object-browser-text';
+    body.textContent = (title || '未命名对象') + (meta ? (' / ' + meta) : '');
+    row.appendChild(badge);
+    row.appendChild(body);
+    if (browserAction.action) {
+      var openButton = document.createElement('button');
+      openButton.className = 'small-button object-browser-open';
+      openButton.type = 'button';
+      openButton.textContent = browserAction.label || '打开';
+      openButton.setAttribute('data-browser-action', String(browserAction.action || ''));
+      openButton.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        openObjectBrowserItem(item);
+      });
+      row.appendChild(openButton);
+    }
+    return row;
+  }
+
+  function openObjectBrowserItem(item) {
+    item = item || {};
+    var descriptor = item.browserAction || {};
+    var action = String(descriptor.action || '');
+    if (!action) return;
+    if (action === 'object_graph') {
+      refreshObjectGraph(true, descriptor.payload || {});
+      return;
+    }
+    if (action === 'object_activity') {
+      refreshObjectActivity(true, descriptor.payload || {});
+      return;
+    }
+    if (action === 'operation_ledger_list') {
+      refreshOperationLedger(true, descriptor.payload || {});
+      return;
+    }
+    if (action === 'operation_ledger_get') {
+      openOperationLedgerEntry({ledgerAction: descriptor});
+      return;
+    }
+    if (item.objectType === 'object_graph') {
+      openObjectGraphNode({
+        graphAction: descriptor,
+        title: item.title,
+        nodeType: item.kind,
+        sourceId: item.browserId,
+        summary: item.summary
+      });
+      return;
+    }
+    openObjectActivityItem({
+      activityAction: descriptor,
+      event: item.title || item.kind || '',
+      level: item.status || '',
+      requestId: item.browserId || '',
+      message: item.summary || ''
+    });
+  }
+
+  function renderObjectBrowser(browser) {
+    if (arguments.length) state.objectBrowser = browser || {};
+    browser = state.objectBrowser || {};
+    var panel = byId('objectBrowserPanel');
+    var summary = byId('objectBrowserSummary');
+    var list = byId('objectBrowserList');
+    if (!panel || !summary || !list) return;
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId) {
+      panel.className = 'object-browser-panel idle';
+      summary.textContent = '等待当前对象浏览器。';
+      replaceElementChildren(list, [objectBrowserRow('等待', '刷新 Agent 计划后显示对象浏览器', '')]);
+      return;
+    }
+    if (state.objectBrowserInFlight) {
+      panel.className = 'object-browser-panel pending';
+      summary.textContent = 'Object Browser：正在读取 ' + objectRef.objectId;
+      return;
+    }
+    if (!browser.ok) {
+      panel.className = 'object-browser-panel idle';
+      summary.textContent = 'Object Browser：尚未读取 / ' + objectRef.objectId;
+      replaceElementChildren(list, [objectBrowserRow('等待', '点击刷新读取当前对象浏览器', '')]);
+      return;
+    }
+    var counts = browser.counts || {};
+    var filters = browser.filters || {};
+    var filterLabels = [];
+    if (filters.objectTypeFilter) filterLabels.push('类型=' + filters.objectTypeFilter);
+    if (filters.kindFilter) filterLabels.push('Kind=' + filters.kindFilter);
+    if (filters.query) filterLabels.push('搜索=' + filters.query);
+    var total = counts.total || 0;
+    var unfilteredTotal = counts.unfilteredTotal;
+    var totalLabel = typeof unfilteredTotal === 'number' && unfilteredTotal !== total
+      ? (total + ' / ' + unfilteredTotal)
+      : String(total);
+    panel.className = 'object-browser-panel ready';
+    summary.textContent =
+      '对象 ' + totalLabel +
+      ' / Registry ' + (counts.registry || 0) +
+      ' / 图谱 ' + (counts.object_graph || 0) +
+      ' / 活动 ' + (counts.object_activity || 0) +
+      ' / 账本 ' + (counts.operation_ledger || 0) +
+      (filterLabels.length ? (' / 筛选：' + filterLabels.join('，')) : '');
+    var rows = [];
+    var objects = browser.objects || [];
+    for (var i = 0; i < objects.length && rows.length < 10; i++) {
+      rows.push(objectBrowserRow(
+        objectBrowserKindLabel(objects[i].objectType, objects[i].kind),
+        objects[i].title || objects[i].browserId || '对象',
+        objects[i].status || objects[i].summary || '',
+        objects[i]
+      ));
+    }
+    if (!rows.length) rows.push(objectBrowserRow('空', '当前对象暂无可浏览对象', ''));
+    replaceElementChildren(list, rows);
+  }
+
+  function refreshObjectBrowser(manual) {
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId || state.objectBrowserInFlight) {
+      renderObjectBrowser();
+      return;
+    }
+    state.objectBrowserInFlight = true;
+    renderObjectBrowser();
+    var filters = objectBrowserFilterPayload();
+    postCompanion('object_browser', Object.assign({
+      mnObject: objectRef,
+      mnObjectId: objectRef.objectId,
+      limit: 12
+    }, filters), function(result) {
+      state.objectBrowserInFlight = false;
+      if (!result || !result.ok) {
+        state.objectBrowser = {ok: false, message: result && result.message ? result.message : 'Object Browser 读取失败。'};
+        renderObjectBrowser();
+        if (manual) addFailureMessage('Object Browser 读取失败', result || {});
+        return;
+      }
+      renderObjectBrowser(result);
+    }, {showReply: false});
+  }
+
+  function requestObjectRegistryScan() {
+    if (state.objectRegistryScanInFlight) return;
+    var objectRef = currentMnObjectRef();
+    var sourceRef = objectRef.sourceRef || {};
+    state.objectRegistryScanInFlight = true;
+    window.CodexPanel.setStatus({text: '正在请求 MN 扫描当前 notebook 对象'});
+    postCompanion('request_mn_object_registry_scan', {
+      mnObject: objectRef,
+      mnObjectId: objectRef.objectId || '',
+      selectedNoteId: sourceRef.noteId || '',
+      limit: 240,
+      source: 'object-browser-scan-button'
+    }, function(result) {
+      state.objectRegistryScanInFlight = false;
+      if (!result || result.ok === false) {
+        addFailureMessage('MN 对象扫描请求失败', result || {});
+        return;
+      }
+      window.CodexPanel.setStatus({text: result.message || '已请求 MN 扫描对象，等待原生插件回传 Registry。'});
+      setTimeout(function() {
+        refreshObjectBrowser(true);
+      }, 1200);
+    }, {showReply: false});
+  }
+
+  function objectGraphKindLabel(nodeType) {
+    var value = String(nodeType || '');
+    if (value === 'mn_object') return '对象';
+    if (value === 'manual_mn_object') return '手工对象';
+    if (value === 'conversation') return '对话';
+    if (value === 'workflow_run') return '工作流';
+    if (value === 'ai_edit_transaction') return '事务';
+    if (value === 'external_gateway_request') return '外部';
+    if (value === 'diagnostic_log') return '日志';
+    if (value === 'knowledge_entity') return '知识';
+    if (value === 'mn_note') return 'MN节点';
+    return '节点';
+  }
+
+  function objectGraphNode(kind, title, meta, item) {
+    item = item || {};
+    var graphAction = item.graphAction || {};
+    var row = document.createElement('div');
+    row.className = 'object-graph-node';
+    row.setAttribute('data-graph-kind', String(kind || 'node'));
+    var badge = document.createElement('span');
+    badge.className = 'object-graph-badge';
+    badge.textContent = kind || '节点';
+    var body = document.createElement('span');
+    body.className = 'object-graph-text';
+    body.textContent = (title || '未命名节点') + (meta ? (' / ' + meta) : '');
+    row.appendChild(badge);
+    row.appendChild(body);
+    if (graphAction.action) {
+      var openButton = document.createElement('button');
+      openButton.className = 'small-button object-graph-open';
+      openButton.type = 'button';
+      openButton.textContent = graphAction.label || '打开';
+      openButton.setAttribute('data-graph-action', String(graphAction.action || ''));
+      openButton.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        openObjectGraphNode(item);
+      });
+      row.appendChild(openButton);
+    }
+    return row;
+  }
+
+  function openObjectGraphNode(item) {
+    item = item || {};
+    var descriptor = item.graphAction || {};
+    var action = String(descriptor.action || '');
+    if (!action) return;
+    if (action === 'operation_ledger_get') {
+      openOperationLedgerEntry({ledgerAction: descriptor});
+      return;
+    }
+    if (action === 'mn_read_tree') {
+      postCompanion('mn_read_tree', descriptor.payload || {}, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('读取 MN 节点子树失败', result || {});
+          return;
+        }
+        renderControls(result || {});
+        addMessage('assistant', result.message || '已请求读取 MN 节点子树。');
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'object_graph_relation_delete') {
+      postCompanion('object_graph_relation_delete', descriptor.payload || {}, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('删除对象关系失败', result || {});
+          return;
+        }
+        addMessage('assistant', result.message || '已删除对象关系。');
+        refreshObjectBrowser(true);
+        refreshObjectGraph(true);
+      }, {showReply: false});
+      return;
+    }
+    openObjectActivityItem({
+      activityAction: descriptor,
+      event: item.title || item.nodeType || '',
+      level: item.status || '',
+      requestId: item.sourceId || '',
+      message: item.summary || ''
+    });
+  }
+
+  function renderObjectGraph(graph) {
+    if (arguments.length) state.objectGraph = graph || {};
+    graph = state.objectGraph || {};
+    var panel = byId('objectGraphPanel');
+    var summary = byId('objectGraphSummary');
+    var list = byId('objectGraphNodes');
+    if (!panel || !summary || !list) return;
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId) {
+      panel.className = 'object-graph-panel idle';
+      summary.textContent = '等待当前对象图谱。';
+      replaceElementChildren(list, [objectGraphNode('等待', '刷新 Agent 计划后显示对象图谱', '')]);
+      return;
+    }
+    if (state.objectGraphInFlight) {
+      panel.className = 'object-graph-panel pending';
+      summary.textContent = 'Object Graph：正在读取 ' + objectRef.objectId;
+      return;
+    }
+    if (!graph.ok) {
+      panel.className = 'object-graph-panel idle';
+      summary.textContent = 'Object Graph：尚未读取 / ' + objectRef.objectId;
+      replaceElementChildren(list, [objectGraphNode('等待', '点击刷新读取当前对象图谱', '')]);
+      return;
+    }
+    var counts = graph.counts || {};
+    panel.className = 'object-graph-panel ready';
+    summary.textContent =
+      '节点 ' + (counts.nodes || 0) +
+      ' / 关系 ' + (counts.edges || 0) +
+      ' / 对话 ' + (counts.conversation || 0) +
+      ' / 操作 ' + ((counts.workflow_run || 0) + (counts.ai_edit_transaction || 0) + (counts.external_gateway_request || 0)) +
+      ' / 手工 ' + (counts.manual_relation || 0);
+    var rows = [];
+    var nodes = graph.nodes || [];
+    for (var i = 0; i < nodes.length && rows.length < 9; i++) {
+      if (!nodes[i] || nodes[i].nodeType === 'mn_object') continue;
+      rows.push(objectGraphNode(
+        objectGraphKindLabel(nodes[i].nodeType),
+        nodes[i].title || nodes[i].sourceId || nodes[i].nodeId || '图谱节点',
+        nodes[i].status || nodes[i].updatedAt || nodes[i].summary || '',
+        nodes[i]
+      ));
+    }
+    if (!rows.length) rows.push(objectGraphNode('空', '当前对象暂无关联图谱节点', ''));
+    replaceElementChildren(list, rows);
+  }
+
+  function refreshObjectGraph(manual, overridePayload) {
+    var objectPayload = overridePayload || {};
+    var objectRef = currentMnObjectRef();
+    var objectId = objectPayload.mnObjectId || objectRef.objectId;
+    if (!objectId || state.objectGraphInFlight) {
+      renderObjectGraph();
+      return;
+    }
+    state.objectGraphInFlight = true;
+    renderObjectGraph();
+    var graphPayload = Object.assign({}, objectPayload, {
+      mnObjectId: objectPayload.mnObjectId || objectRef.objectId,
+      mnObject: objectPayload.mnObject || objectRef,
+      limit: objectPayload.limit || 9
+    });
+    postCompanion('object_graph', graphPayload, function(result) {
+      state.objectGraphInFlight = false;
+      if (!result || !result.ok) {
+        state.objectGraph = {ok: false, message: result && result.message ? result.message : 'Object Graph 读取失败。'};
+        renderObjectGraph();
+        if (manual) addFailureMessage('Object Graph 读取失败', result || {});
+        return;
+      }
+      renderObjectGraph(result);
+    }, {showReply: false});
+  }
+
+  function openObjectGraphRelationEditor() {
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId) {
+      addMessage('assistant', '请先刷新 Agent 计划或在 MN4 中选中一个对象，再添加对象关系。');
+      return;
+    }
+    var editor = byId('objectGraphRelationEditor');
+    if (!editor) return;
+    editor.className = 'object-graph-relation-editor';
+    if (!getValue('objectGraphRelationTypeInput')) setValue('objectGraphRelationTypeInput', 'related_to');
+  }
+
+  function closeObjectGraphRelationEditor() {
+    var editor = byId('objectGraphRelationEditor');
+    if (editor) editor.className = 'object-graph-relation-editor hidden';
+  }
+
+  function saveObjectGraphRelation() {
+    var objectRef = currentMnObjectRef();
+    var targetId = String(getValue('objectGraphRelationTargetInput') || '').trim();
+    var relationType = String(getValue('objectGraphRelationTypeInput') || '').trim() || 'related_to';
+    var label = String(getValue('objectGraphRelationLabelInput') || '').trim();
+    var note = String(getValue('objectGraphRelationNoteInput') || '').trim();
+    if (!objectRef.objectId) {
+      addMessage('assistant', '保存对象关系失败：当前没有可用 MNObject。');
+      return;
+    }
+    if (!targetId) {
+      addMessage('assistant', '保存对象关系失败：请填写目标对象 ID。');
+      return;
+    }
+    postCompanion('object_graph_relation_save', {
+      mnObject: objectRef,
+      targetObject: {objectId: targetId, kind: 'manual', title: targetId, sourceRef: {}},
+      relation: relationType,
+      label: label || relationType,
+      note: note
+    }, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('保存对象关系失败', result || {});
+        return;
+      }
+      setValue('objectGraphRelationTargetInput', '');
+      setValue('objectGraphRelationLabelInput', '');
+      setValue('objectGraphRelationNoteInput', '');
+      closeObjectGraphRelationEditor();
+      addMessage('assistant', result.message || '已保存对象关系。');
+      refreshObjectBrowser(true);
+      refreshObjectGraph(true);
+    }, {showReply: false});
+  }
+
+  function objectActivityRow(kind, title, meta, item) {
+    item = item || {};
+    var activityAction = item.activityAction || {};
+    var row = document.createElement('div');
+    row.className = 'object-activity-row';
+    row.setAttribute('data-activity-kind', String(kind || 'item'));
+    var badge = document.createElement('span');
+    badge.className = 'object-activity-badge';
+    badge.textContent = kind || '活动';
+    var body = document.createElement('span');
+    body.className = 'object-activity-text';
+    body.textContent = (title || '未命名活动') + (meta ? (' / ' + meta) : '');
+    row.appendChild(badge);
+    row.appendChild(body);
+    if (activityAction.action) {
+      var openButton = document.createElement('button');
+      openButton.className = 'small-button object-activity-open';
+      openButton.type = 'button';
+      openButton.textContent = activityAction.label || '打开';
+      openButton.setAttribute('data-activity-action', String(activityAction.action || ''));
+      openButton.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        openObjectActivityItem(item);
+      });
+      row.appendChild(openButton);
+    }
+    return row;
+  }
+
+  function openObjectActivityItem(item) {
+    item = item || {};
+    var descriptor = item.activityAction || {};
+    var action = String(descriptor.action || '');
+    var payload = descriptor.payload || {};
+    if (!action) return;
+    if (action === 'conversation_load') {
+      postCompanion('conversation_load', payload, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('加载对象历史对话失败', result || {});
+          return;
+        }
+        setCurrentConversation(result.conversation || {});
+        renderHistoryItems(result.history || []);
+        switchWorkbenchPane('dialog');
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'workflow_status') {
+      postCompanion('workflow_status', payload, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('读取对象工作流失败', result || {});
+          return;
+        }
+        var summary = result.summary || {};
+        addMessage('assistant',
+          '对象工作流：' + (summary.title || summary.workflowId || payload.workflowRunId || '') +
+          '\n状态：' + (summary.status || '') +
+          '\n排队：' + (summary.queuedCount || 0) +
+          ' / 等待确认：' + (summary.waitingConfirmationCount || 0)
+        );
+        switchWorkbenchPane('dialog');
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'ai_edit_transaction_get') {
+      postCompanion('ai_edit_transaction_get', payload, function(result) {
+        if (!result || !result.ok) {
+          addFailureMessage('读取对象事务失败', result || {});
+          return;
+        }
+        var tx = result.transaction || {};
+        addMessage('assistant',
+          '对象事务：' + (tx.transactionId || payload.transactionId || '') +
+          '\n状态：' + (tx.status || '') +
+          '\n创建：' + (tx.createdCount || 0) +
+          ' / 删除：' + (tx.deletedCount || 0) +
+          ' / 失败：' + (tx.failedCount || 0)
+        );
+        switchWorkbenchPane('dialog');
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'operation_ledger_get') {
+      openOperationLedgerEntry({ledgerAction: descriptor});
+      return;
+    }
+    if (action === 'log_detail') {
+      addMessage('assistant',
+        '对象日志：' + (item.event || payload.event || '') +
+        '\n级别：' + (item.level || '') +
+        '\n请求：' + (item.requestId || payload.requestId || '') +
+        '\n消息：' + (item.message || '')
+      );
+      switchWorkbenchPane('dialog');
+    }
+  }
+
+  function renderObjectActivity(activity) {
+    if (arguments.length) state.objectActivity = activity || {};
+    activity = state.objectActivity || {};
+    var panel = byId('objectActivityPanel');
+    var summary = byId('objectActivitySummary');
+    var list = byId('objectActivityList');
+    if (!panel || !summary || !list) return;
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId) {
+      panel.className = 'object-activity-panel idle';
+      summary.textContent = '等待当前对象活动。';
+      replaceElementChildren(list, [objectActivityRow('等待', '刷新 Agent 计划后显示对象活动', '')]);
+      return;
+    }
+    if (state.objectActivityInFlight) {
+      panel.className = 'object-activity-panel pending';
+      summary.textContent = '对象活动：正在读取 ' + objectRef.objectId;
+      return;
+    }
+    if (!activity.ok) {
+      panel.className = 'object-activity-panel idle';
+      summary.textContent = '对象活动：尚未读取 / ' + objectRef.objectId;
+      replaceElementChildren(list, [objectActivityRow('等待', '点击刷新读取当前对象活动', '')]);
+      return;
+    }
+    var counts = activity.counts || {};
+    panel.className = 'object-activity-panel ready';
+    summary.textContent =
+      '对话 ' + (counts.conversations || 0) +
+      ' / 工作流 ' + (counts.workflowRuns || 0) +
+      ' / 事务 ' + (counts.transactions || 0) +
+      ' / 关系 ' + (counts.manualRelations || 0) +
+      ' / 日志 ' + (counts.logs || 0);
+    var rows = [];
+    var conversations = activity.conversations || [];
+    var workflows = activity.workflowRuns || [];
+    var transactions = activity.transactions || [];
+    var manualRelations = activity.manualRelations || [];
+    var logs = activity.logs || [];
+    for (var c = 0; c < conversations.length && rows.length < 8; c++) {
+      rows.push(objectActivityRow('对话', conversations[c].title || '历史对话', conversations[c].updatedAt || conversations[c].lastMessage || '', conversations[c]));
+    }
+    for (var w = 0; w < workflows.length && rows.length < 8; w++) {
+      rows.push(objectActivityRow('工作流', workflows[w].title || workflows[w].workflowId || 'workflow', workflows[w].status || '', workflows[w]));
+    }
+    for (var t = 0; t < transactions.length && rows.length < 8; t++) {
+      rows.push(objectActivityRow('事务', transactions[t].transactionId || 'AI 编辑事务', transactions[t].status || '', transactions[t]));
+    }
+    for (var r = 0; r < manualRelations.length && rows.length < 8; r++) {
+      rows.push(objectActivityRow('手工关系', manualRelations[r].label || manualRelations[r].relation || '对象关系', manualRelations[r].status || '', manualRelations[r]));
+    }
+    for (var l = 0; l < logs.length && rows.length < 8; l++) {
+      rows.push(objectActivityRow('日志', logs[l].event || '诊断日志', logs[l].message || logs[l].level || '', logs[l]));
+    }
+    if (!rows.length) rows.push(objectActivityRow('空', '当前对象暂无历史活动', ''));
+    replaceElementChildren(list, rows);
+  }
+
+  function refreshObjectActivity(manual, overridePayload) {
+    var objectPayload = overridePayload || {};
+    var objectRef = currentMnObjectRef();
+    var objectId = objectPayload.mnObjectId || objectRef.objectId;
+    if (!objectId || state.objectActivityInFlight) {
+      renderObjectActivity();
+      return;
+    }
+    state.objectActivityInFlight = true;
+    renderObjectActivity();
+    var activityPayload = Object.assign({}, objectPayload, {
+      mnObjectId: objectPayload.mnObjectId || objectRef.objectId,
+      mnObject: objectPayload.mnObject || objectRef,
+      limit: objectPayload.limit || 6
+    });
+    postCompanion('object_activity', activityPayload, function(result) {
+      state.objectActivityInFlight = false;
+      if (!result || !result.ok) {
+        state.objectActivity = {ok: false, message: result && result.message ? result.message : '对象活动读取失败。'};
+        renderObjectActivity();
+        if (manual) addFailureMessage('对象活动读取失败', result || {});
+        return;
+      }
+      renderObjectActivity(result);
+    }, {showReply: false});
+  }
+
+  function operationLedgerRow(kind, title, meta, item) {
+    item = item || {};
+    var ledgerAction = item.ledgerAction || {};
+    var row = document.createElement('div');
+    row.className = 'operation-ledger-row';
+    row.setAttribute('data-ledger-kind', String(kind || 'entry'));
+    var badge = document.createElement('span');
+    badge.className = 'operation-ledger-badge';
+    badge.textContent = kind || '账本';
+    var body = document.createElement('span');
+    body.className = 'operation-ledger-text';
+    body.textContent = (title || '未命名账本项') + (meta ? (' / ' + meta) : '');
+    row.appendChild(badge);
+    row.appendChild(body);
+    if (ledgerAction.action) {
+      var openButton = document.createElement('button');
+      openButton.className = 'small-button operation-ledger-open';
+      openButton.type = 'button';
+      openButton.textContent = ledgerAction.label || '查看';
+      openButton.setAttribute('data-ledger-action', String(ledgerAction.action || ''));
+      openButton.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        openOperationLedgerEntry(item);
+      });
+      row.appendChild(openButton);
+    }
+    return row;
+  }
+
+  function operationLedgerKindLabel(entryType) {
+    var value = String(entryType || '');
+    if (value === 'workflow_run') return '工作流';
+    if (value === 'ai_edit_transaction') return '事务';
+    if (value === 'external_gateway_request') return '外部';
+    if (value === 'object_graph_manual_relation') return '手工关系';
+    return '账本';
+  }
+
+  function operationLedgerSearchQuery() {
+    return String(valueOf('operationLedgerSearchInput') || '').trim();
+  }
+
+  function operationLedgerFilterPayload() {
+    return {
+      entryTypeFilter: String(valueOf('operationLedgerTypeFilterSelect') || '').trim(),
+      statusFilter: String(valueOf('operationLedgerStatusFilterInput') || '').trim(),
+      query: operationLedgerSearchQuery()
+    };
+  }
+
+  function operationLedgerEvidenceRow(label, value, tone) {
+    var row = document.createElement('div');
+    row.className = 'operation-ledger-evidence-row' + (tone ? (' ' + tone) : '');
+    var key = document.createElement('span');
+    key.className = 'operation-ledger-evidence-key';
+    key.textContent = label || '证据';
+    var text = document.createElement('span');
+    text.className = 'operation-ledger-evidence-value';
+    text.textContent = value || '无';
+    row.appendChild(key);
+    row.appendChild(text);
+    return row;
+  }
+
+  function closeOperationLedgerDetail() {
+    state.operationLedgerDetail = null;
+    renderOperationLedgerDetail();
+  }
+
+  function renderOperationLedgerDetail(result) {
+    if (arguments.length) state.operationLedgerDetail = result || null;
+    result = state.operationLedgerDetail || null;
+    var panel = byId('operationLedgerDetailPanel');
+    var title = byId('operationLedgerDetailTitle');
+    var meta = byId('operationLedgerDetailMeta');
+    var evidenceTarget = byId('operationLedgerDetailEvidence');
+    if (!panel || !title || !meta || !evidenceTarget) return;
+    if (!result || !result.ok) {
+      panel.className = 'operation-ledger-detail-panel idle';
+      title.textContent = '选择账本项查看证据';
+      meta.textContent = '事务验证、工作流确认点和外部回调会显示在这里。';
+      replaceElementChildren(evidenceTarget, [operationLedgerEvidenceRow('等待', '尚未打开账本项。', 'empty')]);
+      return;
+    }
+    var entry = result.entry || {};
+    var record = result.record || {};
+    var evidence = result.evidence || {};
+    var verification = evidence.verification || {};
+    var callback = evidence.callback || {};
+    var workflow = evidence.workflow || {};
+    var operationChain = evidence.operationChain || {};
+    var manualRelation = evidence.manualRelation || {};
+    var rows = [
+      operationLedgerEvidenceRow('类型', operationLedgerKindLabel(entry.entryType)),
+      operationLedgerEvidenceRow('状态', entry.status || evidence.status || 'unknown'),
+      operationLedgerEvidenceRow('来源 ID', entry.sourceId || record.requestId || record.transactionId || record.id || ''),
+      operationLedgerEvidenceRow('对象', (entry.objectRef && entry.objectRef.objectId) || ''),
+      operationLedgerEvidenceRow('摘要', entry.summary || evidence.summary || '')
+    ];
+    if (evidence.schema) {
+      rows.push(operationLedgerEvidenceRow('证据', evidence.summary || evidence.status || evidence.schema));
+    }
+    if (verification.schema) {
+      rows.push(operationLedgerEvidenceRow(
+        '验证：状态',
+        (verification.summary || verification.status || '已生成') +
+          ' / 创建 ' + (verification.createdCount || 0) +
+          ' / 删除 ' + (verification.deletedCount || 0) +
+          ' / 剩余 ' + (verification.remainingCount || 0),
+        verification.status === 'pass' || verification.status === 'PASS' ? 'pass' : ''
+      ));
+      rows.push(operationLedgerEvidenceRow('验证：事务', verification.transactionId || record.transactionId || ''));
+      if (verification.remainingNoteIds && verification.remainingNoteIds.length) {
+        rows.push(operationLedgerEvidenceRow('验证：残留 noteId', verification.remainingNoteIds.join(', '), 'warn'));
+      }
+    }
+    if (callback.schema) {
+      rows.push(operationLedgerEvidenceRow(
+        '回调',
+        (callback.status || 'unknown') +
+          ' / 收到 ' + (callback.receivedCount || 0) + ' 次' +
+          (callback.receivedAt ? (' / ' + callback.receivedAt) : '')
+      ));
+      if (callback.message) rows.push(operationLedgerEvidenceRow('回调消息', callback.message));
+    }
+    if (workflow.schema) {
+      rows.push(operationLedgerEvidenceRow(
+        '工作流',
+        (workflow.status || 'unknown') +
+          ' / 排队 ' + (workflow.queuedCount || 0) +
+          ' / 待确认 ' + (workflow.waitingConfirmationCount || 0) +
+          ' / 阻断 ' + (workflow.blockedCount || 0)
+      ));
+      if (workflow.blockedStepIds && workflow.blockedStepIds.length) {
+        rows.push(operationLedgerEvidenceRow('阻断步骤', workflow.blockedStepIds.join(', '), 'warn'));
+      }
+      if (workflow.waitingStepIds && workflow.waitingStepIds.length) {
+        rows.push(operationLedgerEvidenceRow('待确认步骤', workflow.waitingStepIds.join(', ')));
+      }
+    }
+    if (manualRelation.schema) {
+      rows.push(operationLedgerEvidenceRow('关系对象', (manualRelation.fromObjectId || '') + ' -> ' + (manualRelation.toObjectId || '')));
+      rows.push(operationLedgerEvidenceRow('关系类型', manualRelation.relation || 'related_to'));
+      rows.push(operationLedgerEvidenceRow('关系标签', manualRelation.label || ''));
+      if (manualRelation.note) rows.push(operationLedgerEvidenceRow('关系说明', manualRelation.note));
+      rows.push(operationLedgerEvidenceRow('关系状态', manualRelation.status || evidence.status || 'unknown'));
+    }
+    if (operationChain.schema) {
+      var operationPlan = operationChain.operationPlan || {};
+      var dryRun = operationChain.dryRun || {};
+      var nativeCommand = operationChain.nativeCommand || {};
+      var nativeEventTimeline = operationChain.nativeEventTimeline || [];
+      var nativeApply = operationChain.nativeApply || {};
+      var rollback = operationChain.rollback || {};
+      var residual = operationChain.residual || {};
+      rows.push(operationLedgerEvidenceRow(
+        '操作链',
+        '计划 ' + (operationPlan.operationCount || 0) +
+          ' / dry-run ' + (dryRun.status || 'unknown') +
+          ' / path ' + (((dryRun.applyBoundary || {}).currentApplyPath) || '')
+      ));
+      if (nativeCommand.schema) {
+        rows.push(operationLedgerEvidenceRow(
+          '原生命令',
+          (nativeCommand.nativeAction || 'native') +
+            ' / queue ' + (nativeCommand.queueId || '未记录') +
+            ' / 操作 ' + (nativeCommand.operationCount || 0)
+        ));
+      }
+      if (nativeEventTimeline.length) {
+        rows.push(operationLedgerEvidenceRow(
+          '事件线',
+          nativeEventTimeline.length + ' 个事件 / ' +
+            (nativeEventTimeline[0].event || 'start') +
+            ' -> ' +
+            (nativeEventTimeline[nativeEventTimeline.length - 1].event || 'end')
+        ));
+      }
+      if (nativeApply.schema) {
+        rows.push(operationLedgerEvidenceRow(
+          '原生执行',
+          (nativeApply.nativeAction || 'native') +
+            ' / 应用 ' + (nativeApply.appliedCount || 0) +
+            ' / 失败 ' + (nativeApply.failedCount || 0) +
+            ' / 创建 ' + ((nativeApply.createdNoteIds || []).length || 0),
+          nativeApply.failedCount ? 'warn' : 'pass'
+        ));
+      }
+      if (rollback.schema) {
+        rows.push(operationLedgerEvidenceRow(
+          '回滚',
+          (rollback.status || 'unknown') +
+            ' / 已删 ' + (rollback.deletedCount || 0) +
+            ' / 失败 ' + (rollback.failedCount || 0) +
+            (rollback.requiresConfirmation ? ' / 等待确认' : '')
+        ));
+      }
+      if (residual.schema) {
+        rows.push(operationLedgerEvidenceRow(
+          '残留',
+          '剩余 ' + (residual.remainingCount || 0) +
+            ((residual.remainingNoteIds || []).length ? (' / ' + residual.remainingNoteIds.join(', ')) : ''),
+          residual.remainingCount ? 'warn' : 'pass'
+        ));
+      }
+    }
+    panel.className = 'operation-ledger-detail-panel ready';
+    title.textContent = entry.title || entry.ledgerId || 'Operation Ledger 详情';
+    meta.textContent = 'ledgerId：' + (entry.ledgerId || '') + ' / updated：' + (entry.updatedAt || entry.createdAt || '');
+    replaceElementChildren(evidenceTarget, rows);
+  }
+
+  function openOperationLedgerEntry(item) {
+    item = item || {};
+    var descriptor = item.ledgerAction || {};
+    var payload = descriptor.payload || {};
+    if (!payload.ledgerId) return;
+    postCompanion('operation_ledger_get', payload, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('读取 Operation Ledger 失败', result || {});
+        return;
+      }
+      renderOperationLedgerDetail(result);
+      switchWorkbenchPane('object');
+    }, {showReply: false});
+  }
+
+  function renderOperationLedger(ledger) {
+    if (arguments.length) state.operationLedger = ledger || {};
+    ledger = state.operationLedger || {};
+    var panel = byId('operationLedgerPanel');
+    var summary = byId('operationLedgerSummary');
+    var list = byId('operationLedgerList');
+    if (!panel || !summary || !list) return;
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId) {
+      panel.className = 'operation-ledger-panel idle';
+      summary.textContent = '等待当前对象账本。';
+      replaceElementChildren(list, [operationLedgerRow('等待', '刷新 Agent 计划后显示对象账本', '')]);
+      return;
+    }
+    if (state.operationLedgerInFlight) {
+      panel.className = 'operation-ledger-panel pending';
+      summary.textContent = 'Operation Ledger：正在读取 ' + objectRef.objectId;
+      return;
+    }
+    if (!ledger.ok) {
+      panel.className = 'operation-ledger-panel idle';
+      summary.textContent = 'Operation Ledger：尚未读取 / ' + objectRef.objectId;
+      replaceElementChildren(list, [operationLedgerRow('等待', '点击刷新读取当前对象账本', '')]);
+      return;
+    }
+    var counts = ledger.counts || {};
+    var filters = ledger.filters || {};
+    var filterLabels = [];
+    if (filters.entryTypeFilter) filterLabels.push('类型=' + operationLedgerKindLabel(filters.entryTypeFilter));
+    if (filters.statusFilter) filterLabels.push('状态=' + filters.statusFilter);
+    if (filters.query) filterLabels.push('搜索=' + filters.query);
+    var total = counts.total || 0;
+    var unfilteredTotal = counts.unfilteredTotal;
+    var totalLabel = typeof unfilteredTotal === 'number' && unfilteredTotal !== total
+      ? (total + ' / ' + unfilteredTotal)
+      : String(total);
+    panel.className = 'operation-ledger-panel ready';
+    summary.textContent =
+      '总计 ' + totalLabel +
+      ' / 工作流 ' + (counts.workflow_run || 0) +
+      ' / 事务 ' + (counts.ai_edit_transaction || 0) +
+      ' / 外部 ' + (counts.external_gateway_request || 0) +
+      ' / 关系 ' + (counts.object_graph_manual_relation || 0) +
+      (filterLabels.length ? (' / 筛选：' + filterLabels.join('，')) : '');
+    var rows = [];
+    var entries = ledger.entries || [];
+    for (var i = 0; i < entries.length && rows.length < 8; i++) {
+      rows.push(operationLedgerRow(
+        operationLedgerKindLabel(entries[i].entryType),
+        entries[i].title || entries[i].sourceId || entries[i].ledgerId || '账本项',
+        entries[i].status || entries[i].updatedAt || '',
+        entries[i]
+      ));
+    }
+    if (!rows.length) rows.push(operationLedgerRow('空', '当前对象暂无 Operation Ledger', ''));
+    replaceElementChildren(list, rows);
+  }
+
+  function refreshOperationLedger(manual, overridePayload) {
+    var objectPayload = overridePayload || {};
+    var objectRef = currentMnObjectRef();
+    var objectId = objectPayload.mnObjectId || objectRef.objectId;
+    if (!objectId || state.operationLedgerInFlight) {
+      renderOperationLedger();
+      return;
+    }
+    state.operationLedgerInFlight = true;
+    renderOperationLedger();
+    var ledgerPayload = Object.assign({}, objectPayload, {
+      mnObjectId: objectPayload.mnObjectId || objectRef.objectId,
+      mnObject: objectPayload.mnObject || objectRef,
+      limit: objectPayload.limit || 8
+    }, operationLedgerFilterPayload());
+    postCompanion('operation_ledger_list', ledgerPayload, function(result) {
+      state.operationLedgerInFlight = false;
+      if (!result || !result.ok) {
+        state.operationLedger = {ok: false, message: result && result.message ? result.message : 'Operation Ledger 读取失败。'};
+        renderOperationLedger();
+        if (manual) addFailureMessage('Operation Ledger 读取失败', result || {});
+        return;
+      }
+      renderOperationLedger(result);
+    }, {showReply: false});
+  }
+
+  function renderOperationWorkspaceActions(operation) {
+    var target = byId('operationWorkspaceNextActions');
+    if (!target) return;
+    var actions = operation && operation.nextActions && operation.nextActions.length ? operation.nextActions.slice(0, 4) : defaultReplyAgentActions();
+    var nodes = [];
+    for (var i = 0; i < actions.length; i++) {
+      (function(item, index) {
+        item = item || {};
+        var button = document.createElement('button');
+        button.className = 'workbench-action-button' + (index === 0 ? ' primary' : '');
+        button.type = 'button';
+        button.textContent = item.label || actionLabel(item.action || '');
+        button.setAttribute('data-operation-workbench-action', item.id || item.action || 'action');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runAgentNextAction(item, state.latestAssistantReply || promptValue());
+        });
+        nodes.push(button);
+      })(actions[i], i);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function renderOperationWorkspaceVerification() {
+    var status = state.mindmapDiffApply || {};
+    var verification = status.verification || {};
+    var summary = status.summary || verification.summary || '';
+    if (!summary && !status.available) summary = '验证：等待操作结果';
+    else summary = '验证：' + summary;
+    setText('operationWorkspaceVerification', summary);
+    renderMindmapStudioPanel();
+  }
+
+  function latestMindmapDiffOperationPanel() {
+    var panels = document.querySelectorAll('.mindmap-diff-operation');
+    if (!panels || !panels.length) return null;
+    return panels[panels.length - 1];
+  }
+
+  function latestAiEditTransactionId() {
+    var status = state.aiEditTransactionStatus || {};
+    var latest = status.latest || {};
+    var verification = status.verification || {};
+    return String(latest.transactionId || verification.transactionId || '');
+  }
+
+  function mindmapStudioStage(stageId, stateName, text) {
+    var stage = byId(stageId);
+    if (!stage) return;
+    stage.className = 'mindmap-studio-stage ' + (stateName || 'idle');
+    var strong = stage.querySelector ? stage.querySelector('strong') : null;
+    if (strong) strong.textContent = text || '';
+  }
+
+  function mindmapStudioStatusLine() {
+    var tree = state.mindmapTreeCache || {};
+    var diff = state.latestMindmapDiff || {};
+    var apply = state.mindmapDiffApply || {};
+    var tx = state.aiEditTransactionStatus || {};
+    var parts = [];
+    parts.push(tree.available ? ('树 ' + (tree.nodeCount || 0) + ' 节点') : '树未读取');
+    parts.push(diff && diff.mindmapDiff ? 'Diff 已生成' : 'Diff 未生成');
+    parts.push(apply.available ? ('验证 ' + (apply.status || (apply.verification && apply.verification.status) || 'unknown')) : '未执行');
+    parts.push(latestAiEditTransactionId() ? '有事务' : '无事务');
+    if (tx.summary) parts.push(clip(tx.summary, 80));
+    return 'Mindmap Studio：' + parts.join(' / ');
+  }
+
+  function renderMindmapStudioPanel() {
+    var panel = byId('mindmapStudioPanel');
+    if (!panel) return;
+    var tree = state.mindmapTreeCache || {};
+    var diff = state.latestMindmapDiff || null;
+    var apply = state.mindmapDiffApply || {};
+    var txId = latestAiEditTransactionId();
+    var diffSummary = diff && diff.mindmapDiff ? mindmapDiffSummaryLine(diff) : '等待预览';
+    var treeTitle = tree.available ? clip(tree.rootTitle || tree.selectedNoteTitle || '当前脑图', 28) + ' / ' + (tree.nodeCount || 0) + ' 节点' : '未读取';
+    var applyStatus = apply.available ? (apply.summary || (apply.verification && apply.verification.summary) || '已收到执行验证') : '等待执行';
+    var txText = txId ? clip(txId, 32) : '暂无事务';
+    var ready = tree.available || (diff && diff.mindmapDiff) || apply.available || txId;
+    panel.className = 'mindmap-studio-panel ' + (ready ? 'ready' : 'idle');
+    setText('mindmapStudioSummary', 'Mindmap Studio：读取现有脑图、预览 Diff、应用所选变更，并验证或回滚事务。');
+    mindmapStudioStage('mindmapStudioCurrentTree', tree.available ? 'ready' : (String(tree.status || '') === 'pending' ? 'pending' : 'idle'), treeTitle);
+    mindmapStudioStage('mindmapStudioDiffStage', diff && diff.mindmapDiff ? 'ready' : 'idle', diffSummary);
+    mindmapStudioStage('mindmapStudioApplyStage', apply.available ? ((apply.status || (apply.verification && apply.verification.status)) === 'pass' ? 'ready' : 'pending') : 'idle', applyStatus);
+    mindmapStudioStage('mindmapStudioTransactionStage', txId ? 'pending' : 'idle', txText);
+    setText('mindmapStudioStatusLine', mindmapStudioStatusLine());
+    var applyButton = byId('mindmapStudioApplySelectedButton');
+    if (applyButton) applyButton.disabled = !latestMindmapDiffOperationPanel();
+    var verifyButton = byId('mindmapStudioVerifyButton');
+    if (verifyButton) verifyButton.disabled = !txId;
+    var rollbackButton = byId('mindmapStudioRollbackButton');
+    if (rollbackButton) rollbackButton.disabled = !txId;
+  }
+
+  function previewMindmapDiffFromStudio() {
+    switchWorkspaceSurface('mindmap_studio');
+    runAgentNextAction({action: 'mindmap_diff_preview', label: '预览脑图 Diff'}, state.latestAssistantReply || promptValue());
+  }
+
+  function applyMindmapStudioSelectedDiff() {
+    switchWorkspaceSurface('mindmap_studio');
+    var panel = latestMindmapDiffOperationPanel();
+    if (!panel) {
+      addMessage('assistant', '需要先生成脑图 Diff 预览，才能应用所选变更。');
+      renderMindmapStudioPanel();
+      return;
+    }
+    acceptMindmapDiff(panel);
+    renderMindmapStudioPanel();
+  }
+
+  function verifyMindmapStudioTransaction() {
+    var transactionId = latestAiEditTransactionId();
+    if (!transactionId) {
+      addMessage('assistant', '当前没有可验证的脑图事务。');
+      return;
+    }
+    refreshAiEditTransactionVerification(transactionId);
+  }
+
+  function rollbackMindmapStudioTransaction() {
+    var transactionId = latestAiEditTransactionId();
+    if (!transactionId) {
+      addMessage('assistant', '当前没有可回滚的脑图事务。');
+      return;
+    }
+    rollbackAiEditTransaction(transactionId);
+  }
+
+  function agentBarClass(operation) {
+    if (!operation) return 'agent-workbench-bar idle';
+    var policy = operation.operationPolicy || {};
+    var risk = policy.risk || {};
+    var riskStatus = String(risk.status || '');
+    if (riskStatus === 'blocked') return 'agent-workbench-bar blocked';
+    if (riskStatus === 'write_pending_confirmation') return 'agent-workbench-bar warn';
+    if (riskStatus === 'read_only') return 'agent-workbench-bar ready';
+    return 'agent-workbench-bar pending';
+  }
+
+  function renderAgentWorkbench(operation) {
+    if (arguments.length) state.agentOperation = operation || null;
+    operation = state.agentOperation || null;
+    var bar = byId('agentWorkbenchBar');
+    if (!bar) return;
+    var line = byId('agentWorkbenchLine');
+    var detail = byId('agentWorkbenchDetail');
+    if (!operation) {
+      bar.className = 'agent-workbench-bar idle';
+      setText('agentWorkbenchLine', 'Agent：等待当前对象');
+      setText('agentWorkbenchDetail', '选区、卡片、脑图节点或文档会生成可审计操作计划。');
+      renderWorkbenchPanels();
+      return;
+    }
+    var object = operation.object || {};
+    var intent = operation.intent || {};
+    var workflow = operation.workflow || {};
+    var contextPolicy = operation.contextPolicy || {};
+    var knowledge = operation.knowledge || {};
+    var policy = operation.operationPolicy || {};
+    var risk = policy.risk || {};
+    var objectTitle = object.title || agentObjectLabel(object.kind);
+    var workflowTitle = workflow.title || intent.workflowTitle || intent.workflowId || '未匹配工作流';
+    var riskLabel = agentRiskLabel(risk.status);
+    bar.className = agentBarClass(operation);
+    if (line) {
+      line.textContent = 'Agent：' + agentObjectLabel(object.kind) + ' / ' + clip(objectTitle, 34) + ' / ' + clip(workflowTitle, 34);
+    }
+    if (detail) {
+      detail.textContent =
+        '上下文：' + (contextPolicy.visibleScope || 'auto') +
+        ' / 风险：' + riskLabel +
+        ' / 确认点：' + ((risk.confirmationPoints || []).length || 0) +
+        ' / 知识索引：' + (knowledge.enabled ? ('启用 ' + (knowledge.count || 0)) : '未启用');
+    }
+    renderWorkbenchPanels();
+  }
+
+  function renderMindmapDiffApplyStatus(status) {
+    if (arguments.length) state.mindmapDiffApply = status || {};
+    status = state.mindmapDiffApply || {};
+    var bar = byId('mindmapDiffApplyStatus');
+    var text = byId('mindmapDiffApplyText');
+    if (!bar || !text) return;
+    var schema = String(status.schema || 'codex.mn.mindmapDiffApplyStatus.v1');
+    var verification = status.verification || {};
+    var operationVerification = verification.operationVerification || [];
+    var failedVerificationCount = verification.failedVerificationCount || status.failedCount || 0;
+    if (!status.available) {
+      bar.className = 'mindmap-diff-apply-status idle hidden';
+      text.textContent = '脑图验证：等待局部执行结果';
+      renderOperationWorkspaceVerification();
+      return;
+    }
+    var current = String(status.status || verification.status || 'unknown');
+    var className = current === 'pass' ? 'pass' : (current === 'block' || failedVerificationCount ? 'block' : 'pending');
+    bar.className = 'mindmap-diff-apply-status ' + className;
+    text.textContent =
+      '脑图验证：' + (status.summary || verification.summary || '已收到局部执行验证。') +
+      ' / schema ' + schema +
+      ' / 操作 ' + (operationVerification.length || status.appliedCount || 0) +
+      ' / 失败 ' + failedVerificationCount;
+    renderOperationWorkspaceVerification();
+  }
+
+  function aiEditTransactionActionAllowed(latest, verification, action) {
+    latest = latest || {};
+    verification = verification || {};
+    var actions = latest.availableActions || verification.availableActions || [];
+    if (actions && actions.length) {
+      for (var i = 0; i < actions.length; i++) {
+        if (String(actions[i]) === action) return true;
+      }
+      return false;
+    }
+    var status = String(latest.status || verification.transactionStatus || '');
+    if (action === 'retain' || action === 'rollback') return status === 'ready' || status === 'pending_confirmation';
+    if (action === 'confirm_delete' || action === 'dismiss') return status === 'delete_pending_confirmation';
+    return action === 'verify' || action === 'evidence';
+  }
+
+  function makeAiEditTransactionActionButton(label, className, disabled, handler) {
+    var button = document.createElement('button');
+    button.className = className;
+    button.type = 'button';
+    button.textContent = label;
+    button.disabled = !!disabled;
+    button.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      if (button.disabled) return;
+      handler();
+    });
+    return button;
+  }
+
+  function renderAiEditTransactionActions(latest, verification) {
+    var actions = byId('aiEditTransactionActions');
+    if (!actions) return;
+    latest = latest || {};
+    verification = verification || {};
+    var transactionId = String(latest.transactionId || verification.transactionId || '');
+    var deleteMode = String(latest.status || verification.transactionStatus || '') === 'delete_pending_confirmation';
+    var nodes = [
+      deleteMode
+        ? makeAiEditTransactionActionButton(
+            '删除',
+            'ai-edit-transaction-rollback',
+            !transactionId || !aiEditTransactionActionAllowed(latest, verification, 'confirm_delete'),
+            function() { confirmMindmapDeleteTransaction(transactionId); }
+          )
+        : makeAiEditTransactionActionButton(
+            '保留',
+            'ai-edit-transaction-retain',
+            !transactionId || !aiEditTransactionActionAllowed(latest, verification, 'retain'),
+            function() { retainAiEditTransaction(transactionId); }
+          ),
+      deleteMode
+        ? makeAiEditTransactionActionButton(
+            '忽略',
+            'ai-edit-transaction-retain',
+            !transactionId || !aiEditTransactionActionAllowed(latest, verification, 'dismiss'),
+            function() { dismissMindmapDeleteTransaction(transactionId); }
+          )
+        : makeAiEditTransactionActionButton(
+            '回滚',
+            'ai-edit-transaction-rollback',
+            !transactionId || !aiEditTransactionActionAllowed(latest, verification, 'rollback'),
+            function() { rollbackAiEditTransaction(transactionId); }
+          ),
+      makeAiEditTransactionActionButton(
+        '验证',
+        'ai-edit-transaction-verify',
+        !transactionId || !aiEditTransactionActionAllowed(latest, verification, 'verify'),
+        function() { refreshAiEditTransactionVerification(transactionId); }
+      ),
+      makeAiEditTransactionActionButton(
+        '证据',
+        'ai-edit-transaction-evidence',
+        !transactionId || !aiEditTransactionActionAllowed(latest, verification, 'evidence'),
+        function() { showAiEditTransactionEvidence(transactionId); }
+      )
+    ];
+    replaceElementChildren(actions, nodes);
+  }
+
+  function retainAiEditTransaction(transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    setText('aiEditTransactionSummary', '已发送保留确认：' + transactionId + '。等待 MN4 返回事务结果。');
+    bridgeAiEditTransactionWithEvidence('accept_ai_edit_transaction', transactionId);
+  }
+
+  function rollbackAiEditTransaction(transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    setText('aiEditTransactionSummary', '正在回滚事务：' + transactionId + '。MN4 会删除本次新增节点并返回残留验证。');
+    bridgeAiEditTransactionWithEvidence('reject_ai_edit_transaction', transactionId);
+  }
+
+  function confirmMindmapDeleteTransaction(transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    setText('aiEditTransactionSummary', '正在确认删除建议：' + transactionId + '。MN4 只会删除事务列出的目标节点。');
+    bridgeAiEditTransactionWithEvidence('confirm_mindmap_delete_transaction', transactionId);
+  }
+
+  function dismissMindmapDeleteTransaction(transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    setText('aiEditTransactionSummary', '已请求忽略删除建议：' + transactionId + '。不会删除现有脑图节点。');
+    bridgeAiEditTransactionWithEvidence('dismiss_mindmap_delete_transaction', transactionId);
+  }
+
+  function bridgeAiEditTransactionWithEvidence(path, transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    postCompanion('ai_edit_transaction_get', {transactionId: transactionId}, function(result) {
+      var tx = result && result.ok ? (result.transaction || {}) : {};
+      var objectRef = tx.objectRef || {};
+      var sourceRef = objectRef.sourceRef || {};
+      var payload = {
+        transactionId: transactionId,
+        createdNoteIds: (tx.createdNoteIds || []).join('|'),
+        targetNoteIds: (tx.targetNoteIds || []).join('|'),
+        topicid: tx.topicid || '',
+        bookmd5: tx.bookmd5 || '',
+        draftId: tx.draftId || '',
+        mnObjectId: objectRef.objectId || '',
+        mnObjectKind: objectRef.kind || '',
+        mnObjectTitle: objectRef.title || '',
+        mnObjectSourcePage: sourceRef.page === null || sourceRef.page === undefined ? '' : sourceRef.page,
+        mnObjectSourceQuote: sourceRef.quote || '',
+        mnObjectSourceDocumentTitle: sourceRef.documentTitle || '',
+        mnObjectSourcePath: sourceRef.path || ''
+      };
+      bridge(path, payload);
+    }, {showReply: false});
+  }
+
+  function refreshAiEditTransactionVerification(transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    setText('aiEditTransactionSummary', '正在刷新事务验证：' + transactionId + '。');
+    postCompanion('ai_edit_transaction_verify', {transactionId: transactionId}, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('刷新事务验证失败', result || {});
+        return;
+      }
+      var current = state.aiEditTransactionStatus || {};
+      renderAiEditTransactionCenter({
+        schema: current.schema || 'codex.mn.aiEditTransactionStatus.v1',
+        available: true,
+        summary: result.reply || result.message || '已刷新事务验证。',
+        latest: result.transaction || current.latest || {},
+        verification: result.verification || current.verification || {}
+      });
+    }, {showReply: false});
+  }
+
+  function showAiEditTransactionEvidence(transactionId) {
+    transactionId = String(transactionId || '');
+    if (!transactionId) return;
+    postCompanion('ai_edit_transaction_get', {transactionId: transactionId}, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('读取事务证据失败', result || {});
+        return;
+      }
+      var tx = result.transaction || {};
+      var diff = tx.mindmapDiffApply || {};
+      var verification = diff.verification || {};
+      addMessage('assistant',
+        '事务证据：' + (tx.transactionId || transactionId) +
+        '\n状态：' + (tx.status || '') +
+        '\n创建：' + ((tx.createdNoteIds || []).join('、') || '无') +
+        '\n应用：' + ((tx.appliedNoteIds || []).join('、') || '无') +
+        '\n失败：' + (tx.failedCount || 0) +
+        '\n验证：' + (verification.summary || tx.message || '无验证摘要')
+      );
+    }, {showReply: false});
+  }
+
+  function renderAiEditTransactionCenter(status) {
+    if (arguments.length) state.aiEditTransactionStatus = status || {};
+    status = state.aiEditTransactionStatus || {};
+    var panel = byId('aiEditTransactionCenter');
+    var notes = byId('aiEditTransactionNotes');
+    if (!panel || !notes) return;
+    var schema = String(status.schema || 'codex.mn.aiEditTransactionStatus.v1');
+    var latest = status.latest || {};
+    var verification = status.verification || {};
+    if (!status.available) {
+      panel.className = 'ai-edit-transaction-center idle';
+      panel.setAttribute('data-transaction-state', 'idle');
+      setText('aiEditTransactionTitle', '事务中心');
+      setText('aiEditTransactionSummary', status.summary || '暂无 AI 编辑事务。');
+      var empty = document.createElement('div');
+      empty.className = 'ai-edit-transaction-note empty';
+      empty.textContent = '接受或拒绝 AI 编辑后，这里会显示回滚状态、残留 noteId 和最近事务摘要。';
+      replaceElementChildren(notes, [empty]);
+      renderAiEditTransactionActions({}, {});
+      renderMindmapStudioPanel();
+      return;
+    }
+    var verificationStatus = String(verification.status || 'pending');
+    var transactionStatus = String(latest.status || verification.transactionStatus || 'unknown');
+    var objectRef = latest.objectRef || verification.objectRef || {};
+    var mnObjectId = objectRef.objectId || '';
+    var className = verificationStatus === 'pass' ? 'pass' : (verificationStatus === 'block' ? 'block' : 'pending');
+    panel.className = 'ai-edit-transaction-center ' + className;
+    panel.setAttribute('data-transaction-state', transactionStatus);
+    panel.setAttribute('data-transaction-id', String(latest.transactionId || verification.transactionId || ''));
+    setText(
+      'aiEditTransactionTitle',
+      '事务中心 / ' + (latest.transactionId || verification.transactionId || '最近事务')
+    );
+    setText(
+      'aiEditTransactionSummary',
+      (status.summary || verification.summary || '已读取最近 AI 编辑事务。') +
+      ' / schema ' + schema +
+      ' / 创建 ' + (verification.createdCount || latest.createdCount || 0) +
+      ' / 删除 ' + (verification.deletedCount || latest.deletedCount || 0) +
+      ' / 残留 ' + (verification.remainingCount || 0)
+    );
+    var ids = verification.remainingNoteIds && verification.remainingNoteIds.length
+      ? verification.remainingNoteIds
+      : latest.createdNoteIds && latest.createdNoteIds.length
+      ? latest.createdNoteIds
+      : verification.createdNoteIds && verification.createdNoteIds.length
+      ? verification.createdNoteIds
+      : [];
+    var rows = [];
+    if (mnObjectId || objectRef.kind || objectRef.title) {
+      var objectRow = document.createElement('div');
+      objectRow.className = 'ai-edit-transaction-note object-ref';
+      objectRow.textContent = '事务对象：' +
+        (objectRef.kind || 'object') +
+        ' / ' + clip(objectRef.title || mnObjectId, 52) +
+        (mnObjectId ? (' / ' + mnObjectId) : '');
+      objectRow.setAttribute('data-mn-object-id', String(mnObjectId || ''));
+      rows.push(objectRow);
+    }
+    for (var i = 0; i < ids.length && i < 8; i++) {
+      var row = document.createElement('div');
+      row.className = 'ai-edit-transaction-note';
+      row.textContent = (verification.remainingNoteIds && verification.remainingNoteIds.length ? '残留 noteId：' : '创建 noteId：') + ids[i];
+      row.setAttribute('data-note-id', String(ids[i]));
+      rows.push(row);
+    }
+    if (!rows.length) {
+      var summary = document.createElement('div');
+      summary.className = 'ai-edit-transaction-note empty';
+      summary.textContent = '本次事务没有可列出的 noteId。状态：' + transactionStatus;
+      rows.push(summary);
+    }
+    if (ids.length > rows.length) {
+      var more = document.createElement('div');
+      more.className = 'ai-edit-transaction-note empty';
+      more.textContent = '还有 ' + (ids.length - rows.length) + ' 个 noteId 未展开。';
+      rows.push(more);
+    }
+    replaceElementChildren(notes, rows);
+    renderAiEditTransactionActions(latest, verification);
+    renderMindmapStudioPanel();
+  }
+
+  function renderMindmapTreeCacheStatus(status) {
+    if (arguments.length) state.mindmapTreeCache = status || {};
+    status = state.mindmapTreeCache || {};
+    var bar = byId('mindmapTreeCacheStatus');
+    var text = byId('mindmapTreeCacheText');
+    if (!bar || !text) return;
+    if (!status.available) {
+      var pending = String(status.status || '') === 'pending';
+      bar.className = 'mindmap-tree-cache-status ' + (pending ? 'pending' : 'idle');
+      text.textContent = pending ? '当前脑图树：正在请求读取' : '当前脑图树：未读取';
+      renderMindmapTreePreview(status);
+      renderMindmapStudioPanel();
+      return;
+    }
+    var nodeCount = status.nodeCount || 0;
+    var truncated = status.truncatedCount || 0;
+    var title = status.rootTitle || status.selectedNoteTitle || '当前脑图';
+    bar.className = truncated ? 'mindmap-tree-cache-status pending' : 'mindmap-tree-cache-status ready';
+    text.textContent = '当前脑图树：' + clip(title, 34) + ' / ' + nodeCount + ' 节点' + (truncated ? (' / 截断 ' + truncated) : '');
+    renderMindmapTreePreview(status);
+    renderMindmapStudioPanel();
+  }
+
+  function renderMindmapTreePreview(status) {
+    status = status || state.mindmapTreeCache || {};
+    var target = byId('mindmapTreePreviewList');
+    if (!target) return;
+    var preview = status.treePreview && status.treePreview.length ? status.treePreview : [];
+    if (!preview.length) {
+      var empty = document.createElement('div');
+      empty.className = 'workbench-empty';
+      empty.textContent = status.available ? '当前脑图树没有可显示节点。' : '点击“读取当前脑图”后显示树预览。';
+      replaceElementChildren(target, [empty]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < preview.length && i < 24; i++) {
+      var item = preview[i] || {};
+      var row = document.createElement('div');
+      var depth = Math.max(0, Math.min(2, Number(item.depth || 0)));
+      row.className = 'mindmap-tree-preview-node';
+      row.setAttribute('data-depth', String(depth));
+      row.textContent = Array(depth + 1).join('  ') + (item.title || '未命名节点') + (item.childCount ? (' · ' + item.childCount + ' 子节点') : '');
+      if (item.noteId) row.setAttribute('data-note-id', String(item.noteId));
+      nodes.push(row);
+    }
+    if (status.treePreviewTruncated) {
+      var more = document.createElement('div');
+      more.className = 'workbench-empty';
+      more.textContent = '预览已截断，只显示前 ' + nodes.length + ' 个节点。';
+      nodes.push(more);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
+  function requestMindmapTreeRead() {
+    var button = byId('mindmapTreeRefreshButton');
+    if (button) button.disabled = true;
+    renderMindmapTreeCacheStatus({
+      schema: 'codex.mn.mindmapTreeCache.v1',
+      available: false,
+      status: 'pending',
+      summary: '正在请求 MN4 读取当前脑图树。',
+      treePreview: []
+    });
+    postCompanion('mn_read_tree', {
+      mindmapTarget: state.mindmapTarget && state.mindmapTarget.target ? state.mindmapTarget.target : {}
+    }, function(result) {
+      if (button) button.disabled = false;
+      renderControls(result || {});
+      if (!result || !result.ok) addFailureMessage('读取当前脑图失败', result);
+    }, {showReply: false});
+  }
+
+  function agentPlanRefreshKey(extraPrompt) {
+    var ctx = state.context || {};
+    var target = state.mindmapTarget && state.mindmapTarget.target ? state.mindmapTarget.target : {};
+    return [
+      currentContextScope(),
+      trimText(extraPrompt || '', 180),
+      ctx.topicid || ctx.notebookid || '',
+      ctx.bookmd5 || ctx.docmd5 || '',
+      ctx.documentTitle || '',
+      ctx.selectionText || ctx.selectedText || ctx.activeSelectionText || '',
+      ctx.selectedNoteId || ctx.noteId || ctx.noteid || '',
+      ctx.selectedNoteTitle || '',
+      target.mode || '',
+      target.label || target.rootTitle || target.selectedNoteTitle || ''
+    ].join('|').substring(0, 1600);
+  }
+
+  function postCompanionAgentPlan(extra, done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState !== 4) return;
+      var result = parseCompanionResult(xhr);
+      if (done) done(result || {});
+    };
+    xhr.onerror = function() {
+      if (done) done(companionConnectionFailureResult());
+    };
+    xhr.send(JSON.stringify(companionPayload('agent_plan', extra || {})));
+  }
+
+  function formatAgentPlanMessage(operation) {
+    operation = operation || state.agentOperation || {};
+    var object = operation.object || {};
+    var workflow = operation.workflow || {};
+    var policy = operation.operationPolicy || {};
+    var risk = policy.risk || {};
+    var actions = operation.nextActions || [];
+    var lines = [
+      'Agent 操作计划',
+      '对象：' + agentObjectLabel(object.kind) + ' / ' + (object.title || ''),
+      '工作流：' + (workflow.title || workflow.id || '未匹配'),
+      '写入风险：' + agentRiskLabel(risk.status),
+      'Dry-run：' + (risk.dryRunStatus || 'not_available')
+    ];
+    if (actions.length) {
+      lines.push('下一步：' + actions.slice(0, 3).map(function(item) {
+        return item.label || item.id || item.action;
+      }).join(' / '));
+    }
+    return lines.join('\n');
+  }
+
+  function refreshAgentPlan(manual) {
+    if (state.agentPlanInFlight) return;
+    var prompt = promptValue() || state.latestAssistantReply || state.lastPromptFromSelection || '';
+    var hasAnyContext = !!(
+      compactText(prompt) ||
+      compactText((state.context || {}).selectionText) ||
+      compactText((state.context || {}).selectedNoteTitle) ||
+      compactText((state.context || {}).documentTitle) ||
+      compactText((state.context || {}).bookmd5 || (state.context || {}).docmd5)
+    );
+    if (!manual && !hasAnyContext) {
+      renderAgentWorkbench(null);
+      return;
+    }
+    var key = agentPlanRefreshKey(prompt);
+    if (!manual && key && key === state.agentPlanLastKey) return;
+    state.agentPlanLastKey = key;
+    state.agentPlanInFlight = true;
+    if (manual) {
+      var bar = byId('agentWorkbenchBar');
+      if (bar) bar.className = 'agent-workbench-bar pending';
+      setText('agentWorkbenchLine', 'Agent：正在生成操作计划');
+      setText('agentWorkbenchDetail', '正在检查当前对象、工作流、写入风险和确认点。');
+    }
+    postCompanionAgentPlan({prompt: prompt}, function(result) {
+      state.agentPlanInFlight = false;
+      if (!result || !result.ok || !result.agentOperation) {
+        var bar = byId('agentWorkbenchBar');
+        if (bar) bar.className = 'agent-workbench-bar error';
+        setText('agentWorkbenchLine', 'Agent：计划刷新失败');
+        setText('agentWorkbenchDetail', result && result.message ? result.message : 'Companion 未返回 Agent 操作计划。');
+        if (manual) addFailureMessage('Agent 计划失败', result);
+        return;
+      }
+      renderAgentWorkbench(result.agentOperation);
+      if (manual) addMessage('assistant', formatAgentPlanMessage(result.agentOperation));
+    });
+  }
+
+  function scheduleAgentPlanRefresh() {
+    if (state.agentPlanRefreshTimer) window.clearTimeout(state.agentPlanRefreshTimer);
+    state.agentPlanRefreshTimer = window.setTimeout(function() {
+      state.agentPlanRefreshTimer = null;
+      refreshAgentPlan(false);
+    }, 450);
   }
 
   function setWebRunLock(active) {
@@ -986,6 +4630,7 @@
       explain_selection: '解释选中',
       generate_card: '生成卡片',
       generate_mindmap: '新建脑图',
+      mindmap_diff_preview: '预览脑图 Diff',
       expand_node: '补脑图',
       reorganize_mindmap: '重组脑图',
       generate_full_reading: '完整精读',
@@ -1385,6 +5030,32 @@
       detail.textContent =
         'AI 后端：' + (backendLabels[backend] || backend) +
         '。未发现可用的本机 Codex CLI，也未配置 OpenAI Key；当前无法进行真实 AI 对话。';
+    }
+  }
+
+  function renderMnApiStatus(result) {
+    result = result || {};
+    if (result.mnApi) state.mnApi = result.mnApi || {};
+    var settings = result.settings || state.settings || {};
+    var info = state.mnApi || {};
+    var backend = settings.mnApiBackend || result.mn_api_backend || info.backend || 'auto';
+    var configured = info.urlApiConfigured !== undefined ? !!info.urlApiConfigured : !!result.mn_url_api_configured;
+    var labels = {
+      auto: '自动',
+      native: '原生插件',
+      url_api: 'URL API'
+    };
+    setValue('mnApiBackendSelect', backend);
+    var line = byId('mnApiStatusLine');
+    if (!line) return;
+    line.textContent =
+      'MN 接口：' + (labels[backend] || backend) +
+      ' / URL API：' + (configured ? '已配置' : '未配置') +
+      ' / 回调：' + (info.callbackBaseUrl || '默认本机回调');
+    if (backend === 'url_api' && !configured) {
+      line.className = 'mn-api-status-line warn';
+    } else {
+      line.className = 'mn-api-status-line ok';
     }
   }
 
@@ -2094,9 +5765,40 @@
   function draftEditOperationMeta(draft) {
     draft = draft || {};
     var lines = [];
+    var manifest = draft.operation_manifest || draft.operationManifest || {};
+    var dryRun = manifest.dryRun || {};
+    if (manifest.operationCount !== undefined) {
+      lines.push(
+        '操作计划：' + (manifest.operationCount || 0) + ' 项' +
+        ' / 卡片 ' + (manifest.createCards || 0) +
+        ' / 脑图节点 ' + (manifest.createMindmapNodes || 0)
+      );
+    }
+    if (dryRun.status) lines.push('Dry-run：' + dryRun.status + (dryRun.message ? ' / ' + dryRun.message : ''));
     if (draft.write_target) lines.push('写入目标：' + draft.write_target);
     if (draft.mindmap_title) lines.push('脑图根：' + draft.mindmap_title);
     return lines.join('\n');
+  }
+
+  function cardFactoryQualityLines(draft) {
+    draft = draft || {};
+    var manifest = draft.operation_manifest || draft.operationManifest || {};
+    var cardFactory = draft.cardFactory || draft.card_factory || manifest.cardFactory || {};
+    var cardQuality = draft.cardQuality || draft.card_quality || manifest.cardQuality || {};
+    var lines = [];
+    if (cardFactory.schema || cardQuality.schema || cardFactory.cardCount || cardQuality.cardCount) {
+      lines.push('卡片工厂：' + (cardFactory.cardCount || cardQuality.cardCount || draft.card_count || 0) + ' 张');
+    }
+    var typeCounts = cardFactory.typeCounts || cardQuality.typeCounts || {};
+    var typeParts = [];
+    Object.keys(typeCounts).forEach(function(key) {
+      if (typeCounts[key]) typeParts.push(key + ' ' + typeCounts[key]);
+    });
+    if (typeParts.length) lines.push('卡型：' + typeParts.join(' / '));
+    if (cardQuality.missingSourceCount !== undefined) lines.push('缺来源：' + (cardQuality.missingSourceCount || 0));
+    if (cardQuality.longCardCount !== undefined) lines.push('长卡：' + (cardQuality.longCardCount || 0));
+    if (cardQuality.duplicateTitleCount !== undefined) lines.push('重复标题：' + (cardQuality.duplicateTitleCount || 0));
+    return lines;
   }
 
   function setAiEditOperationBusy(panel, busy) {
@@ -2114,6 +5816,62 @@
     panel.setAttribute('data-state', mode || '');
   }
 
+  function renderAiEditVerification(panel, verification) {
+    if (!panel) return;
+    verification = verification || {};
+    var report = panel.querySelector('.ai-edit-verification');
+    if (!report) {
+      report = document.createElement('div');
+      report.className = 'ai-edit-verification';
+      panel.appendChild(report);
+    }
+    var status = String(verification.status || 'pending');
+    report.className = 'ai-edit-verification ' + status;
+    report.textContent = verification.summary || '回滚验证：未返回验证报告。';
+  }
+
+  function refreshAiEditVerification(transactionId, panel) {
+    transactionId = String(transactionId || '');
+    if (!transactionId || !panel) return;
+    renderAiEditVerification(panel, {status: 'pending', summary: '回滚验证：正在核对新增对象和回滚结果...'});
+    postCompanion('ai_edit_transaction_verify', {transactionId: transactionId}, function(result) {
+      if (!result || !result.ok) {
+        renderAiEditVerification(panel, {
+          status: 'block',
+          summary: '回滚验证：读取失败，' + (result && result.message ? result.message : '未知错误。')
+        });
+        return;
+      }
+      renderAiEditVerification(panel, result.verification || {});
+    }, {showReply: false});
+  }
+
+  function addDraftToReviewQueue(panel, draft) {
+    draft = draft || state.draft || {};
+    var draftId = draft.id || (panel && panel.getAttribute('data-draft-id')) || '';
+    if (!draftId) {
+      setAiEditOperationStatus(panel, '没有草稿 ID，不能加入复习队列。', 'error');
+      return;
+    }
+    var objectRef = currentMnObjectRef();
+    setAiEditOperationBusy(panel, true);
+    setAiEditOperationStatus(panel, '正在加入复习队列...', 'saving');
+    postCompanion('review_queue_add', {draftId: draftId, mnObject: objectRef, mnObjectId: objectRef.objectId || ''}, function(result) {
+      setAiEditOperationBusy(panel, false);
+      if (!result || result.ok === false) {
+        setAiEditOperationStatus(panel, '加入复习队列失败：' + (result && result.message ? result.message : '未知错误'), 'error');
+        return;
+      }
+      state.knowledgeWorkspace = Object.assign({}, state.knowledgeWorkspace || {}, {
+        reviewQueue: result.reviewQueue || result,
+        reviewQueueSummary: result.summary || {},
+        reviewItems: result.items || []
+      });
+      renderKnowledgeWorkspace(state.knowledgeWorkspace);
+      setAiEditOperationStatus(panel, result.message || '已加入复习队列。', 'accepted');
+    }, {showReply: false});
+  }
+
   function buildAiEditOperationPanel(draft) {
     var panel = document.createElement('section');
     panel.className = 'ai-edit-operation';
@@ -2129,6 +5887,10 @@
     var meta = document.createElement('div');
     meta.className = 'ai-edit-meta' + (metaText ? '' : ' hidden');
     meta.textContent = metaText;
+    var qualityText = cardFactoryQualityLines(draft).join('\n');
+    var cardQuality = document.createElement('div');
+    cardQuality.className = 'ai-edit-card-quality' + (qualityText ? '' : ' hidden');
+    cardQuality.textContent = qualityText;
     var actions = document.createElement('div');
     actions.className = 'ai-edit-actions';
     var accept = document.createElement('button');
@@ -2152,12 +5914,25 @@
     var status = document.createElement('div');
     status.className = 'ai-edit-status';
     status.textContent = '等待确认';
+    var secondaryActions = document.createElement('div');
+    secondaryActions.className = 'ai-edit-secondary-actions';
+    var reviewQueue = document.createElement('button');
+    reviewQueue.className = 'small-button ai-edit-review-queue';
+    reviewQueue.type = 'button';
+    reviewQueue.textContent = '加入复习队列';
+    reviewQueue.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      addDraftToReviewQueue(panel, draft);
+    });
+    secondaryActions.appendChild(reviewQueue);
     actions.appendChild(accept);
     actions.appendChild(reject);
     panel.appendChild(title);
     panel.appendChild(subtitle);
     panel.appendChild(meta);
+    panel.appendChild(cardQuality);
     panel.appendChild(actions);
+    panel.appendChild(secondaryActions);
     panel.appendChild(status);
     return panel;
   }
@@ -2749,6 +6524,7 @@
     state.stagedLabel = String(label || actionLabel(state.stagedAction));
     setValue('promptInput', stagedPrompt);
     switchTab('chat');
+    switchProductMode('chat');
     renderStagedActionLine();
     updateActionAvailability();
     updateRunToggleButton();
@@ -2972,6 +6748,7 @@
     var label = targetState.label || (target.rootTitle ? ('文档脑图：' + target.rootTitle) : '目标脑图');
     select.title = (targetState.detail ? targetState.detail + '\n' : '') + label;
     bar.className = 'mindmap-target-bar ' + status;
+    scheduleAgentPlanRefresh();
   }
 
   function refreshMindmapTarget() {
@@ -3012,9 +6789,23 @@
     state.queue = result.queue || state.queue || {pending: 0};
     renderPdfCacheBanner(result.pdfCache || (state.queue && state.queue.pdfCache));
     if (result.mindmapTarget) renderMindmapTargetBar(result.mindmapTarget);
+    if (result.agentOperation) renderAgentWorkbench(result.agentOperation);
+    if (result.mindmapTreeCache) renderMindmapTreeCacheStatus(result.mindmapTreeCache);
+    if (result.mindmapDiff) renderMindmapDiffWorkbench(result);
+    if (result.mindmapDiffApply) renderMindmapDiffApplyStatus(result.mindmapDiffApply);
+    if (result.aiEditTransactionStatus) renderAiEditTransactionCenter(result.aiEditTransactionStatus);
+    if (result.knowledgeWorkspace || result.knowledgeIndex || result.knowledgeIndexStatus) {
+      renderKnowledgeWorkspace(result.knowledgeWorkspace || result.knowledgeIndex || result.knowledgeIndexStatus);
+    }
+    if (result.workflowWorkspace || result.workflowRuns || result.workflowStatus) {
+      renderWorkflowWorkspace(result.workflowWorkspace || result.workflowStatus || result);
+    }
+    renderWorkbenchPanels();
     updateReadiness(result);
     setValue('aiBackendSelect', state.settings.aiBackend || state.aiBackend || 'auto');
     setValue('permissionSelect', state.settings.permission || 'notes');
+    renderMnApiStatus(result);
+    renderWorkflowWorkspace();
     setValue('modelInput', state.settings.model || 'gpt-5.5');
     setValue('speedSelect', state.settings.speed || 'fast');
     setValue('proxyUrlInput', state.settings.proxyUrl || '');
@@ -3194,9 +6985,11 @@
 
   function saveSettings() {
     var openaiApiKey = getValue('openaiApiKeyInput');
+    var mnUrlApiSecret = getValue('mnUrlApiSecretInput');
     postCompanion('settings_update', {
       settings: {
         aiBackend: getValue('aiBackendSelect'),
+        mnApiBackend: getValue('mnApiBackendSelect'),
         permission: getValue('permissionSelect'),
         model: getValue('modelInput'),
         speed: getValue('speedSelect'),
@@ -3206,10 +6999,12 @@
         githubRepo: getValue('githubRepoInput'),
         fileSearchRoots: parseFileSearchRootsInput(),
         customButtons: state.customButtons,
-        openaiApiKey: openaiApiKey
+        openaiApiKey: openaiApiKey,
+        mnUrlApiSecret: mnUrlApiSecret
       }
     }, function(result) {
       if (openaiApiKey) setValue('openaiApiKeyInput', '');
+      if (mnUrlApiSecret) setValue('mnUrlApiSecretInput', '');
       renderControls(result || {});
       setContextScope((result && result.settings && result.settings.defaultContextScope) || getValue('defaultContextScopeSelect') || 'auto');
     });
@@ -3225,6 +7020,19 @@
     }, function(result) {
       renderControls(result || {});
       if (!result || !result.ok) addFailureMessage('清除 OpenAI Key 失败', result);
+    });
+  }
+
+  function clearMnUrlApiSecret() {
+    if (window.confirm && !window.confirm('确认清除本机保存的 URL API Secret？')) return;
+    setValue('mnUrlApiSecretInput', '');
+    postCompanion('settings_update', {
+      settings: {
+        clearMnUrlApiSecret: true
+      }
+    }, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) addFailureMessage('清除 URL API Secret 失败', result);
     });
   }
 
@@ -3507,8 +7315,16 @@
     bridge('write_draft', {id: draftId});
     renderDraft(null);
     if (panel) {
-      setAiEditOperationStatus(panel, '已接受，写入请求已发送。', 'accepted');
-      setAiEditOperationBusy(panel, true);
+      if (panel.className && panel.className.indexOf('mindmap-diff-operation') !== -1) {
+        setMindmapDiffStatus(panel, '已接受，写入请求已发送。', 'accepted');
+        setMindmapDiffBusy(panel, true);
+      } else if (panel.className && panel.className.indexOf('operation-plan-panel') !== -1) {
+        setOperationPlanStatus(panel, '已接受，写入请求已发送。', 'accepted');
+        setOperationPlanBusy(panel, true);
+      } else {
+        setAiEditOperationStatus(panel, '已接受，写入请求已发送。', 'accepted');
+        setAiEditOperationBusy(panel, true);
+      }
     } else {
       addMessage('assistant', '已发送写入请求：' + draftId);
     }
@@ -3715,8 +7531,10 @@
     renderSettingsContextMeta(state.context);
 
     renderContextPreview();
+    renderWorkbenchPanels();
     autoRequestPdfCacheForCurrentContext();
     refreshMindmapTarget();
+    scheduleAgentPlanRefresh();
     updateActionAvailability();
   }
 
@@ -3792,6 +7610,7 @@
       renderContextSourceLine(state.context);
       renderContextPreview();
       renderSettingsContextMeta(state.context);
+      scheduleAgentPlanRefresh();
       updateActionAvailability();
     },
     setStatus: function(payload) {
@@ -3844,6 +7663,7 @@
         } else {
           setAiEditOperationStatus(panels[i], '已接受，保留本次新增内容。', 'accepted');
         }
+        refreshAiEditVerification(transactionId, panels[i]);
       }
     },
     setBusy: function(payload) {
@@ -3899,6 +7719,26 @@
         switchTab(ev.currentTarget.getAttribute('data-tab'));
       });
     }
+    var workbenchTabs = document.querySelectorAll('.workbench-tab');
+    for (var w = 0; w < workbenchTabs.length; w++) {
+      workbenchTabs[w].addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        switchWorkbenchPane(ev.currentTarget.getAttribute('data-workbench-pane'));
+      });
+    }
+    var workspaceNavCards = document.querySelectorAll('.workspace-nav-card');
+    for (var n = 0; n < workspaceNavCards.length; n++) {
+      workspaceNavCards[n].addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        switchWorkspaceSurface(ev.currentTarget.getAttribute('data-workspace-surface'));
+      });
+    }
+    bindButton('chatModeButton', function() {
+      switchProductMode('chat');
+    });
+    bindButton('agentWorkspaceModeButton', function() {
+      switchProductMode('workspace');
+    });
     bindButton('closeButton', function() {
       bridge('close', {});
     });
@@ -3906,6 +7746,38 @@
     bindButton('newConversationButton', newConversation);
     bindButton('conversationHistoryButton', openConversationHistory);
     bindButton('conversationHistoryCloseButton', closeConversationHistory);
+    bindButton('conversationHistoryAllButton', function() {
+      state.conversationHistoryScope = 'document';
+      refreshConversationHistory();
+    });
+    bindButton('conversationHistoryObjectButton', function() {
+      state.conversationHistoryScope = 'object';
+      refreshConversationHistory();
+    });
+    bindButton('objectBrowserRefreshButton', function() {
+      refreshObjectBrowser(true);
+    });
+    bindButton('objectBrowserFilterButton', function() {
+      refreshObjectBrowser(true);
+    });
+    bindButton('objectRegistryScanButton', requestObjectRegistryScan);
+    bindButton('objectGraphRefreshButton', function() {
+      refreshObjectGraph(true);
+    });
+    bindButton('objectGraphRelationAddButton', openObjectGraphRelationEditor);
+    bindButton('objectGraphRelationSaveButton', saveObjectGraphRelation);
+    bindButton('objectGraphRelationCancelButton', closeObjectGraphRelationEditor);
+    bindButton('objectActivityRefreshButton', function() {
+      refreshObjectActivity(true);
+    });
+    bindButton('operationLedgerRefreshButton', function() {
+      refreshOperationLedger(true);
+    });
+    bindButton('operationLedgerFilterButton', function() {
+      refreshOperationLedger(true);
+    });
+    bindButton('operationLedgerDetailCloseButton', closeOperationLedgerDetail);
+    bindButton('workflowRunInspectorCloseButton', closeWorkflowRunInspector);
     bindButton('configBackButton', closeConfigPage);
     bindButton('contextButton', function() {
       bridge('context', {});
@@ -3914,6 +7786,7 @@
     bindButton('saveSettingsButton', saveSettings);
     bindButton('saveFileSearchRootsButton', saveFileSearchRoots);
     bindButton('clearOpenAIKeyButton', clearOpenAIKey);
+    bindButton('clearMnUrlApiSecretButton', clearMnUrlApiSecret);
     bindButton('aiBackendProbeButton', probeAiBackend);
     bindButton('healthCheckButton', checkHealth);
     bindButton('permissionDiagnoseButton', diagnosePermissions);
@@ -3921,6 +7794,18 @@
     bindButton('pdfCacheFileButton', choosePdfCacheFile);
     bindButton('pdfCacheFileBannerButton', choosePdfCacheFile);
     bindButton('mindmapTargetRefreshButton', refreshMindmapTarget);
+    bindButton('mindmapTreeRefreshButton', requestMindmapTreeRead);
+    bindButton('mindmapStudioReadTreeButton', requestMindmapTreeRead);
+    bindButton('mindmapStudioPreviewDiffButton', previewMindmapDiffFromStudio);
+    bindButton('mindmapStudioApplySelectedButton', applyMindmapStudioSelectedDiff);
+    bindButton('mindmapStudioVerifyButton', verifyMindmapStudioTransaction);
+    bindButton('mindmapStudioRollbackButton', rollbackMindmapStudioTransaction);
+    bindButton('agentPlanRefreshButton', function() {
+      refreshAgentPlan(true);
+    });
+    bindButton('knowledgeWorkspaceSearchButton', function() {
+      searchKnowledgeWorkspace('');
+    });
     bindButton('runtimeEvidenceButton', collectRuntimeEvidence);
     bindButton('nativeCapabilitiesRefreshButton', refreshNativeCapabilities);
     bindButton('updateCheckButton', function() {
@@ -3967,6 +7852,56 @@
         updateMindmapTargetFromSelect(ev.currentTarget.value);
       });
     }
+    var knowledgeSearchInput = byId('knowledgeWorkspaceSearchInput');
+    if (knowledgeSearchInput) {
+      knowledgeSearchInput.addEventListener('keydown', function(ev) {
+        if (ev.isComposing || ev.keyCode === 229) return;
+        if (ev.keyCode === 13) {
+          ev.preventDefault();
+          searchKnowledgeWorkspace('');
+        }
+      });
+    }
+    var objectBrowserTypeFilterSelect = byId('objectBrowserTypeFilterSelect');
+    if (objectBrowserTypeFilterSelect) {
+      objectBrowserTypeFilterSelect.addEventListener('change', function() {
+        refreshObjectBrowser(true);
+      });
+    }
+    var objectBrowserFilterInputs = [
+      byId('objectBrowserKindFilterInput'),
+      byId('objectBrowserSearchInput')
+    ];
+    for (var f = 0; f < objectBrowserFilterInputs.length; f++) {
+      if (!objectBrowserFilterInputs[f]) continue;
+      objectBrowserFilterInputs[f].addEventListener('keydown', function(ev) {
+        if (ev.isComposing || ev.keyCode === 229) return;
+        if (ev.keyCode === 13) {
+          ev.preventDefault();
+          refreshObjectBrowser(true);
+        }
+      });
+    }
+    var operationLedgerTypeFilterSelect = byId('operationLedgerTypeFilterSelect');
+    if (operationLedgerTypeFilterSelect) {
+      operationLedgerTypeFilterSelect.addEventListener('change', function() {
+        refreshOperationLedger(true);
+      });
+    }
+    var operationLedgerFilterInputs = [
+      byId('operationLedgerStatusFilterInput'),
+      byId('operationLedgerSearchInput')
+    ];
+    for (var lf = 0; lf < operationLedgerFilterInputs.length; lf++) {
+      if (!operationLedgerFilterInputs[lf]) continue;
+      operationLedgerFilterInputs[lf].addEventListener('keydown', function(ev) {
+        if (ev.isComposing || ev.keyCode === 229) return;
+        if (ev.keyCode === 13) {
+          ev.preventDefault();
+          refreshOperationLedger(true);
+        }
+      });
+    }
     byId('promptInput').addEventListener('keydown', function(ev) {
       if (ev.isComposing || ev.keyCode === 229) return;
       if (ev.keyCode === 13 && !ev.shiftKey) {
@@ -3977,6 +7912,7 @@
     byId('promptInput').addEventListener('input', function() {
       updateActionAvailability();
       updateRunToggleButton();
+      scheduleAgentPlanRefresh();
     });
     updateRunToggleButton();
     updateReadiness({});
@@ -3984,6 +7920,17 @@
     renderContextSourceLine(state.context);
     renderContextPreview();
     renderMindmapTargetBar(state.mindmapTarget);
+    renderMindmapTreeCacheStatus(state.mindmapTreeCache);
+    renderMindmapDiffWorkbench();
+    renderMindmapStudioPanel();
+    renderAiEditTransactionCenter(state.aiEditTransactionStatus);
+    renderAgentWorkbench(null);
+    renderWorkbenchPanels();
+    renderObjectBrowser();
+    renderOperationLedgerDetail();
+    renderKnowledgeWorkspace();
+    renderWorkflowWorkspace();
+    switchProductMode(state.activeProductMode);
     renderSettingsContextMeta(state.context);
     renderPresetButtons();
     renderMainPinnedButtons();

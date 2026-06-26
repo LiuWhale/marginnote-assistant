@@ -89,6 +89,13 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("/marginnote/draft?id=", self.main)
         self.assertIn("draftWriteFailed", self.main)
         self.assertIn("draftWritten", self.main)
+        write_body = self.main.split("CodexAssistantAddon.prototype.writeDraft", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1
+        )[0]
+        self.assertIn("operationManifest", write_body)
+        self.assertIn("dryRunStatus === 'blocked'", write_body)
+        self.assertIn("operation-dry-run-blocked", write_body)
+        self.assertIn("return;", write_body)
 
     def test_ai_edit_reject_rolls_back_created_cards_without_structure_only_unlink(self) -> None:
         for marker in [
@@ -705,6 +712,97 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("var draftId = safeString(valueOf(command, 'draftId')", native_body)
         self.assertIn("this.writeDraft(draftId)", native_body)
         self.assertIn("toArray(valueOf(command, 'pdfPathCandidates'))", native_body)
+
+    def test_native_poll_can_request_current_mindmap_tree_read(self) -> None:
+        self.assertIn("read_mindmap_tree", self.main)
+        self.assertIn("readMindmapTree", self.main)
+        self.assertIn("mindmapTreeReadRequested", self.main)
+
+        native_body = self.main.split("CodexAssistantAddon.prototype.handleNativeQueueCommand", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.ackCommands", 1
+        )[0]
+
+        self.assertIn("nativeAction === 'read_mindmap_tree'", native_body)
+        self.assertIn("this.readMindmapTree(command)", native_body)
+
+    def test_native_poll_can_apply_mindmap_diff_operations(self) -> None:
+        self.assertIn("apply_mindmap_diff_operations", self.main)
+        self.assertIn("applyMindmapDiffOperations", self.main)
+        self.assertIn("mindmapDiffApplyRequested", self.main)
+        self.assertIn("mindmapDiffApplyFinished", self.main)
+        self.assertIn("updateOperationNode", self.main)
+        self.assertIn("mergeOperationNode", self.main)
+        self.assertIn("moveOperationNode", self.main)
+        self.assertIn("resolveOperationCurrentNote", self.main)
+
+        native_body = self.main.split("CodexAssistantAddon.prototype.handleNativeQueueCommand", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.ackCommands", 1
+        )[0]
+
+        self.assertIn("nativeAction === 'apply_mindmap_diff_operations'", native_body)
+        self.assertIn("this.applyMindmapDiffOperations(command)", native_body)
+        executor_body = self.main.split("CodexAssistantAddon.prototype.applyMindmapDiffOperations", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.handleNativeQueueCommand", 1
+        )[0]
+        self.assertIn("updateOperationNode(operation)", executor_body)
+        self.assertIn("mergeOperationNode(operation)", executor_body)
+        self.assertIn("moveOperationNode(operation)", executor_body)
+        self.assertNotIn("reason: 'local-operation-not-implemented'", executor_body)
+
+    def test_mindmap_diff_apply_reports_per_operation_verification(self) -> None:
+        executor_body = self.main.split("CodexAssistantAddon.prototype.applyMindmapDiffOperations", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.handleNativeQueueCommand", 1
+        )[0]
+        for marker in [
+            "function verifyAppliedMindmapDiffOperation",
+            "function buildMindmapDiffApplyVerification",
+            "codex.mn.mindmapDiffApplyVerification.v1",
+            "verifiedCount",
+            "failedVerificationCount",
+            "operationVerification",
+            "verification: verification",
+            "expectedTitle",
+            "actualTitle",
+            "expectedParentNoteId",
+            "actualParentNoteId",
+            "expectedBody",
+            "bodyMatches",
+            "commentMatches",
+            "sourceMatches",
+            "expectedSourceText",
+            "actualCommentText",
+            "sourceTextForOperation(operation)",
+            "Source:",
+        ]:
+            self.assertIn(marker, executor_body)
+
+    def test_mindmap_diff_apply_carries_transaction_evidence(self) -> None:
+        executor_body = self.main.split("CodexAssistantAddon.prototype.applyMindmapDiffOperations", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.handleNativeQueueCommand", 1
+        )[0]
+        for marker in [
+            "var transactionId = safeString(valueOf(command, 'transactionId')",
+            "transactionId: transactionId",
+            "var draftId = safeString(valueOf(command, 'draftId')",
+            "draftId: draftId",
+            "createdNoteIds: created.map",
+            "appliedOperations: appliedOperations",
+            "mindmapDiffApplyFinished",
+        ]:
+            self.assertIn(marker, executor_body)
+
+    def test_native_probe_reports_mindmap_local_mutation_capabilities(self) -> None:
+        for marker in [
+            "nativeMindmapUpdate",
+            "nativeMindmapMerge",
+            "nativeMindmapMove",
+            "nativeMindmapDelete",
+            "canUpdateMindmapNode",
+            "canMergeMindmapNode",
+            "canMoveMindmapNode",
+            "canDeleteMindmapNode",
+        ]:
+            self.assertIn(marker, self.main)
 
     def test_pdf_cache_upload_callback_does_not_treat_nil_error_as_failure(self) -> None:
         upload_callback = self.main.split("postJSON(CompanionURL, ctx, 30", 1)[1].split(

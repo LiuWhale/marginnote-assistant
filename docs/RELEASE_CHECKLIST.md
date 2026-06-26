@@ -3,9 +3,9 @@
 ## 版本信息
 
 - 插件名：Codex Companion
-- 当前发布候选：0.4.27
-- MN4 插件 manifest 版本：0.4.27
-- Companion 版本：0.4.27
+- 当前发布候选：0.4.28
+- MN4 插件 manifest 版本：0.4.28
+- Companion 版本：0.4.28
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`
@@ -15,11 +15,11 @@
 0. 发布包一键安装入口
 
 ```bash
-unzip CodexCompanion-0.4.27-latest-dist.zip
-cd CodexCompanion-0.4.27
+unzip CodexCompanion-0.4.28-latest-dist.zip
+cd CodexCompanion-0.4.28
 python3 release_smoke_test.py
-python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.27-latest.mnaddon
-python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.27-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.28-latest.mnaddon
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.28-latest.mnaddon --install-dry-run
 python3 build_pkg.py --dry-run
 ./install.sh
 ```
@@ -54,7 +54,7 @@ python3 build_pkg.py --sign-identity "Developer ID Installer: <Team Name> (<Team
 签名 pkg 还不是最终可分发包。公发前必须 notarize 并 staple：
 
 ```bash
-python3 notarize_pkg.py ./release/CodexCompanion-0.4.27-latest.pkg --keychain-profile "CodexNotary"
+python3 notarize_pkg.py ./release/CodexCompanion-0.4.28-latest.pkg --keychain-profile "CodexNotary"
 ```
 
 发布维护者也可以双击 `Notarize Package.command`。该入口需要 `NOTARYTOOL_KEYCHAIN_PROFILE`，或 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_SPECIFIC_PASSWORD`。`doctor.py` 会用 `xcrun stapler validate` 和 `spctl -a -vv -t install` 把 notarization 作为独立证据；`release_acceptance.py` 会把 `signed_pkg` 和 `notarized_pkg` 分开阻断。
@@ -67,9 +67,16 @@ node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/Mar
 node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant/CodexWebPanelController.js"
 node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant/web/app.js"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/companion.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/agent_workbench.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/diagnostic_log.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/knowledge_index.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/marginnote_api_adapter.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/operation_runtime.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/runtime_config.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/skill_marketplace.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/transaction_manager.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/update_manager.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/workflow_engine.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/send_action.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/refresh_mn_runtime.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/audit_highlights.py"
@@ -102,12 +109,12 @@ tail -n 30 "$HOME/.codex/marginnote-assistant/events.jsonl"
 
 应看到：
 
-- `pluginVersion` 为 `0.4.27`
+- `pluginVersion` 为 `0.4.28`
 - `webPanelLoaded`
 - `panelShownState`
 - `panelKind=webview`
 - `panelAutoShown`
-- `webControlsReady` 的 controls 至少包含 `promptInput,sendButton,stagedActionLine,clearStagedActionButton,goalActionStrip,primaryActionGrid,mindmapToolPanel,mindmapActionGrid,sourceToolPanel,toolActionGrid`，并且 `missing=""`
+- `webControlsReady` 的 controls 至少包含 `aiChatShell,modeSwitchBar,chatModeButton,agentWorkspaceModeButton,modeIntentLine,workspaceNavigator,workspaceNavigatorSummary,workspaceNavConsoleButton,workspaceNavMindmapStudioButton,workspaceNavCardFactoryButton,workspaceNavLedgerExplorerButton,workspaceNavKnowledgeGraphButton,workspaceNavWorkflowBuilderButton,workspaceNavSkillCenterButton,workbenchTabs,objectWorkspacePanel,objectGraphPanel,objectGraphRelationAddButton,objectGraphRelationEditor,objectGraphRelationTargetInput,objectGraphRelationSaveButton,objectActivityPanel,operationLedgerPanel,operationWorkspacePanel,knowledgeWorkspacePanel,workflowWorkspacePanel,agentWorkbenchBar,mindmapDiffWorkbench,aiEditTransactionCenter,promptInput,sendButton,stopButton,contextButton,readinessPanel,mnApiStatusLine`，并且 `missing=""`
 
 4. 鼠标缩放面板
 
@@ -226,12 +233,14 @@ python3 "$HOME/.codex/marginnote-assistant/release_acceptance.py" \
 - 设置页“检查权限”能返回当前 PDF、MN4 数据库、导出目录和 PyMuPDF 状态；macOS 拦截时能看到 Full Disk Access 指引，“打开设置”能尝试打开对应系统设置页。
 - 设置页“本文档验收”能返回当前 PDF 的按钮/工作流检查结果；“发布验收”仍显示发布 gate，不混在主操作区。
 - 设置页“缓存PDF”能触发 `pdfCacheUploadStarted` 和 `pdfCacheUploadPosted` 事件；随后导出标注 PDF 时 Companion 优先使用当前 book 的缓存 PDF 副本。
-- 文件子界面只出现上传相关控件，不放停止或队列控件。
 - 主界面对话区底部一直显示输入框和“发送”按钮；发送不混入 AI 任务按钮网格。
-- 对话页显示独立 `goalRunPanel`，`goalActionStrip` 内的 `目标` 按钮和目标状态同在其中；常用区是 2x2：解释、制卡、新建脑图、精读；`workflowActionPanel` 常驻显示当前脑图区的补到当前/重组当前，以及原文区的高亮/导出/状态；刷新上下文在当前内容区；运行态提示只放刷新和去设置；状态栏只放连接、队列/停止、队列和运行状态。
-- 按钮子界面可显示预设按钮、自定义按钮、动作类型和“主界面”开关；被勾选的自定义按钮会显示在主界面常用 prompt 区，未勾选时不自动显示重复的默认 prompt。
+- 首屏 `Chat Mode / Agent Workspace` 两个产品模式可切换；`Chat Mode` 只展开对话面板、输入框和发送按钮，`Agent Workspace` 展开对象、操作、知识、工作流工作区，并能恢复上一次非对话工作区。`Workspace Navigator` 必须显示 `Knowledge Console`、`Mindmap Studio`、`Card Factory`、`Operation Ledger`、`Knowledge Graph`、`Workflow Builder`、`Skill Center`，点击后能选中对应 workspace surface 并跳到目标模块。对象区显示当前 `MNObject`、`objectBrowserPanel`、Object Graph、对象活动和 Operation Ledger。`object_browser` 至少能把当前焦点对象、Object Graph 节点、对象活动和 Operation Ledger 条目汇总为可浏览清单，并显示每个对象的 `browserAction`；`objectRegistryScanButton` / `扫描 MN` 能请求 `request_mn_object_registry_scan`，让原生队列执行 `scan_mn_objects`，并把 `mnObjectRegistryScanFinished` 对象写成 `native_object_scan` Registry 证据；扫描对象会进入 Object Graph，生成 `mn_note` 节点和 `native_object_scan 父子边`；点击扫描对象会打开该对象图谱，点击扫描对象会打开该对象活动和账本，不能退回只刷新当前焦点对象；Object Graph 至少能显示历史/事务/知识或 MN 原生脑图树缓存节点，MN 原生脑图缓存节点应以 `mn_note` 和 `contains` 父子关系进入图谱；对象区“添加关系”能保存本地 `manual_relation` 手工边，刷新后仍能在图谱中看到，保存事件会以 `object_graph_manual_relation` 和 `manualRelation` 出现在对象活动与 Operation Ledger 详情；删除关系后该边消失，删除事件仍保留在账本里用于审计。
+- 制卡必须返回 Card Factory 第一阶段元数据：`codex.mn.cardFactory.v1`、每张卡的 `cardType`、`source`、`learningGoal`、`reviewPrompt` 和 `codex.mn.cardFactoryCard.v1`。保存草稿后，AI 编辑确认面板必须显示“卡片工厂”摘要、卡型、缺来源、长卡和重复标题风险。
+- 操作区显示目标脑图、当前脑图树缓存、脑图 Diff 编辑台、Agent 操作计划、执行验证和事务中心；生成脑图后，即使对话滚动，最近 Diff 和事务状态仍留在操作区。
+- 知识区显示 Knowledge Graph 状态、实体/关系统计、检索输入和命中列表；工作流区显示 Workflow Runtime、External Automation Gateway、Skill Marketplace、模板、最近 run 和技能包清单。
+- 设置页而不是主界面承载 AI 后端、MN API、文件路径、更新、日志和诊断；文件路径管理不再作为首屏任务按钮。
 - 历史和清空按钮不溢出，点击历史后能在消息区显示历史记录。
-- 对话、按钮、设置、文件、历史五个子界面可切换。
+- 历史以独立页面打开，并能按当前 `MNObject` 过滤对象相关对话。
 - 同一按钮连续点击时不因焦点残留而失效。
 - 执行中对话页显示动态进度和已用秒数；`queue_status` 和 `/status` 能返回当前/最近任务的动作、阶段、详情和耗时。
 - 生成卡片、脑图或完整精读后先出现待写入草稿；在草稿框编辑内容并用 `## 标题` 分隔卡片后点击“写入 MN”，写入结果应采用编辑后的卡片内容；点击“丢弃”不会写入。

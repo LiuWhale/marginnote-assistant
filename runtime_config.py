@@ -13,6 +13,7 @@ DEFAULT_RUNTIME_SETTINGS = {
     "speed": "fast",
     "proxyUrl": "",
     "aiBackend": "auto",
+    "mnApiBackend": "auto",
     "codexCliPath": "",
     "defaultContextScope": "auto",
     "githubRepo": "LiuWhale/marginnote-assistant",
@@ -20,6 +21,7 @@ DEFAULT_RUNTIME_SETTINGS = {
     "fileSearchRoots": [],
 }
 AI_BACKENDS = {"auto", "codex_cli", "openai_api", "local"}
+MN_API_BACKENDS = {"auto", "native", "url_api"}
 AI_BACKEND_LABELS = {
     "auto": "自动",
     "codex_cli": "Codex CLI",
@@ -133,6 +135,13 @@ def sanitize_ai_backend(value: Any) -> str:
     return DEFAULT_RUNTIME_SETTINGS["aiBackend"]
 
 
+def sanitize_mn_api_backend(value: Any) -> str:
+    text = str(value or "").strip()
+    if text in MN_API_BACKENDS:
+        return text
+    return DEFAULT_RUNTIME_SETTINGS["mnApiBackend"]
+
+
 def sanitize_default_context_scope(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -207,5 +216,16 @@ def sanitize_openai_api_key(value: Any) -> str:
     if len(text) > 300 or any(char in text for char in "\r\n\t "):
         return ""
     if not re.match(r"^[A-Za-z0-9._:-]{12,300}$", text):
+        return ""
+    return text
+
+
+def sanitize_mn_url_api_secret(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) > 300 or any(char in text for char in "\r\n\t "):
+        return ""
+    if not re.match(r"^[A-Za-z0-9._:-]{8,300}$", text):
         return ""
     return text

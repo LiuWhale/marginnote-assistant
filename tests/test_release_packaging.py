@@ -342,17 +342,22 @@ class ReleasePackagingTests(unittest.TestCase):
             root = Path(tmp)
             zip_path = root / "CodexCompanion-test-latest-dist.zip"
             pkg_path = root / "CodexCompanion-test-latest.pkg"
+            addon_path = root / "CodexCompanion-test-latest.mnaddon"
             cloud = root / "OneDrive/Codex Companion"
             zip_path.write_bytes(b"zip")
             pkg_path.write_bytes(b"pkg")
+            addon_path.write_bytes(b"addon")
 
             result = module.sync_release_artifacts(zip_path, pkg_path, cloud)
 
             self.assertEqual(result["onedrivePkg"], str((cloud / pkg_path.name).resolve()))
+            self.assertEqual(result["onedriveMnaddon"], str((cloud / addon_path.name).resolve()))
             self.assertEqual((cloud / zip_path.name).read_bytes(), b"zip")
             self.assertEqual((cloud / pkg_path.name).read_bytes(), b"pkg")
+            self.assertEqual((cloud / addon_path.name).read_bytes(), b"addon")
             self.assertEqual((root / "SHA256SUMS.txt").read_text(), (cloud / "SHA256SUMS.txt").read_text())
             self.assertIn(hashlib.sha256(b"pkg").hexdigest() + "  " + pkg_path.name, (cloud / "SHA256SUMS.txt").read_text())
+            self.assertIn(hashlib.sha256(b"addon").hexdigest() + "  " + addon_path.name, (cloud / "SHA256SUMS.txt").read_text())
 
     def test_pkg_builder_main_reports_signing_errors_without_traceback(self) -> None:
         spec = importlib.util.spec_from_file_location("codex_mn_build_pkg_cli_error", PKG_BUILDER_PATH)

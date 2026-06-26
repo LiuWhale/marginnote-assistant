@@ -29,6 +29,7 @@ class RuntimeConfigTests(unittest.TestCase):
         config = load_runtime_config()
 
         self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["githubRepo"], "LiuWhale/marginnote-assistant")
+        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["mnApiBackend"], "auto")
         self.assertEqual(config.sanitize_model("bad model name", "fallback-model"), "fallback-model")
         self.assertEqual(config.sanitize_model("gpt-5.5", "fallback-model"), "gpt-5.5")
         self.assertEqual(config.sanitize_proxy_url("ftp://127.0.0.1:7890"), "")
@@ -39,6 +40,10 @@ class RuntimeConfigTests(unittest.TestCase):
             "LiuWhale/marginnote-assistant",
         )
         self.assertEqual(config.sanitize_github_repo("bad repo name"), "LiuWhale/marginnote-assistant")
+        self.assertEqual(config.sanitize_mn_api_backend("url_api"), "url_api")
+        self.assertEqual(config.sanitize_mn_api_backend("bad"), "auto")
+        self.assertEqual(config.sanitize_mn_url_api_secret("mnsec_test_secret_123"), "mnsec_test_secret_123")
+        self.assertEqual(config.sanitize_mn_url_api_secret("bad secret with spaces"), "")
         self.assertEqual(config.sanitize_default_context_scope("全文"), "document")
         self.assertEqual(config.sanitize_default_context_scope("unknown"), "auto")
         self.assertEqual(

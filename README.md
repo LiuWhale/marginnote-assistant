@@ -11,19 +11,31 @@ Codex Companion is a local-first AI assistant plugin for MarginNote 4. It connec
 
 It is not limited to academic papers. Papers, book chapters, course material, project documents, meeting notes, and any document that MarginNote can expose through its APIs can be used as context.
 
+The public 0.4.x line is still a preview. The long-term target is **MarginNote Knowledge Agent OS**, not a chat box with more buttons. The final product is a dual-mode system: `Chat Mode` mirrors the lightweight reading conversation users expect from MarginNote's built-in AI, while `Agent Workspace Mode` turns selections, cards, mind-map nodes, documents, notebooks, and external files into addressable objects. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. In that final form, chat is the entry point, not the end state; Agent Workspace is the production system, and the product is object-first, operation-first, and evidence-first.
+
 > This project is not affiliated with MarginNote, OpenAI, or Apple.
 
 ## What It Can Do
 
 - Chat inside the MarginNote 4 panel with context from the current selection, node, or document.
+- Switch between `Chat Mode` for lightweight reading conversation and `Agent Workspace` for object, operation, knowledge, and workflow work.
+- Use the `Workspace Navigator` in Agent Workspace to jump directly to `Knowledge Console`, `Mindmap Studio`, `Card Factory`, `Operation Ledger`, `Knowledge Graph`, `Workflow Builder`, and `Skill Center`.
 - Choose the context scope explicitly: auto, selection/node only, or full document.
-- Generate short MarginNote cards and structured mind-map branches, with draft or AI-edit confirmation before writing.
+- Generate short MarginNote cards and structured mind-map branches, with draft or AI-edit confirmation before writing. Card generation now returns a `codex.mn.cardFactory.v1` summary; each card carries `cardType`, source, `learningGoal`, and `reviewPrompt`, and the confirmation panel shows type and quality risks.
+- Preview mind-map changes as a Diff, including create/update/merge/move/delete-suggestion counts, with per-node keep/skip selection and title/body editing before writing.
+- Use the first Mindmap Studio panel in Agent Workspace. It is not a renamed answer button: it exposes the operation sequence `读取现有脑图`, `预览 Diff`, `应用所选`, `验证事务`, and `回滚事务`.
 - Turn the latest answer into a mind-map tree; accept keeps it, reject attempts to remove the nodes and cards created by that edit.
 - Select the target mind map at the top of the chat before writing, reducing the risk of creating nodes in the wrong notebook or page.
 - Queue actions while another generation is running; pending tasks continue automatically.
 - Stop the current generation; stopped tasks do not continue writing cards or mind maps.
 - Show a persistent current-document cache light: yellow while caching, green when ready, red on failure.
-- Provide chat history, new conversations, settings, file path management, structured logs, and diagnostics.
+- Provide chat history, new conversations, settings, file path management, structured logs, and diagnostics; history and action logs carry the current `MNObject` so operations can be traced by selection, note, document, or mind-map object.
+- Show a Knowledge Console risk panel in the object workspace. `agent_plan` now returns `codex.mn.riskRegister.v1`, listing permission, context scope, target mind map, dry-run, and confirmation risk items before the user chooses an action.
+- Show an object-scoped Object Browser in the object workspace. It aggregates the current focus object, Object Graph nodes, Object Activity items, Operation Ledger entries, and first-stage `MNObject Registry` entries into one browsable object list with per-object actions. The browser can now filter by object type, kind, and search text, so users can narrow the list to Registry entries, mind-map nodes, activity items, or ledger records. Native mind-map tree cache nodes are registered as `mnobj:note:<noteId>` objects when MarginNote reports `mindmapTreeReadFinished`; the `objectRegistryScanButton` can also request `request_mn_object_registry_scan`, enqueue `scan_mn_objects`, and ingest `mnObjectRegistryScanFinished` objects with `native_object_scan` evidence. Scanned objects are promoted into Object Graph as `mn_note` nodes, including `native_object_scan` parent-child `contains` edges; selecting a scanned object opens that object's graph, activity feed, and ledger with its own `mnObject` payload.
+- Show an object-scoped Object Graph in the object workspace, linking the current `MNObject` to related conversations, workflow runs, AI edit transactions, external automation requests, diagnostic evidence, Knowledge Index entities, cached native MarginNote mind-map nodes with parent-child edges, and user-maintained `manual_relation` edges between `MNObject` IDs. Saving or deleting those manual edges creates auditable `object_graph_manual_relation` ledger events with `manualRelation` evidence.
+- Show an object activity feed in the object workspace, aggregating conversations, workflow runs, AI edit transactions, and diagnostic logs for the current `MNObject`, with direct actions to open or inspect each item.
+- Show an object-scoped Operation Ledger that aggregates workflow runs, AI edit transactions, external gateway requests, and manual Object Graph relationship events for the current `MNObject`; it can filter audit entries by entry type, status, and keyword, and selecting a ledger item opens an evidence detail panel in the object workspace with operation plan, dry-run/apply path, native command, native event timeline, native apply, rollback/residual, workflow confirmation state, callback evidence, and manual relationship evidence.
+- Show a first-stage Workflow Run Inspector in the workflow workspace. Recent workflow runs can be opened to inspect each step's status, queue id, confirmation requirement, warning/blocking tone, and next action; recoverable failed or blocked direct/queueable steps expose a retry action, while write/confirmation steps still require accept/reject.
 - Check GitHub Releases for updates and open the matching download page.
 - Keep the original PDF clean by default; annotated export writes a copy instead of overwriting the source file.
 
@@ -98,14 +110,16 @@ Select text in a PDF or note node, then ask a question or click an explanation a
 
 1. Choose the target mind map at the top of the chat.
 2. Click `生成脑图树` under the latest answer, or ask for a structured mind map from the full document.
-3. The plugin writes the mind-map branch into MarginNote first.
-4. It then shows AI edit confirmation: `接受` keeps it, `拒绝` removes the new edit where the native API allows it.
+3. In Agent Workspace, open `Mindmap Studio` to read the existing tree, preview the Diff, apply selected changes, verify the transaction, or roll it back.
+4. The plugin keeps the latest create/update/merge/move/delete-suggestion summary visible in the operation workspace.
+5. Uncheck nodes you do not want to write, or edit a node title/body directly in the Diff panel; the preview marks skipped nodes and saves edited nodes before writing.
+6. Confirm below the answer: `接受` writes or locally applies the change, while `拒绝` discards the draft.
 
 If the current document has no suitable mind-map page, create or select the target in MarginNote first, then refresh the target list. This is safer than silently writing to an unrelated existing mind map.
 
 ### Create Cards
 
-Cards are split into short, reviewable items rather than one oversized note. Generated cards go through a draft or AI-edit confirmation before they are written to MarginNote.
+Cards are split into short, reviewable items rather than one oversized note. Generated cards go through a draft or AI-edit confirmation before they are written to MarginNote. The first Card Factory layer adds `cardType`, source, `learningGoal`, `reviewPrompt`, and quality summary metadata so missing sources, long cards, and duplicate titles are visible before writing. The AI edit confirmation can also add draft cards to the object-scoped Review Queue; the Knowledge workspace lists those queued review cards for the current `MNObject`.
 
 ### New Conversation And History
 
@@ -265,20 +279,20 @@ curl http://127.0.0.1:48761/status
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.27
+python3 package_release.py 0.4.28
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.27-latest-dist.zip --mnaddon release/CodexCompanion-0.4.27-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.27-latest-dist.zip --mnaddon release/CodexCompanion-0.4.27-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.28-latest-dist.zip --mnaddon release/CodexCompanion-0.4.28-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.28-latest-dist.zip --mnaddon release/CodexCompanion-0.4.28-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.27-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.28-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.
