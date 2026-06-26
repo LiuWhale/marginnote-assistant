@@ -7,15 +7,49 @@ from typing import Any
 
 AGENT_OPERATION_SCHEMA = "codex.mn.agentOperation.v1"
 MN_OBJECT_SCHEMA = "codex.mn.mnObject.v1"
+OPERATION_PLAN_SCHEMA = "codex.mn.operationPlan.v1"
+VERIFICATION_PLAN_SCHEMA = "codex.mn.verificationPlan.v1"
+OPERATION_COMPILER_SCHEMA = "codex.mn.operationCompiler.v1"
 
 
 WRITE_ACTIONS = {
+    "write_draft",
+    "request_native_highlight_selection",
+    "mindmap_diff_apply",
+    "object_graph_relation_save",
+    "object_graph_relation_delete",
+    "review_queue_add",
+}
+
+DRAFT_ACTIONS = {
     "generate_card",
     "generate_mindmap",
     "generate_full_reading",
     "expand_node",
     "reorganize_mindmap",
-    "write_draft",
+}
+
+
+READ_ACTION_REQUIREMENTS = {
+    "request_pdf_cache": ["cacheCurrentPdf"],
+    "mn_read_tree": ["readMindmapTree"],
+    "knowledge_index_search": [],
+    "chat": [],
+    "operation_plan_preview": [],
+    "ai_edit_transaction_get": ["rollbackLedger"],
+}
+
+WRITE_ACTION_REQUIREMENTS = {
+    "write_draft": ["nativeCards", "nativeMindmap", "rollbackLedger"],
+    "request_native_highlight_selection": ["nativeHighlightSelection"],
+}
+
+DRAFT_ACTION_REQUIREMENTS = {
+    "generate_full_reading": ["aiBackend", "cacheCurrentPdf"],
+    "generate_card": ["aiBackend"],
+    "generate_mindmap": ["aiBackend"],
+    "expand_node": ["aiBackend", "readMindmapTree"],
+    "reorganize_mindmap": ["aiBackend", "readMindmapTree"],
 }
 
 
@@ -278,6 +312,228 @@ def _risk_item(item_id: str, label: str, status: str, detail: str = "", tone: st
     }
 
 
+def _workflow_steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = workflow.get("steps") if isinstance(workflow.get("steps"), list) else []
+    return [step for step in steps if isinstance(step, dict)]
+
+
+def _workflow_actions(workflow: dict[str, Any]) -> set[str]:
+    return {str(step.get("action") or "") for step in _workflow_steps(workflow) if str(step.get("action") or "")}
+
+
+def _step_requires(action: str, workflow_actions: set[str], writes: bool = False) -> list[str]:
+    action = str(action or "")
+    requirements: list[str] = []
+    if action in READ_ACTION_REQUIREMENTS:
+        requirements.extend(READ_ACTION_REQUIREMENTS[action])
+    if not writes and action in DRAFT_ACTION_REQUIREMENTS:
+        requirements.extend(DRAFT_ACTION_REQUIREMENTS[action])
+    if writes and action in WRITE_ACTION_REQUIREMENTS:
+        requirements.extend(WRITE_ACTION_REQUIREMENTS[action])
+    if action == "write_draft":
+        if "generate_card" not in workflow_actions:
+            requirements = [item for item in requirements if item != "nativeCards"]
+        if not ({"generate_mindmap", "expand_node", "reorganize_mindmap", "mn_read_tree"} & workflow_actions):
+            requirements = [item for item in requirements if item != "nativeMindmap"]
+    return sorted(set(requirements))
+
+
+def _step_mutation(action: str, writes: bool) -> str:
+    if not writes:
+        return "none"
+    if action == "request_native_highlight_selection":
+        return "update"
+    if action in {"reorganize_mindmap", "expand_node"}:
+        return "create_update_move"
+    return "create"
+
+
+def _step_rollback(action: str, writes: bool) -> dict[str, Any]:
+    if not writes:
+        return {"strategy": "not_required", "requiresLedger": False}
+    if action == "request_native_highlight_selection":
+        return {
+            "strategy": "manual_or_native_undo",
+            "requiresLedger": True,
+            "residualRisk": "native_highlight_visibility",
+        }
+    return {
+        "strategy": "ai_edit_transaction",
+        "requiresLedger": True,
+        "residualRisk": "created_note_or_mindmap_node",
+    }
+
+
+def _confirmation_points(workflow: dict[str, Any]) -> set[str]:
+    return {str(item) for item in (workflow.get("confirmationPoints") if isinstance(workflow.get("confirmationPoints"), list) else []) if str(item)}
+
+
+def _operation_plan_status(write_count: int, permission: str, dry_run: dict[str, Any]) -> str:
+    if write_count and permission == "read_only":
+        return "blocked"
+    dry_status = str(dry_run.get("status") or "")
+    if dry_status == "blocked":
+        return "blocked"
+    if write_count:
+        return "waiting_dry_run"
+    return "read_only"
+
+
+def build_operation_plan(
+    payload: dict[str, Any],
+    *,
+    mn_object: dict[str, Any],
+    context_policy: dict[str, Any],
+    workflow: dict[str, Any],
+    dry_run: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    dry_run = dry_run if isinstance(dry_run, dict) else {}
+    settings = settings if isinstance(settings, dict) else {}
+    steps = _workflow_steps(workflow)
+    workflow_actions = _workflow_actions(workflow)
+    confirmations = _confirmation_points(workflow)
+    object_ref = {
+        "objectId": str(mn_object.get("objectId") or ""),
+        "kind": str(mn_object.get("kind") or ""),
+        "title": _clean(mn_object.get("title"), 220),
+        "sourceRef": mn_object.get("sourceRef") if isinstance(mn_object.get("sourceRef"), dict) else {},
+    }
+    operations: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        step_id = _clean(step.get("id") or f"step_{index}", 80) or f"step_{index}"
+        action = _clean(step.get("action"), 120)
+        writes = bool(step.get("writes")) or action in {"write_draft", "request_native_highlight_selection"}
+        confirmation_required = writes or step_id in confirmations or action in {"write_draft", "operation_plan_preview"}
+        operations.append(
+            {
+                "opId": f"workflow:{step_id}",
+                "op": "workflow_step",
+                "action": action,
+                "mutation": _step_mutation(action, writes),
+                "writes": writes,
+                "title": _clean(step.get("title") or action or step_id, 240),
+                "stepId": step_id,
+                "stepIndex": index,
+                "objectRef": object_ref,
+                "contextScope": str(context_policy.get("visibleScope") or "none"),
+                "requires": _step_requires(action, workflow_actions, writes),
+                "confirmationRequired": confirmation_required,
+                "confirmationPoint": step_id if confirmation_required else "",
+                "rollback": _step_rollback(action, writes),
+            }
+        )
+    write_count = len([operation for operation in operations if operation.get("writes")])
+    required_capabilities = sorted(
+        {requirement for operation in operations for requirement in operation.get("requires", [])}
+    )
+    permission = _clean(settings.get("permission") or "notes", 80)
+    return {
+        "schema": OPERATION_PLAN_SCHEMA,
+        "planType": "workflow",
+        "compiler": OPERATION_COMPILER_SCHEMA,
+        "status": _operation_plan_status(write_count, permission, dry_run),
+        "workflowId": _clean(workflow.get("id") or payload.get("workflowId"), 120),
+        "workflowTitle": _clean(workflow.get("title"), 220),
+        "objectRef": object_ref,
+        "contextPolicy": {
+            "requestedScope": str(context_policy.get("requestedScope") or "auto"),
+            "visibleScope": str(context_policy.get("visibleScope") or "none"),
+            "explicitFullDocument": bool(context_policy.get("explicitFullDocument")),
+            "explicitKnowledgeIndex": bool(context_policy.get("explicitKnowledgeIndex")),
+        },
+        "operationCount": len(operations),
+        "writeCount": write_count,
+        "confirmationPointCount": len([operation for operation in operations if operation.get("confirmationRequired")]),
+        "operations": operations,
+        "requiredCapabilities": required_capabilities,
+        "dryRun": {
+            "status": str(dry_run.get("status") or "not_available"),
+            "blockedCount": int(dry_run.get("blockedCount") or 0),
+            "unknownCount": int(dry_run.get("unknownCount") or 0),
+        },
+        "verify": {
+            "expectedCreatedItems": write_count,
+            "requiresRollbackLedger": bool(write_count),
+            "requiresResidualReport": bool(write_count),
+        },
+    }
+
+
+def build_verification_plan(operation_plan: dict[str, Any]) -> dict[str, Any]:
+    operations = operation_plan.get("operations") if isinstance(operation_plan.get("operations"), list) else []
+    write_operations = [operation for operation in operations if isinstance(operation, dict) and operation.get("writes")]
+    write_count = len(write_operations)
+    expected_events = []
+    if write_count:
+        expected_events.extend(["aiEditTransactionStarted", "aiEditTransactionAccepted"])
+    if any("nativeMindmap" in (operation.get("requires") or []) for operation in write_operations):
+        expected_events.append("mindmapDiffApplyFinished")
+    if any("nativeCards" in (operation.get("requires") or []) for operation in write_operations):
+        expected_events.append("createCardsFinished")
+    return {
+        "schema": VERIFICATION_PLAN_SCHEMA,
+        "status": "required" if write_count else "not_required",
+        "mustVerifyCreatedObjects": bool(write_count),
+        "mustVerifyRollback": bool(write_count),
+        "mustReportResidualObjects": bool(write_count),
+        "expectedWriteOperationCount": write_count,
+        "expectedEvents": sorted(set(expected_events)),
+        "residualChecks": [
+            "created_note_ids",
+            "mindmap_outline_nodes",
+            "card_entities",
+            "manual_relations",
+            "review_queue_entries",
+        ] if write_count else [],
+    }
+
+
+def build_operation_compiler_report(
+    *,
+    operation_plan: dict[str, Any],
+    verification_plan: dict[str, Any],
+    context_policy: dict[str, Any],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    write_count = int(operation_plan.get("writeCount") or 0)
+    permission = _clean(settings.get("permission") or "notes", 80)
+    checks = [
+        _risk_item("schema", "Schema", "pass", "agentOperation / operationPlan / verificationPlan schema 已生成。"),
+        _risk_item(
+            "context",
+            "Context",
+            str(context_policy.get("visibleScope") or "none"),
+            "可见范围：" + str(context_policy.get("visibleScope") or "none"),
+            "pass" if context_policy.get("visibleScope") not in {"", "none", None} else "warn",
+        ),
+        _risk_item(
+            "permission",
+            "Permission",
+            "blocked" if write_count and permission == "read_only" else "pass",
+            "只读权限会阻断写入。" if write_count and permission == "read_only" else "权限允许当前计划继续到 dry-run。",
+        ),
+        _risk_item(
+            "dry_run",
+            "Dry-run",
+            str((operation_plan.get("dryRun") or {}).get("status") or "not_available"),
+            "写入前仍需 dry-run。" if write_count else "只读计划不需要 dry-run。",
+        ),
+        _risk_item(
+            "verification",
+            "Verification",
+            str(verification_plan.get("status") or "unknown"),
+            "写入后必须验证对象、回滚和残留。" if write_count else "无写入验证要求。",
+        ),
+    ]
+    return {
+        "schema": OPERATION_COMPILER_SCHEMA,
+        "status": "blocked" if any(item.get("tone") == "block" for item in checks) else ("needs_dry_run" if write_count else "ready"),
+        "checkCount": len(checks),
+        "checks": checks,
+    }
+
+
 def _target_mindmap_required(payload: dict[str, Any], workflow: dict[str, Any]) -> bool:
     text = " ".join(
         [
@@ -434,6 +690,21 @@ def build_agent_operation(
     context_policy = _context_policy(payload, object_focus)
     risk = _workflow_risk(workflow, dry_run)
     permission = _clean(settings.get("permission") or "notes", 80)
+    operation_plan = build_operation_plan(
+        payload,
+        mn_object=mn_object,
+        context_policy=context_policy,
+        workflow=workflow,
+        dry_run=dry_run,
+        settings=settings,
+    )
+    verification_plan = build_verification_plan(operation_plan)
+    compiler_report = build_operation_compiler_report(
+        operation_plan=operation_plan,
+        verification_plan=verification_plan,
+        context_policy=context_policy,
+        settings=settings,
+    )
     risk_register = _risk_register(
         payload,
         mn_object=mn_object,
@@ -473,5 +744,8 @@ def build_agent_operation(
             "mustUseAcceptRejectForWrites": True,
             "mustKeepPdfClean": True,
         },
+        "operationPlan": operation_plan,
+        "verificationPlan": verification_plan,
+        "operationCompiler": compiler_report,
         "nextActions": next_actions(workflow, risk),
     }

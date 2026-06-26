@@ -1286,6 +1286,145 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.operation-compiler-panel {
+  display: grid;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+}
+
+.operation-compiler-panel.pass {
+  border-color: #bfdcd2;
+  background: #f4fbf8;
+}
+
+.operation-compiler-panel.warn {
+  border-color: #e8ce83;
+  background: var(--warn-bg);
+}
+
+.operation-compiler-panel.block {
+  border-color: #efb9b5;
+  background: #fff5f4;
+}
+
+.operation-compiler-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.operation-compiler-kicker {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.operation-compiler-summary {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.operation-plan-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.operation-plan-stat {
+  min-height: 46px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.operation-plan-stat.pass {
+  border-color: #b7d8cb;
+  background: #effaf5;
+}
+
+.operation-plan-stat.warn {
+  border-color: #e8ce83;
+  background: #fff9e7;
+}
+
+.operation-plan-stat.block {
+  border-color: #efb9b5;
+  background: #fff5f4;
+}
+
+.operation-plan-stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.operation-plan-stat strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.operation-compiler-checks {
+  display: grid;
+  gap: 5px;
+}
+
+.operation-compiler-check {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.operation-compiler-check.pass {
+  border-color: #b7d8cb;
+  background: #effaf5;
+}
+
+.operation-compiler-check.warn {
+  border-color: #e8ce83;
+  background: #fff9e7;
+}
+
+.operation-compiler-check.block {
+  border-color: #efb9b5;
+  background: #fff5f4;
+}
+
+.operation-compiler-check-badge {
+  color: var(--ink);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.operation-compiler-check-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .mindmap-diff-workbench {
   display: grid;
   gap: 7px;

@@ -23,6 +23,8 @@
 
 Card Factory 补充：`generate_card` 已从普通短卡拆分推进到 `codex.mn.cardFactory.v1` 第一阶段。每张卡带 `cardType`、`source`、`learningGoal`、`reviewPrompt` 和 `codex.mn.cardFactoryCard.v1`，草稿摘要保留 `card_factory` / `card_quality`，AI 编辑确认面板显示“卡片工厂”、卡型、缺来源、长卡和重复标题，并可调用 `review_queue_add` 加入对象级复习队列。知识区通过 `review_queue_list` 显示 `codex.mn.reviewQueue.v1` 摘要和最近复习卡。跨对象去重和替换/合并仍属于后续目标。
 
+Operation Compiler 补充：`agent_plan` 已从普通下一步建议推进到结构化操作编译第一阶段。后端现在返回 `codex.mn.operationPlan.v1`、`codex.mn.verificationPlan.v1` 和 `codex.mn.operationCompiler.v1`，把当前意图拆成计划步骤、写入步骤、required capabilities、confirmation points、rollback strategy、预期 native events 和 verification obligations。前端操作区新增 `operationCompilerPanel/operationCompilerSummary/operationPlanStats/operationCompilerChecks`，用状态色显示 schema、上下文、权限、dry-run、confirmation、rollback 和 verification 检查。doctor、Web 静态检查和单文档验收都把这些控件纳入必需项。当前仍属于第一阶段编译层，不能等同于完整逐节点 native dry-run、跨对象残留扫描和发布级回滚证明。
+
 | 需求 | 当前证据 | 状态 | 下一步 |
 | --- | --- | --- | --- |
 | MN4 中可打开插件面板 | 本机 MN4 扩展 manifest、`main.js PluginVersion` 和 Companion `/status.pluginVersion` 已替换为 `0.4.28`；若 `/status.mnRuntime` 还没有 `pluginVersion=0.4.28` 的 WebView/native 事件，需要重新打开 Codex 面板或重启 MN4 | 安装替换完成，运行态待刷新 | 打开 MN4 notebook 和 Codex 面板后复跑 release acceptance |

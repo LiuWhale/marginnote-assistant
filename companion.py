@@ -859,6 +859,8 @@ def agent_plan(payload: dict[str, Any]) -> dict[str, Any]:
     focus = operation.get("object") if isinstance(operation.get("object"), dict) else {}
     policy = operation.get("operationPolicy") if isinstance(operation.get("operationPolicy"), dict) else {}
     risk = policy.get("risk") if isinstance(policy.get("risk"), dict) else {}
+    operation_plan = operation.get("operationPlan") if isinstance(operation.get("operationPlan"), dict) else {}
+    verification_plan = operation.get("verificationPlan") if isinstance(operation.get("verificationPlan"), dict) else {}
     return {
         "ok": True,
         "message": "已生成 Agent 操作计划。",
@@ -866,10 +868,14 @@ def agent_plan(payload: dict[str, Any]) -> dict[str, Any]:
             "Agent 操作计划\n"
             f"对象：{focus.get('kind')} / {focus.get('title')}\n"
             f"工作流：{workflow.get('title')} / {workflow.get('status')}\n"
+            f"计划步骤：{operation_plan.get('operationCount', 0)} / 写入步骤：{operation_plan.get('writeCount', 0)}\n"
             f"写入风险：{risk.get('status')}\n"
             "后续写入必须经过 dry-run 和接受/拒绝确认。"
         ),
         "agentOperation": operation,
+        "operationPlan": operation_plan,
+        "verificationPlan": verification_plan,
+        "operationCompiler": operation.get("operationCompiler") if isinstance(operation.get("operationCompiler"), dict) else {},
         "workflow": workflow,
         "knowledge": knowledge,
         "dryRun": dry_run,

@@ -157,6 +157,10 @@
     'operationLedgerDetailCloseButton',
     'operationWorkspaceTitle',
     'operationWorkspaceMeta',
+    'operationCompilerPanel',
+    'operationCompilerSummary',
+    'operationPlanStats',
+    'operationCompilerChecks',
     'operationWorkspaceNextActions',
     'mindmapStudioPanel',
     'mindmapStudioSummary',
@@ -2632,6 +2636,82 @@
     }
   }
 
+  function operationCompilerTone(status) {
+    var value = String(status || '').toLowerCase();
+    if (value === 'blocked' || value === 'block' || value === 'failed' || value === 'error') return 'block';
+    if (value === 'needs_dry_run' || value === 'waiting_dry_run' || value === 'not_available' || value === 'required' || value === 'warn') return 'warn';
+    if (value === 'ready' || value === 'read_only' || value === 'pass' || value === 'not_required') return 'pass';
+    return 'idle';
+  }
+
+  function operationPlanStat(label, value, tone) {
+    var node = document.createElement('div');
+    node.className = 'operation-plan-stat ' + operationCompilerTone(tone);
+    var labelNode = document.createElement('span');
+    labelNode.textContent = label;
+    var valueNode = document.createElement('strong');
+    valueNode.textContent = value;
+    node.appendChild(labelNode);
+    node.appendChild(valueNode);
+    return node;
+  }
+
+  function operationCompilerCheckRow(check) {
+    check = check || {};
+    var row = document.createElement('div');
+    row.className = 'operation-compiler-check ' + operationCompilerTone(check.tone || check.status);
+    var badge = document.createElement('span');
+    badge.className = 'operation-compiler-check-badge';
+    badge.textContent = check.label || check.id || 'Check';
+    var text = document.createElement('span');
+    text.className = 'operation-compiler-check-text';
+    text.textContent = (check.status || 'unknown') + (check.detail ? (' / ' + check.detail) : '');
+    row.appendChild(badge);
+    row.appendChild(text);
+    return row;
+  }
+
+  function renderOperationCompilerPanel(operation) {
+    operation = operation || {};
+    var panel = byId('operationCompilerPanel');
+    if (!panel) return;
+    var plan = operation.operationPlan || {};
+    var verification = operation.verificationPlan || {};
+    var compiler = operation.operationCompiler || {};
+    var planStatus = compiler.status || plan.status || 'idle';
+    var writeCount = plan.writeCount || 0;
+    panel.className = 'operation-compiler-panel ' + operationCompilerTone(planStatus);
+    setText(
+      'operationCompilerSummary',
+      plan.schema
+        ? (
+            'Operation Compiler：' + (compiler.status || plan.status || 'unknown') +
+            ' / workflow ' + (plan.workflowId || '未匹配') +
+            ' / capabilities ' + ((plan.requiredCapabilities || []).length || 0)
+          )
+        : 'Operation Compiler：等待把当前对象和 workflow 编译成 operation plan。'
+    );
+    var stats = byId('operationPlanStats');
+    if (stats) {
+      replaceElementChildren(stats, [
+        operationPlanStat('Plan', plan.operationCount !== undefined ? String(plan.operationCount) : '未生成', plan.status || planStatus),
+        operationPlanStat('Write', String(writeCount), writeCount ? 'warn' : 'pass'),
+        operationPlanStat('Verify', verification.status || '等待', verification.status || 'idle')
+      ]);
+    }
+    var checks = byId('operationCompilerChecks');
+    if (checks) {
+      var checkItems = compiler.checks || [];
+      if (!checkItems.length) {
+        replaceElementChildren(checks, [operationCompilerCheckRow({label: '等待', status: 'idle', detail: 'Schema、上下文、权限、dry-run 和验证检查会显示在这里。'})]);
+      } else {
+        var rows = [];
+        for (var i = 0; i < checkItems.length && i < 6; i++) rows.push(operationCompilerCheckRow(checkItems[i]));
+        replaceElementChildren(checks, rows);
+      }
+    }
+  }
+
   function refreshKnowledgeWorkspace(manual) {
     postCompanion('knowledge_index_status', {}, function(result) {
       if (result && result.ok !== false) {
@@ -2709,6 +2789,7 @@
       ' / Dry-run：' + (risk.dryRunStatus || 'not_available') +
       ' / 确认点：' + ((risk.confirmationPoints || []).length || 0)
     );
+    renderOperationCompilerPanel(operation);
     renderObjectWorkspaceMnObject(mnObject, object);
     renderObjectRiskPanel(policy.riskRegister || {}, risk);
     renderObjectWorkspaceEvidence(objectKind, ctx);

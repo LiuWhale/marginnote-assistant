@@ -112,6 +112,31 @@ class AgentWorkbenchTests(unittest.TestCase):
         self.assertTrue(operation["knowledge"]["enabled"])
         self.assertEqual(operation["operationPolicy"]["risk"]["status"], "write_pending_confirmation")
         self.assertTrue(operation["operationPolicy"]["mustDryRunBeforeWrite"])
+        operation_plan = operation["operationPlan"]
+        self.assertEqual(operation_plan["schema"], "codex.mn.operationPlan.v1")
+        self.assertEqual(operation_plan["planType"], "workflow")
+        self.assertEqual(operation_plan["workflowId"], "selection_to_cards")
+        self.assertEqual(operation_plan["operationCount"], 3)
+        self.assertEqual(operation_plan["writeCount"], 1)
+        self.assertEqual(operation_plan["status"], "waiting_dry_run")
+        self.assertIn("nativeCards", operation_plan["requiredCapabilities"])
+        self.assertIn("rollbackLedger", operation_plan["requiredCapabilities"])
+        write_ops = [item for item in operation_plan["operations"] if item["writes"]]
+        self.assertEqual(len(write_ops), 1)
+        self.assertEqual(write_ops[0]["action"], "write_draft")
+        self.assertEqual(write_ops[0]["mutation"], "create")
+        self.assertTrue(write_ops[0]["confirmationRequired"])
+        self.assertEqual(write_ops[0]["rollback"]["strategy"], "ai_edit_transaction")
+        verification_plan = operation["verificationPlan"]
+        self.assertEqual(verification_plan["schema"], "codex.mn.verificationPlan.v1")
+        self.assertEqual(verification_plan["status"], "required")
+        self.assertTrue(verification_plan["mustVerifyCreatedObjects"])
+        self.assertTrue(verification_plan["mustVerifyRollback"])
+        self.assertTrue(verification_plan["mustReportResidualObjects"])
+        self.assertIn("createCardsFinished", verification_plan["expectedEvents"])
+        compiler = operation["operationCompiler"]
+        self.assertEqual(compiler["schema"], "codex.mn.operationCompiler.v1")
+        self.assertEqual(compiler["status"], "needs_dry_run")
         risk_register = operation["operationPolicy"]["riskRegister"]
         self.assertEqual(risk_register["schema"], "codex.mn.riskRegister.v1")
         self.assertEqual(risk_register["summary"]["status"], "write_pending_confirmation")
@@ -151,9 +176,40 @@ class AgentWorkbenchTests(unittest.TestCase):
 
         next_actions = {item["id"]: item for item in operation["nextActions"]}
         self.assertEqual(operation["object"]["kind"], "mindmap")
+        self.assertIn("readMindmapTree", operation["operationPlan"]["requiredCapabilities"])
+        self.assertIn("nativeMindmap", operation["operationPlan"]["requiredCapabilities"])
+        self.assertIn("rollbackLedger", operation["operationPlan"]["requiredCapabilities"])
+        self.assertIn("mindmapDiffApplyFinished", operation["verificationPlan"]["expectedEvents"])
         self.assertIn("preview_mindmap_diff", next_actions)
         self.assertEqual(next_actions["preview_mindmap_diff"]["action"], "mindmap_diff_preview")
         self.assertTrue(next_actions["preview_mindmap_diff"]["requiresDraft"])
+
+    def test_read_only_permission_blocks_write_operation_plan(self) -> None:
+        operation = agent_workbench.build_agent_operation(
+            {
+                "prompt": "把当前选区做成卡片",
+                "selectionText": "selected text",
+                "topicid": "T1",
+                "bookmd5": "B1",
+            },
+            workflow={
+                "id": "selection_to_cards",
+                "title": "选区制卡工作流",
+                "status": "ready",
+                "steps": [
+                    {"id": "cards", "action": "generate_card", "writes": False},
+                    {"id": "write", "action": "write_draft", "writes": True},
+                ],
+                "confirmationPoints": ["write"],
+            },
+            settings={"permission": "read_only"},
+        )
+
+        self.assertEqual(operation["operationPlan"]["status"], "blocked")
+        compiler_checks = {item["id"]: item for item in operation["operationCompiler"]["checks"]}
+        self.assertEqual(compiler_checks["permission"]["tone"], "block")
+        risk_items = {item["id"]: item for item in operation["operationPolicy"]["riskRegister"]["items"]}
+        self.assertEqual(risk_items["permission"]["status"], "read_only_blocked")
 
 
 if __name__ == "__main__":

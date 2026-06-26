@@ -283,6 +283,31 @@
           <span class="workbench-panel-badge">Plan</span>
         </header>
         <div id="operationWorkspaceMeta" class="workbench-panel-text">写入计划、目标脑图、事务状态和验证结果会集中显示在这里。</div>
+        <section id="operationCompilerPanel" class="operation-compiler-panel idle" aria-label="Operation Compiler">
+          <div class="operation-compiler-header">
+            <div>
+              <div class="operation-compiler-kicker">Operation Compiler</div>
+              <div id="operationCompilerSummary" class="operation-compiler-summary">等待把当前对象和 workflow 编译成 operation plan。</div>
+            </div>
+          </div>
+          <div id="operationPlanStats" class="operation-plan-stats">
+            <div class="operation-plan-stat idle">
+              <span>Plan</span>
+              <strong>未生成</strong>
+            </div>
+            <div class="operation-plan-stat idle">
+              <span>Write</span>
+              <strong>0</strong>
+            </div>
+            <div class="operation-plan-stat idle">
+              <span>Verify</span>
+              <strong>等待</strong>
+            </div>
+          </div>
+          <div id="operationCompilerChecks" class="operation-compiler-checks">
+            <div class="operation-compiler-check empty">Schema、上下文、权限、dry-run 和验证检查会显示在这里。</div>
+          </div>
+        </section>
         <div id="operationWorkspaceNextActions" class="workbench-action-list" aria-label="下一步操作"></div>
         <section id="mindmapStudioPanel" class="mindmap-studio-panel idle" aria-label="Mindmap Studio">
           <div class="mindmap-studio-header">

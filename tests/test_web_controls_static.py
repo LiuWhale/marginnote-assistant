@@ -86,6 +86,10 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="operationLedgerDetailCloseButton"',
             'id="operationWorkspaceTitle"',
             'id="operationWorkspaceMeta"',
+            'id="operationCompilerPanel"',
+            'id="operationCompilerSummary"',
+            'id="operationPlanStats"',
+            'id="operationCompilerChecks"',
             'id="operationWorkspaceNextActions"',
             'id="mindmapStudioPanel"',
             'id="mindmapStudioSummary"',
@@ -584,14 +588,21 @@ class WebControlsStaticTests(unittest.TestCase):
         operation_html = main_html.split('id="operationWorkspacePanel"', 1)[1].split("</aside>", 1)[0]
         self.assertIn('id="agentWorkbenchBar"', operation_html)
         self.assertIn('id="operationWorkspaceMeta"', operation_html)
+        self.assertIn('id="operationCompilerPanel"', operation_html)
+        self.assertIn('id="operationPlanStats"', operation_html)
+        self.assertIn('id="operationCompilerChecks"', operation_html)
         for marker in [
             "state.agentOperation",
             "function renderAgentWorkbench",
+            "function renderOperationCompilerPanel",
             "function refreshAgentPlan",
             "function scheduleAgentPlanRefresh",
             "postCompanionAgentPlan",
             "companionPayload('agent_plan'",
             "operation.nextActions",
+            "operation.operationPlan",
+            "operation.verificationPlan",
+            "operation.operationCompiler",
             "写入需确认",
             "Dry-run",
         ]:
@@ -604,6 +615,9 @@ class WebControlsStaticTests(unittest.TestCase):
             self.assertNotIn(removed, main_html)
         self.assertIn(".agent-workbench-bar", self.css)
         self.assertIn(".agent-workbench-light", self.css)
+        self.assertIn(".operation-compiler-panel", self.css)
+        self.assertIn(".operation-plan-stat", self.css)
+        self.assertIn(".operation-compiler-check", self.css)
 
     def test_object_graph_exposes_manual_relation_editor(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
