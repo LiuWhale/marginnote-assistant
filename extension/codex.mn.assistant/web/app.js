@@ -112,7 +112,11 @@
     'notebookWorkspaceReview',
     'notebookWorkspaceWorkflow',
     'notebookWorkspaceLedger',
+    'notebookWorkspaceSources',
     'notebookWorkspaceActions',
+    'notebookWorkspaceSourceRegistry',
+    'notebookWorkspaceSourceSummary',
+    'notebookWorkspaceSourceList',
     'notebookWorkspaceStudyProgram',
     'notebookWorkspaceStudyCoverage',
     'notebookWorkspaceStudyGaps',
@@ -2180,6 +2184,56 @@
     return text;
   }
 
+  function sourceRegistryKindLabel(kind) {
+    kind = String(kind || '');
+    if (kind === 'mn_document') return 'MN 文档';
+    if (kind === 'pdf_cache') return 'PDF 缓存';
+    if (kind === 'explicit_pdf') return 'PDF 路径';
+    if (kind === 'upload') return '上传';
+    if (kind === 'file_search_root') return '搜索根';
+    return kind || '来源';
+  }
+
+  function renderNotebookSourceRegistry(registry) {
+    registry = registry || {};
+    var panel = byId('notebookWorkspaceSourceRegistry');
+    var summaryNode = byId('notebookWorkspaceSourceSummary');
+    var listNode = byId('notebookWorkspaceSourceList');
+    if (!panel || !summaryNode || !listNode) return;
+    var summary = registry.summary || {};
+    var status = String(registry.status || 'idle');
+    panel.className = 'notebook-source-registry ' + status;
+    summaryNode.textContent =
+      '来源：可读 ' + (summary.readable || 0) +
+      ' / PDF缓存 ' + (summary.cachedPdf || 0) +
+      ' / 上传 ' + (summary.readableUploads || 0) + '/' + (summary.uploads || 0) +
+      ' / 搜索根 ' + (summary.searchRoots || 0) +
+      (summary.pendingNativeCache ? ' / 等待 MN 缓存' : '');
+    var sources = registry.sources || [];
+    if (!sources.length) {
+      replaceElementChildren(listNode, [textNode('div', 'notebook-source-item empty', '当前材料还没有可登记来源。')]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < Math.min(sources.length, 8); i++) {
+      (function(source) {
+        source = source || {};
+        var item = document.createElement('div');
+        item.className = 'notebook-source-item ' + String(source.status || 'idle');
+        item.setAttribute('data-source-registry-kind', source.kind || 'source');
+        item.appendChild(textNode('div', 'notebook-source-kind', sourceRegistryKindLabel(source.kind)));
+        item.appendChild(textNode('div', 'notebook-source-title', source.title || source.path || '未命名来源'));
+        var detail = [];
+        detail.push(source.readable ? '可读' : '未验证可读');
+        if (source.path) detail.push(clip(source.path, 72));
+        if (source.detail) detail.push(clip(source.detail, 60));
+        item.appendChild(textNode('div', 'notebook-source-detail', detail.join(' / ')));
+        nodes.push(item);
+      })(sources[i]);
+    }
+    replaceElementChildren(listNode, nodes);
+  }
+
   function renderNotebookStudyProgram(program) {
     program = program || {};
     var panel = byId('notebookWorkspaceStudyProgram');
@@ -2522,6 +2576,8 @@
     var review = data.reviewQueue || {};
     var workflows = data.workflows || {};
     var ledger = data.ledger || {};
+    var sourceRegistry = data.sourceRegistry || {};
+    var sourceSummary = sourceRegistry.summary || {};
     var readiness = data.readiness || {};
     var title = data.documentTitle || data.bookmd5 || data.topicid || '当前 notebook 工作台';
     setText('notebookWorkspaceTitle', clip(title, 84));
@@ -2537,6 +2593,8 @@
     setText('notebookWorkspaceReview', notebookWorkspaceCardText('复习', review.total || 0, '到期 ' + (review.due || 0) + ' / 新卡 ' + (review.new || 0)));
     setText('notebookWorkspaceWorkflow', notebookWorkspaceCardText('工作流', workflows.runCount || 0, workflows.latestStatus || 'none'));
     setText('notebookWorkspaceLedger', notebookWorkspaceCardText('账本', ledger.total || 0, '证据项'));
+    setText('notebookWorkspaceSources', notebookWorkspaceCardText('来源', sourceSummary.readable || 0, 'PDF ' + (sourceSummary.cachedPdf || 0) + ' / 上传 ' + (sourceSummary.readableUploads || 0) + '/' + (sourceSummary.uploads || 0)));
+    renderNotebookSourceRegistry(sourceRegistry);
     renderNotebookStudyProgram(data.studyProgram || {});
     renderNotebookWorkspaceRunbook(data.runbook || {});
     var target = byId('notebookWorkspaceActions');

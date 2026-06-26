@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260627-study-program-v1">
+  <link rel="stylesheet" href="app.css?v=20260627-source-registry-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
@@ -88,8 +88,20 @@
         <div id="notebookWorkspaceReview" class="notebook-workspace-card">复习：等待卡片</div>
         <div id="notebookWorkspaceWorkflow" class="notebook-workspace-card">工作流：等待运行</div>
         <div id="notebookWorkspaceLedger" class="notebook-workspace-card">账本：等待证据</div>
+        <div id="notebookWorkspaceSources" class="notebook-workspace-card">来源：等待材料</div>
       </div>
       <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
+      <section id="notebookWorkspaceSourceRegistry" class="notebook-source-registry idle" aria-label="Source Registry">
+        <div class="notebook-source-header">
+          <div>
+            <div class="notebook-source-kicker">Source Registry</div>
+            <div id="notebookWorkspaceSourceSummary" class="notebook-source-summary">等待当前材料来源。</div>
+          </div>
+        </div>
+        <div id="notebookWorkspaceSourceList" class="notebook-source-list">
+          <div class="notebook-source-item empty">当前 MN 文档、PDF 缓存、上传文件和文件搜索根会显示在这里。</div>
+        </div>
+      </section>
       <section id="notebookWorkspaceStudyProgram" class="notebook-study-program idle" aria-label="Study Program">
         <div class="notebook-study-header">
           <div>
@@ -695,6 +707,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260627-study-program-v1"></script>
+  <script src="app.js?v=20260627-source-registry-v1"></script>
 </body>
 </html>

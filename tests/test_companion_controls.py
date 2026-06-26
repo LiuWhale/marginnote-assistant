@@ -3861,6 +3861,102 @@ class CompanionControlsTests(unittest.TestCase):
                 ["paper_deep_reading", "mindmap_reorganize", "selection_to_cards"],
             )
 
+    def test_notebook_workspace_exposes_source_registry_for_cached_pdf_uploads_and_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            search_root = root / "papers"
+            search_root.mkdir()
+            (search_root / "placeholder.pdf").write_bytes(b"%PDF-1.4\n% placeholder\n")
+            companion.handle_action(
+                {
+                    "action": "settings_update",
+                    "settings": {"permission": "notes", "fileSearchRoots": [str(search_root)]},
+                }
+            )
+            upload = companion.handle_action(
+                {
+                    "action": "upload_file",
+                    "fileName": "notes.md",
+                    "fileContent": "# notes\nsource registry evidence",
+                }
+            )
+            self.assertTrue(upload["ok"], upload)
+            cached = companion.handle_action(
+                {
+                    "action": "cache_pdf_from_marginnote",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "fileName": "paper.pdf",
+                    "pdfPath": str(search_root / "placeholder.pdf"),
+                    "pdfBase64": base64.b64encode(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n").decode("ascii"),
+                }
+            )
+            self.assertTrue(cached["ok"], cached)
+
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Source Registry Paper",
+                }
+            )
+
+            registry = workspace["notebookWorkspace"]["sourceRegistry"]
+            self.assertEqual(registry["schema"], "codex.mn.sourceRegistry.v1")
+            self.assertEqual(registry["scope"]["topicid"], "T1")
+            self.assertEqual(registry["scope"]["bookmd5"], "B1")
+            self.assertEqual(registry["summary"]["cachedPdf"], 1)
+            self.assertEqual(registry["summary"]["uploads"], 1)
+            self.assertEqual(registry["summary"]["readableUploads"], 1)
+            self.assertEqual(registry["summary"]["searchRoots"], 1)
+            self.assertGreaterEqual(registry["summary"]["readable"], 3)
+            source_kinds = {item["kind"] for item in registry["sources"]}
+            self.assertIn("mn_document", source_kinds)
+            self.assertIn("pdf_cache", source_kinds)
+            self.assertIn("upload", source_kinds)
+            self.assertIn("file_search_root", source_kinds)
+            pdf_sources = [item for item in registry["sources"] if item["kind"] == "pdf_cache"]
+            self.assertEqual(pdf_sources[0]["status"], "ready")
+            self.assertTrue(pdf_sources[0]["readable"])
+            self.assertTrue(pdf_sources[0]["path"].endswith(".pdf"))
+            program = workspace["notebookWorkspace"]["studyProgram"]
+            self.assertEqual(program["coverage"]["sourceRegistry"], 100)
+            self.assertNotIn("source_registry", [item["id"] for item in program["gaps"]])
+
+    def test_notebook_study_program_does_not_treat_missing_upload_as_readable_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            upload = companion.handle_action(
+                {
+                    "action": "upload_file",
+                    "fileName": "missing-notes.md",
+                    "fileContent": "# deleted after upload\n",
+                }
+            )
+            self.assertTrue(upload["ok"], upload)
+            Path(upload["file"]["path"]).unlink()
+
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Missing Upload Paper",
+                }
+            )
+
+            registry = workspace["notebookWorkspace"]["sourceRegistry"]
+            self.assertEqual(registry["summary"]["uploads"], 1)
+            self.assertEqual(registry["summary"]["readableUploads"], 0)
+            upload_sources = [item for item in registry["sources"] if item["kind"] == "upload"]
+            self.assertEqual(upload_sources[0]["status"], "missing")
+            self.assertFalse(upload_sources[0]["readable"])
+            program = workspace["notebookWorkspace"]["studyProgram"]
+            self.assertLess(program["coverage"]["sourceRegistry"], 100)
+            self.assertIn("source_registry", [item["id"] for item in program["gaps"]])
+
     def test_notebook_runbook_preflight_record_is_visible_in_workspace_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

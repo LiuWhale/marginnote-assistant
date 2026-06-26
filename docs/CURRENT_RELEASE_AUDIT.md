@@ -6,19 +6,65 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.37 公开预览版
-- MN4 插件 manifest：0.4.37
-- Companion：0.4.37
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.37`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.37-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.37-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.37-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.37-latest.mnaddon`
+- 当前发布候选：0.4.38 公开预览版
+- MN4 插件 manifest：0.4.38
+- Companion：0.4.38
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.38`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.38-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.38-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.38-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.38-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.37-latest.pkg`，已生成但未签名、未公证
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.38-latest.pkg`，已生成但未签名、未公证
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.38 发布候选：Notebook Source Registry
+
+本轮不是继续给聊天流加按钮，而是把 `Notebook Workspace` 往真正的资料工作台推进一步：后端 `notebook_workspace` 新增 `codex.mn.sourceRegistry.v1`，统一汇总当前 MN 文档、显式 PDF 路径、PDF 缓存、用户上传文件和文件搜索根，并给每个来源标出 `kind/status/readable/path/evidence/action`。Web 首屏新增 `Source Registry` 面板，用户打开 Agent Workspace 就能看到“插件到底看见了哪些资料、哪些可读、哪些只是待缓存或待授权”，不用靠模型回复里反复猜为什么找不到全文。
+
+主要变化包括：
+
+- 后端新增 `notebook_source_registry`，返回 `codex.mn.sourceRegistry.v1`、`codex.mn.sourceRegistrySource.v1` 和汇总 `summary`，覆盖 `mn_document`、`explicit_pdf`、`pdf_cache`、`upload`、`file_search_root` 五类来源。
+- `notebook_study_program` 会读取 Source Registry；当当前资料没有可读 PDF、上传或路径来源时，Study Program 会新增 `source_registry` 缺口，提醒先缓存或授权资料，而不是继续生成空泛学习计划。
+- WebView 新增 `notebookWorkspaceSources`、`notebookWorkspaceSourceRegistry`、`notebookWorkspaceSourceSummary`、`notebookWorkspaceSourceList`，把来源计数、可读数量、缓存、上传和搜索根直接显示在首屏。
+- `doctor.py`、Web 静态检查和单文档验收 required controls 已更新到 Source Registry + Study Program + Notebook Runbook 结构。
+
+本轮本地验证结果：
+
+```text
+python3 -m unittest discover -s tests
+506 tests passed
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 -m py_compile companion.py doctor.py release_acceptance.py release_smoke_test.py package_release.py build_pkg.py single_document_acceptance.py prepare_release_handoff.py refresh_mn_runtime.py diagnostic_log.py operation_runtime.py
+PASS
+
+git diff --check
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.38-latest-dist.zip --mnaddon release/CodexCompanion-0.4.38-latest.mnaddon
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.38-latest-dist.zip --mnaddon release/CodexCompanion-0.4.38-latest.mnaddon --install-dry-run
+PASS
+
+python3 build_pkg.py release/CodexCompanion-0.4.38-latest-dist.zip --json
+PASS, generated release/CodexCompanion-0.4.38-latest.pkg
+```
+
+本轮 artifact：
+
+- `CodexCompanion-0.4.38-latest-dist.zip` sha256 `309c13ba5d777c584b7749b6d64c543ee904d586120c7d7a9e8eb024897f0daa`
+- `CodexCompanion-0.4.38-latest.mnaddon` sha256 `d9de935e3f7585ac2d9e8c1bbb7f9d425cb0809fe3b5e3fa5845e7f9ff7cb84b`
+- `CodexCompanion-0.4.38-latest.pkg` sha256 `ab47fbe5421b7a5e695b1ac990bd04c2a821b4edddaa7eea889fed0e87265799`
+- `SHA256SUMS.txt`
+
+本机安装替换已完成，`doctor.py` 报告 MN4 extension manifest 和 Companion service 均为 `0.4.38`。当前 release acceptance 剩余阻塞为：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。前两项需要打开 MN4 notebook 并重新打开 Codex 面板后上报当前版本 WebView/native 能力事件；其余仍是最终 v1.0/正式发布门槛，不阻止 0.4.38 作为公开预览版发布。
 
 ### 2026-06-27 v0.4.37 发布候选：Zero-Message Study Program
 

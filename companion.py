@@ -90,7 +90,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.37"
+CURRENT_PLUGIN_VERSION = "0.4.38"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -2031,6 +2031,199 @@ def notebook_study_program_recommendation(
     }
 
 
+def source_registry_entry(
+    source_id: str,
+    kind: str,
+    title: str,
+    *,
+    status: str,
+    readable: bool = False,
+    path: str = "",
+    detail: str = "",
+    evidence: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": "codex.mn.sourceRegistrySource.v1",
+        "id": source_id,
+        "kind": kind,
+        "title": title,
+        "status": status,
+        "readable": bool(readable),
+        "path": path,
+        "detail": detail,
+        "evidence": [str(item) for item in (evidence or []) if item],
+        "metadata": metadata if isinstance(metadata, dict) else {},
+        "action": action if isinstance(action, dict) else {},
+    }
+
+
+def source_registry_file_status(path: Path) -> dict[str, Any]:
+    try:
+        if path.is_file():
+            return probe_file_read_access(path)
+        if path.is_dir():
+            return {
+                "path": str(path),
+                "exists": True,
+                "readable": os.access(path, os.R_OK),
+                "status": "OK" if os.access(path, os.R_OK) else "PERMISSION",
+                "message": "readable directory" if os.access(path, os.R_OK) else "directory is not readable",
+            }
+    except Exception as exc:
+        return {
+            "path": str(path),
+            "exists": False,
+            "readable": False,
+            "status": "ERROR",
+            "message": str(exc),
+        }
+    return {
+        "path": str(path),
+        "exists": False,
+        "readable": False,
+        "status": "MISSING",
+        "message": "path does not exist",
+    }
+
+
+def notebook_source_registry(
+    payload: dict[str, Any],
+    summary: dict[str, Any],
+    primary_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    topic_id = str(summary.get("topicid") or normalize_topic_id(payload))
+    book_md5 = str(summary.get("bookmd5") or normalize_book_md5(payload))
+    document_title = str(summary.get("documentTitle") or payload.get("documentTitle") or "")
+    sources: list[dict[str, Any]] = []
+    actions_by_id = {str(item.get("id") or ""): item for item in primary_actions if isinstance(item, dict)}
+
+    if topic_id or book_md5 or document_title:
+        sources.append(
+            source_registry_entry(
+                f"mn-document:{topic_id or 'topic'}:{book_md5 or 'book'}",
+                "mn_document",
+                document_title or book_md5 or topic_id or "当前 MN 文档",
+                status="ready",
+                readable=False,
+                detail="MarginNote 当前文档元信息；全文可读性由 PDF 缓存、显式路径或上传材料证明。",
+                evidence=[item for item in ["topicid" if topic_id else "", "bookmd5" if book_md5 else "", "documentTitle" if document_title else ""] if item],
+                metadata={"topicid": topic_id, "bookmd5": book_md5, "documentTitle": document_title},
+            )
+        )
+
+    explicit_paths: list[Path] = []
+    for key in ("pdfPath", "documentPath", "sourcePdfPath"):
+        raw = str(payload.get(key) or "").strip()
+        if raw:
+            explicit_paths.append(pdf_path_from_raw_value(raw))
+    for index, path in enumerate(unique_paths(explicit_paths)):
+        status = source_registry_file_status(path)
+        sources.append(
+            source_registry_entry(
+                f"explicit-pdf:{index + 1}",
+                "explicit_pdf",
+                path.name or "显式 PDF 路径",
+                status="ready" if status.get("readable") else str(status.get("status") or "missing").lower(),
+                readable=bool(status.get("readable")),
+                path=str(path),
+                detail=str(status.get("message") or ""),
+                evidence=["payload.pdfPath"],
+                metadata={"exists": bool(status.get("exists")), "status": str(status.get("status") or "")},
+            )
+        )
+
+    cache_access = pdf_cache_access_status(book_md5)
+    if str(cache_access.get("path") or ""):
+        cache_path = str(cache_access.get("path") or "")
+        sources.append(
+            source_registry_entry(
+                f"pdf-cache:{pdf_cache_key(book_md5) or 'document'}",
+                "pdf_cache",
+                Path(cache_path).name or "缓存 PDF",
+                status="ready" if cache_access.get("readable") else str(cache_access.get("status") or "missing").lower(),
+                readable=bool(cache_access.get("readable")),
+                path=cache_path,
+                detail=str(cache_access.get("message") or ""),
+                evidence=["pdf_cache_index"],
+                metadata={
+                    "bookmd5": book_md5,
+                    "sourcePdf": str(cache_access.get("sourcePdf") or ""),
+                    "sha256": str(cache_access.get("sha256") or ""),
+                    "size": int(cache_access.get("size") or 0),
+                    "cached_at": str(cache_access.get("cached_at") or ""),
+                },
+            )
+        )
+
+    for item in uploaded_files():
+        path = Path(str(item.get("path") or ""))
+        status = source_registry_file_status(path)
+        sources.append(
+            source_registry_entry(
+                f"upload:{item.get('id') or hashlib.sha256(str(path).encode('utf-8')).hexdigest()[:12]}",
+                "upload",
+                str(item.get("name") or path.name or "上传文件"),
+                status="ready" if status.get("readable") else str(status.get("status") or "missing").lower(),
+                readable=bool(status.get("readable")),
+                path=str(path),
+                detail=str(status.get("message") or ""),
+                evidence=["upload_index"],
+                metadata={
+                    "size": int(item.get("size") or 0),
+                    "uploaded_at": str(item.get("uploaded_at") or ""),
+                },
+            )
+        )
+
+    for index, root in enumerate(configured_extra_pdf_roots()):
+        status = source_registry_file_status(root)
+        sources.append(
+            source_registry_entry(
+                f"file-search-root:{hashlib.sha256(str(root).encode('utf-8')).hexdigest()[:12]}",
+                "file_search_root",
+                root.name or str(root),
+                status="ready" if status.get("readable") else str(status.get("status") or "missing").lower(),
+                readable=bool(status.get("readable")),
+                path=str(root),
+                detail=str(status.get("message") or ""),
+                evidence=["settings.fileSearchRoots"],
+                metadata={"order": index + 1, "exists": bool(status.get("exists"))},
+            )
+        )
+
+    pending_cache = pending_pdf_cache_command(topic_id, book_md5)
+    readable_count = sum(1 for item in sources if item.get("readable"))
+    cached_pdf_count = sum(1 for item in sources if item.get("kind") == "pdf_cache" and item.get("readable"))
+    upload_count = sum(1 for item in sources if item.get("kind") == "upload")
+    readable_upload_count = sum(1 for item in sources if item.get("kind") == "upload" and item.get("readable"))
+    search_root_count = sum(1 for item in sources if item.get("kind") == "file_search_root")
+    explicit_pdf_count = sum(1 for item in sources if item.get("kind") == "explicit_pdf" and item.get("readable"))
+    status = "ready" if cached_pdf_count or explicit_pdf_count or upload_count else ("waiting_native" if pending_cache else "missing")
+    return {
+        "schema": "codex.mn.sourceRegistry.v1",
+        "status": status,
+        "scope": {
+            "topicid": topic_id,
+            "bookmd5": book_md5,
+            "documentTitle": document_title,
+        },
+        "summary": {
+            "total": len(sources),
+            "readable": readable_count,
+            "cachedPdf": cached_pdf_count,
+            "uploads": upload_count,
+            "readableUploads": readable_upload_count,
+            "searchRoots": search_root_count,
+            "explicitPdf": explicit_pdf_count,
+            "pendingNativeCache": 1 if pending_cache else 0,
+        },
+        "sources": sources[:40],
+        "primaryAction": actions_by_id.get("cache_current_pdf") or {},
+    }
+
+
 def notebook_study_program(
     summary: dict[str, Any],
     primary_actions: list[dict[str, Any]],
@@ -2043,12 +2236,19 @@ def notebook_study_program(
     workflows = summary.get("workflows") if isinstance(summary.get("workflows"), dict) else {}
     ledger = summary.get("ledger") if isinstance(summary.get("ledger"), dict) else {}
     readiness = summary.get("readiness") if isinstance(summary.get("readiness"), dict) else {}
+    source_registry = summary.get("sourceRegistry") if isinstance(summary.get("sourceRegistry"), dict) else {}
+    source_summary = source_registry.get("summary") if isinstance(source_registry.get("summary"), dict) else {}
     has_context = bool(summary.get("topicid") or summary.get("bookmd5") or summary.get("documentTitle") or object_ref_has_identity(focus))
     native_scan_count = int(objects.get("nativeScan") or 0)
     mindmap_ready = str(mindmap.get("status") or "") == "available"
     review_total = int(review.get("total") or 0)
     workflow_count = int(workflows.get("runCount") or 0)
     ledger_total = int(ledger.get("total") or 0)
+    source_readable = (
+        int(source_summary.get("cachedPdf") or 0) > 0
+        or int(source_summary.get("explicitPdf") or 0) > 0
+        or int(source_summary.get("readableUploads") or 0) > 0
+    )
 
     gaps: list[dict[str, Any]] = []
     if not has_context:
@@ -2058,6 +2258,16 @@ def notebook_study_program(
                 "缺少上下文",
                 "blocked",
                 "还没有当前 notebook、文档或 MNObject，不能自动生成可靠学习计划。",
+            )
+        )
+    if not source_readable:
+        gaps.append(
+            notebook_study_program_gap(
+                "source_registry",
+                "缺少可读材料来源",
+                "action_required" if has_context else "blocked",
+                "需要缓存当前 PDF、选择本机文件或上传材料，Study Program 才能可靠读取全文和生成覆盖率。",
+                action=source_registry.get("primaryAction") if isinstance(source_registry.get("primaryAction"), dict) else {},
             )
         )
     if native_scan_count <= 0:
@@ -2113,6 +2323,7 @@ def notebook_study_program(
 
     axis_scores = {
         "context": 100 if has_context else 0,
+        "sourceRegistry": 100 if source_readable else (40 if int(source_summary.get("searchRoots") or 0) > 0 else 0),
         "objects": 100 if native_scan_count > 0 else (40 if int(objects.get("total") or 0) > 0 else 0),
         "mindmap": 100 if mindmap_ready else 0,
         "review": 100 if review_total > 0 else 0,
@@ -2373,6 +2584,7 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
         ledger_total=ledger_total,
     )
     summary["primaryActions"] = primary_actions
+    summary["sourceRegistry"] = notebook_source_registry(payload, summary, primary_actions)
     summary["studyProgram"] = notebook_study_program(summary, primary_actions)
     summary["runbook"] = notebook_workspace_runbook(summary, primary_actions)
     return {
@@ -4958,7 +5170,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.37-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.38-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )

@@ -143,7 +143,7 @@ def copy_public_assets(package_root: Path) -> None:
 
 
 def main() -> int:
-    version = sys.argv[1] if len(sys.argv) > 1 else "0.4.37"
+    version = sys.argv[1] if len(sys.argv) > 1 else "0.4.38"
     stamp = time.strftime("%Y%m%d-%H%M%S")
     package_name = f"CodexCompanion-{version}-{stamp}-dist.zip"
     latest_name = f"CodexCompanion-{version}-latest-dist.zip"

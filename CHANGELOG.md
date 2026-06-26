@@ -4,6 +4,19 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.38 - 2026-06-27
+
+### Added
+
+- Added the first `Source Registry` kernel to `notebook_workspace`. The workspace now returns `codex.mn.sourceRegistry.v1`, unifying the current MarginNote document, explicit PDF paths, cached PDFs, uploaded files, and configured file search roots into source objects with readability status and evidence.
+- Added a visible `Source Registry` panel to Notebook Workspace with `notebookWorkspaceSources`, `notebookWorkspaceSourceRegistry`, `notebookWorkspaceSourceSummary`, and `notebookWorkspaceSourceList`.
+- Connected Study Program coverage to Source Registry. If there is no readable PDF cache, explicit PDF path, or uploaded material, Study Program reports a `source_registry` gap instead of pretending the document is readable.
+- Separated total uploads from readable uploads, so a stale upload record no longer makes full-document workflows look ready.
+
+### Changed
+
+- Promoted material readability from a settings/path-management concern into the notebook-first workspace. This moves the product closer to v3 Source Registry behavior and keeps file/PDF/cache state visible before any chat prompt or workflow execution.
+
 ## 0.4.37 - 2026-06-27
 
 ### Added

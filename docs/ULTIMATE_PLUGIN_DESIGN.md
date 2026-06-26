@@ -33,6 +33,8 @@ v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
 
 0.4.37 继续把这个迁移从“预检步骤”推进到“zero-message 学习计划”：`notebook_workspace` 返回 `codex.mn.studyProgram.v1`，Web 首屏显示 `Study Program`，直接给出覆盖率、对象/脑图/复习卡/workflow/账本缺口和推荐 workflow。用户打开文档后，不输入 prompt 也能看到 `paper_deep_reading`、`mindmap_reorganize`、`selection_to_cards` 等下一步，并且点击推荐会进入现有 `workflow_start`、确认点和账本链路，而不是绕过工作台直接写 MN。这仍是 Study Program Engine 的第一阶段：它现在能提出计划和缺口，但还没有真正维护长期学习目标、复习间隔、跨文档概念覆盖和完整知识缺口计算。
 
+0.4.38 补上第一阶段 `Source Registry`：`notebook_workspace` 返回 `codex.mn.sourceRegistry.v1`，把当前 MN 文档、显式 PDF 路径、PDF 缓存、上传文件和文件搜索根统一成来源对象，并在首屏显示可读来源数量。Study Program 不再只根据上下文猜测全文是否可用；如果没有可读 PDF 缓存、显式 PDF 或上传材料，它会报告 `source_registry` 缺口。它仍不是完整 v3 Source Registry，因为还没有把 OneDrive/iCloud/MN URL API、网页、外部数据和跨 notebook 授权索引全部纳入长期对象库，但它把“为什么找不到 PDF/全文”从设置页和错误消息推进到了 notebook-first 工作台。
+
 ### 0.1 终局选择：B + C，而不是 A
 
 终局不走“MarginNote 自带 AI 的超强版”这条路。那条路只会得到一个更会聊天、更会生成脑图的面板，和当前 0.4.x 的差异不够大。
