@@ -36,6 +36,7 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
     "ai-edit-undo-rollback-v2",
+    "native-mn-object-existence-probe-v1",
 ]
 CURRENT_RC_VERSION = "0.4.28"
 PREFERRED_LAUNCH_LABEL = "com.codex.paper-companion"

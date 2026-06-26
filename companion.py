@@ -107,6 +107,7 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
     "ai-edit-undo-rollback-v2",
+    "native-mn-object-existence-probe-v1",
 ]
 ONEDRIVE_COMPANION_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 PDF_EXPORT_DIR = ONEDRIVE_COMPANION_DIR / "exports"
@@ -213,6 +214,7 @@ READ_ONLY_ACTIONS = {
     "logs_clear",
     "mn_object_registry",
     "request_mn_object_registry_scan",
+    "request_mn_object_existence_probe",
     "object_browser",
     "object_graph",
     "object_graph_relation_save",
@@ -309,6 +311,7 @@ NATIVE_QUEUE_ACTIONS = {
     "write_draft",
     "read_mindmap_tree",
     "scan_mn_objects",
+    "probe_mn_object_existence",
     "apply_mindmap_diff_operations",
 }
 
@@ -3045,6 +3048,58 @@ def request_mn_object_registry_scan(payload: dict[str, Any]) -> dict[str, Any]:
             "已把“扫描 MN 对象”命令加入当前 notebook 队列。\n\n"
             "MN4 插件轮询后会尽量枚举当前 notebook 中可见的卡片/脑图节点，并把结果写入 MNObject Registry。"
         ),
+        "queued": queued["queued"],
+        "queue": queue_status_payload(topic_id, book_md5),
+    }
+
+
+def request_mn_object_existence_probe(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "请求 MN 对象存在性 probe 失败：缺少 topicid。"}
+    transaction_id = transaction_manager.safe_transaction_id(
+        payload.get("transactionId") or payload.get("id") or ""
+    )
+    note_ids = transaction_manager.unique_strings(payload.get("noteIds"))
+    if not note_ids and transaction_id:
+        transaction = transaction_manager.load_transaction(transaction_id)
+        note_ids = transaction_manager.unique_strings(transaction.get("createdNoteIds"))
+        if not note_ids:
+            note_ids = transaction_manager.unique_strings(transaction.get("targetNoteIds"))
+    if not note_ids:
+        return {
+            "ok": False,
+            "message": "请求 MN 对象存在性 probe 失败：缺少 noteIds 或可读取的 transactionId。",
+            "queue": queue_status_payload(topic_id, book_md5),
+        }
+    probe_id = str(payload.get("probeId") or f"probe-{uuid.uuid4().hex[:12]}")
+    command = {
+        "nativeAction": "probe_mn_object_existence",
+        "message": "请 MN4 插件检查这些 noteId 是否仍存在。",
+        "source": str(payload.get("source") or "request_mn_object_existence_probe"),
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "transactionId": transaction_id,
+        "probeId": probe_id,
+        "noteIds": note_ids,
+    }
+    queued = enqueue_command({**payload, "command": command})
+    if not queued.get("ok"):
+        return queued
+    return {
+        "ok": True,
+        "message": f"已请求 MN4 插件检查 {len(note_ids)} 个对象是否仍存在。",
+        "reply": (
+            "已把“MN 对象存在性 probe”加入当前 notebook 队列。\n\n"
+            "MN4 插件轮询后会按 noteId 查询真实对象，并把结果写回事务验证。"
+        ),
+        "probe": {
+            "schema": "codex.mn.objectExistenceProbeRequest.v1",
+            "probeId": probe_id,
+            "transactionId": transaction_id,
+            "noteIds": note_ids,
+            "requestedAt": command["requested_at"],
+        },
         "queued": queued["queued"],
         "queue": queue_status_payload(topic_id, book_md5),
     }
@@ -11028,6 +11083,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return request_mindmap_tree(payload)
     if action == "request_mn_object_registry_scan":
         return request_mn_object_registry_scan(payload)
+    if action == "request_mn_object_existence_probe":
+        return request_mn_object_existence_probe(payload)
     if action == "request_web_panel_reload":
         return request_web_panel_reload(payload)
     if action == "request_native_capability_probe":

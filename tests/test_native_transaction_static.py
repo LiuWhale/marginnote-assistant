@@ -105,6 +105,24 @@ class NativeTransactionStaticTests(unittest.TestCase):
         self.assertIn("if (nativeAction === 'scan_mn_objects')", body)
         self.assertIn("this.scanMnObjects(command)", body)
 
+    def test_native_object_existence_probe_command_posts_probe_event(self) -> None:
+        for marker in [
+            "probe_mn_object_existence",
+            "probeMnObjectExistence",
+            "mnObjectExistenceProbeRequested",
+            "mnObjectExistenceProbeFinished",
+            "objectId: 'mnobj:note:' + noteId",
+            "exists: !!note",
+        ]:
+            self.assertIn(marker, self.main_js)
+
+    def test_native_object_existence_probe_command_is_routed_from_queue(self) -> None:
+        body = self.main_js.split("CodexAssistantAddon.prototype.handleNativeQueueCommand", 1)[1].split(
+            "CodexAssistantAddon.prototype.ackCommands", 1
+        )[0]
+        self.assertIn("if (nativeAction === 'probe_mn_object_existence')", body)
+        self.assertIn("this.probeMnObjectExistence(command)", body)
+
 
 if __name__ == "__main__":
     unittest.main()

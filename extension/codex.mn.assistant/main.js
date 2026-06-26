@@ -21,6 +21,7 @@ JSB.newAddon = function(mainPath) {
     'ai-edit-undo-rollback-v2',
     'native-mindmap-read-tree-request-v1',
     'native-mn-object-registry-scan-v1',
+    'native-mn-object-existence-probe-v1',
     'native-mindmap-diff-apply-create-v1',
     'native-mindmap-delete-suggestion-confirm-v1'
   ];
@@ -2532,6 +2533,55 @@ JSB.newAddon = function(mainPath) {
     });
   };
 
+  CodexAssistantAddon.prototype.probeMnObjectExistence = function(command) {
+    var ctx = this.resolveNotebookAndDocument();
+    var transactionId = safeString(valueOf(command, 'transactionId') || '');
+    var probeId = safeString(valueOf(command, 'probeId') || String(new Date().getTime()));
+    var rawNoteIds = toArray(valueOf(command, 'noteIds'));
+    var noteIds = [];
+    var seen = {};
+    for (var i = 0; i < rawNoteIds.length; i++) {
+      var noteId = safeString(rawNoteIds[i]);
+      if (!noteId || seen[noteId]) continue;
+      seen[noteId] = true;
+      noteIds.push(noteId);
+    }
+    this.postEvent('mnObjectExistenceProbeRequested', {
+      nativeAction: 'probe_mn_object_existence',
+      transactionId: transactionId,
+      probeId: probeId,
+      requestedCount: noteIds.length,
+      source: safeString(valueOf(command, 'source') || 'native-queue')
+    });
+    var results = [];
+    var existingCount = 0;
+    for (var j = 0; j < noteIds.length; j++) {
+      var currentNoteId = noteIds[j];
+      var note = ctx ? findNoteById(ctx.notebook, currentNoteId) : null;
+      if (!note) note = resolveAiEditNoteById(ctx, currentNoteId);
+      if (note) existingCount += 1;
+      results.push({
+        noteId: currentNoteId,
+        objectId: 'mnobj:note:' + currentNoteId,
+        exists: !!note,
+        kind: 'mindmap_node',
+        title: note ? safeString(valueOf(note, 'noteTitle') || valueOf(note, 'title') || currentNoteId) : '',
+        reason: note ? '' : (ctx ? 'not-found' : (this.lastResolveError || 'missing-context'))
+      });
+    }
+    this.postEvent('mnObjectExistenceProbeFinished', {
+      nativeAction: 'probe_mn_object_existence',
+      ok: !!ctx,
+      transactionId: transactionId,
+      probeId: probeId,
+      checkedCount: results.length,
+      existingCount: existingCount,
+      missingCount: results.length - existingCount,
+      results: results,
+      topicid: ctx ? ctx.topicId : ''
+    });
+  };
+
   CodexAssistantAddon.prototype.applyMindmapDiffOperations = function(command) {
     var ctx = this.resolveNotebookAndDocument();
     var plan = valueOf(command, 'mindmapDiffOperationPlan') || {};
@@ -2991,6 +3041,10 @@ JSB.newAddon = function(mainPath) {
     }
     if (nativeAction === 'scan_mn_objects') {
       this.scanMnObjects(command);
+      return true;
+    }
+    if (nativeAction === 'probe_mn_object_existence') {
+      this.probeMnObjectExistence(command);
       return true;
     }
     if (nativeAction === 'apply_mindmap_diff_operations') {

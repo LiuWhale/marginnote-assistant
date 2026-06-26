@@ -942,6 +942,7 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-existence-probe-v1",
                         ],
                     },
                 },
@@ -1009,6 +1010,7 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-existence-probe-v1",
                         ],
                     },
                 },
@@ -1074,6 +1076,7 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-existence-probe-v1",
                         ],
                     },
                 },
@@ -1099,7 +1102,7 @@ class CompanionControlsTests(unittest.TestCase):
             (extension / "web").mkdir(parents=True)
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-existence-probe-v1\n",
                 encoding="utf-8",
             )
             for relative in ("CodexWebPanelController.js", "web/app.js", "web/index.html", "web/app.css"):
@@ -1147,6 +1150,7 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-existence-probe-v1",
                 ],
             )
 
@@ -1198,6 +1202,7 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-existence-probe-v1",
                 ],
             )
             self.assertEqual(
@@ -1214,6 +1219,7 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-existence-probe-v1",
                 ],
             )
             self.assertIn("native-handler-features", runtime["runtimeHandlerStaleActions"])
@@ -4877,6 +4883,28 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(polled["command"]["nativeAction"], "scan_mn_objects")
             self.assertEqual(polled["command"]["limit"], 80)
 
+    def test_request_mn_object_existence_probe_enqueues_native_probe_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "source": "unittest",
+                "transactionId": "probe-tx",
+                "noteIds": ["N1", "N2", "N1", ""],
+            }
+
+            requested = companion.handle_action({**payload, "action": "request_mn_object_existence_probe"})
+
+            self.assertTrue(requested["ok"], requested)
+            self.assertEqual(requested["probe"]["schema"], "codex.mn.objectExistenceProbeRequest.v1")
+            self.assertEqual(requested["probe"]["noteIds"], ["N1", "N2"])
+            polled = companion.poll_commands("T1", "B1")
+            self.assertTrue(polled["hasCommand"], polled)
+            self.assertEqual(polled["command"]["nativeAction"], "probe_mn_object_existence")
+            self.assertEqual(polled["command"]["transactionId"], "probe-tx")
+            self.assertEqual(polled["command"]["noteIds"], ["N1", "N2"])
+
     def test_mn_object_registry_ingests_native_object_scan_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -6578,6 +6606,79 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(by_note["N3"]["actualState"], "remaining_reported")
             self.assertTrue(by_note["N3"]["residual"])
             self.assertIn("仍可能残留", tx_status["summary"])
+
+    def test_ai_edit_verification_uses_native_object_existence_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "probe-verify-tx",
+                        "createdNoteIds": ["N1", "N2", "N3"],
+                        "createdCount": 3,
+                        "has_mindmap": True,
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "aiEditTransactionRejected",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "probe-verify-tx",
+                        "ok": False,
+                        "deleted": 1,
+                        "failed": 2,
+                        "failures": [
+                            {"noteId": "N2", "reason": "rollback-failed"},
+                            {"noteId": "N3", "reason": "rollback-failed"},
+                        ],
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "mnObjectExistenceProbeFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "nativeAction": "probe_mn_object_existence",
+                        "transactionId": "probe-verify-tx",
+                        "probeId": "probe-001",
+                        "results": [
+                            {"noteId": "N1", "exists": False, "objectId": "mnobj:note:N1"},
+                            {"noteId": "N2", "exists": True, "objectId": "mnobj:note:N2", "title": "Still here"},
+                            {"noteId": "N3", "exists": False, "objectId": "mnobj:note:N3"},
+                        ],
+                    },
+                }
+            )
+
+            status = companion.status_payload()["aiEditTransactionStatus"]
+            verification = status["verification"]
+            self.assertEqual(verification["transactionId"], "probe-verify-tx")
+            self.assertEqual(verification["status"], "block")
+            self.assertEqual(verification["remainingNoteIds"], ["N2"])
+            self.assertEqual(verification["remainingCount"], 1)
+            self.assertEqual(verification["objectExistenceProbe"]["schema"], "codex.mn.objectExistenceProbe.v1")
+            self.assertEqual(verification["objectExistenceProbe"]["probeId"], "probe-001")
+            proof = verification["residualProof"]
+            self.assertIn("objectExistenceProbe", proof["sourceFields"])
+            by_note = {item["noteId"]: item for item in proof["objects"]}
+            self.assertEqual(by_note["N1"]["actualState"], "missing_confirmed")
+            self.assertEqual(by_note["N1"]["verificationLevel"], "native_object_probe")
+            self.assertFalse(by_note["N1"]["residual"])
+            self.assertEqual(by_note["N2"]["actualState"], "exists_confirmed")
+            self.assertEqual(by_note["N2"]["verificationLevel"], "native_object_probe")
+            self.assertTrue(by_note["N2"]["residual"])
+            self.assertEqual(by_note["N2"]["evidence"]["probeId"], "probe-001")
+            self.assertEqual(by_note["N3"]["actualState"], "missing_confirmed")
+            self.assertFalse(by_note["N3"]["residual"])
 
 
 if __name__ == "__main__":

@@ -20,9 +20,11 @@ _TRACKED_EVENTS = {
     "mindmapDeleteSuggestionPrepared",
     "mindmapDeleteSuggestionConfirmed",
     "mindmapDeleteSuggestionDismissed",
+    "mnObjectExistenceProbeFinished",
 }
 VERIFICATION_SCHEMA = "codex.mn.aiEditVerification.v1"
 RESIDUAL_PROOF_SCHEMA = "codex.mn.residualProof.v1"
+OBJECT_EXISTENCE_PROBE_SCHEMA = "codex.mn.objectExistenceProbe.v1"
 TRANSACTION_STATUS_SCHEMA = "codex.mn.aiEditTransactionStatus.v1"
 
 
@@ -128,6 +130,44 @@ def clean_undo_rollback(value: Any) -> dict[str, Any]:
         "deleted": int(value.get("deleted") or 0),
         "remaining": int(value.get("remaining") or 0),
         "reason": str(value.get("reason") or ""),
+    }
+
+
+def clean_object_existence_probe(value: Any, *, transaction_id: str = "") -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    results_in = value.get("results") if isinstance(value.get("results"), list) else []
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in results_in:
+        if not isinstance(item, dict):
+            continue
+        note_id = str(item.get("noteId") or item.get("id") or "").strip()
+        if not note_id or note_id in seen:
+            continue
+        seen.add(note_id)
+        exists = bool(item.get("exists"))
+        results.append(
+            {
+                "noteId": note_id,
+                "objectId": str(item.get("objectId") or f"mnobj:note:{note_id}"),
+                "exists": exists,
+                "title": str(item.get("title") or "")[:240],
+                "kind": str(item.get("kind") or "mindmap_node"),
+                "reason": str(item.get("reason") or ""),
+            }
+        )
+    existing_count = len([item for item in results if item.get("exists")])
+    return {
+        "schema": OBJECT_EXISTENCE_PROBE_SCHEMA,
+        "probeId": str(value.get("probeId") or "")[:160],
+        "transactionId": str(value.get("transactionId") or transaction_id),
+        "checkedCount": len(results),
+        "existingCount": existing_count,
+        "missingCount": len(results) - existing_count,
+        "noteIds": [item["noteId"] for item in results],
+        "results": results,
+        "updatedAt": str(value.get("updatedAt") or now_timestamp()),
     }
 
 
@@ -354,6 +394,13 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
         transaction["status"] = "delete_dismissed"
         transaction["targetNoteIds"] = unique_strings(extra.get("targetNoteIds")) or unique_strings(transaction.get("targetNoteIds"))
         transaction["message"] = str(extra.get("message") or "已忽略本次脑图删除建议。")
+    elif event_name == "mnObjectExistenceProbeFinished":
+        probe = clean_object_existence_probe(extra, transaction_id=transaction_id)
+        transaction["objectExistenceProbe"] = probe
+        transaction["message"] = str(
+            extra.get("message")
+            or f"MN 对象存在性 probe：检查 {probe.get('checkedCount') or 0} 个，仍存在 {probe.get('existingCount') or 0} 个。"
+        )
 
     transaction["requiresConfirmation"] = transaction_requires_confirmation(transaction)
     transaction["availableActions"] = transaction_available_actions(transaction)
@@ -432,6 +479,7 @@ def residual_proof_source_fields(
     failed_count: int,
     failures: list[dict[str, Any]],
     status: str,
+    object_existence_probe: dict[str, Any] | None = None,
 ) -> list[str]:
     fields: list[str] = []
     if status.startswith("delete") and target_note_ids:
@@ -444,6 +492,8 @@ def residual_proof_source_fields(
         fields.append("failedCount")
     if failures:
         fields.append("failures")
+    if isinstance(object_existence_probe, dict) and object_existence_probe.get("results"):
+        fields.append("objectExistenceProbe")
     return fields
 
 
@@ -473,7 +523,16 @@ def residual_actual_state_for_note(
     rollback_complete: bool,
     remaining_note_ids: list[str],
     failures_by_note: dict[str, dict[str, Any]],
+    probe_by_note: dict[str, dict[str, Any]],
 ) -> tuple[str, bool, str]:
+    if note_id in probe_by_note:
+        probe = probe_by_note[note_id]
+        exists = bool(probe.get("exists"))
+        if exists:
+            if status in {"accepted", "ready", "started", "pending_confirmation", "apply_failed", "delete_pending_confirmation"}:
+                return "exists_confirmed", False, "native_object_probe"
+            return "exists_confirmed", True, "native_object_probe"
+        return "missing_confirmed", False, "native_object_probe"
     if delete_mode and status == "delete_pending_confirmation":
         return "existing_pending_confirmation", False, "transaction_state"
     if delete_mode and status == "delete_dismissed":
@@ -506,6 +565,7 @@ def residual_proof(
     rollback_complete: bool,
     target_note_ids: list[str],
     summary: str,
+    object_existence_probe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status = str(transaction.get("status") or "")
     transaction_id = str(transaction.get("transactionId") or "")
@@ -516,6 +576,13 @@ def residual_proof(
     failures_by_note = {
         str(item.get("noteId") or ""): item
         for item in failures
+        if isinstance(item, dict) and str(item.get("noteId") or "")
+    }
+    probe = object_existence_probe if isinstance(object_existence_probe, dict) else {}
+    probe_results = probe.get("results") if isinstance(probe.get("results"), list) else []
+    probe_by_note = {
+        str(item.get("noteId") or ""): item
+        for item in probe_results
         if isinstance(item, dict) and str(item.get("noteId") or "")
     }
     objects: list[dict[str, Any]] = []
@@ -529,8 +596,10 @@ def residual_proof(
             rollback_complete=rollback_complete,
             remaining_note_ids=remaining_note_ids,
             failures_by_note=failures_by_note,
+            probe_by_note=probe_by_note,
         )
         failure = failures_by_note.get(note_id, {})
+        probe_item = probe_by_note.get(note_id, {})
         objects.append(
             {
                 "objectId": f"mnobj:note:{note_id}",
@@ -541,12 +610,15 @@ def residual_proof(
                 "residual": bool(residual),
                 "verificationLevel": verification_level,
                 "evidence": {
-                    "source": "ai_edit_transaction_native_event",
+                    "source": "mn_object_existence_probe" if probe_item else "ai_edit_transaction_native_event",
                     "transactionStatus": status,
                     "deletedCount": deleted_count,
                     "failedCount": failed_count,
                     "failureReason": str(failure.get("reason") or ""),
                     "failureMethod": str(failure.get("method") or ""),
+                    "probeId": str(probe.get("probeId") or ""),
+                    "probeExists": bool(probe_item.get("exists")) if probe_item else None,
+                    "probeTitle": str(probe_item.get("title") or ""),
                 },
             }
         )
@@ -558,6 +630,7 @@ def residual_proof(
         failed_count=failed_count,
         failures=failures,
         status=status,
+        object_existence_probe=probe,
     )
     if residual_count:
         proof_summary = f"逐对象残留证明：{residual_count}/{len(objects)} 个对象仍可能残留。"
@@ -598,6 +671,26 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     mindmap_verification = mindmap_diff_apply.get("verification") if isinstance(mindmap_diff_apply.get("verification"), dict) else {}
     delete_suggestion = transaction.get("deleteSuggestion") if isinstance(transaction.get("deleteSuggestion"), dict) else {}
     target_note_ids = unique_strings(transaction.get("targetNoteIds")) or unique_strings(delete_suggestion.get("targetNoteIds"))
+    object_existence_probe = clean_object_existence_probe(
+        transaction.get("objectExistenceProbe"),
+        transaction_id=transaction_id,
+    )
+    probe_results = (
+        object_existence_probe.get("results")
+        if isinstance(object_existence_probe.get("results"), list)
+        else []
+    )
+    probe_applies_to_deletion = bool(probe_results) and status in {
+        "rolled_back",
+        "rollback_failed",
+        "delete_confirmed",
+        "delete_failed",
+    }
+    probe_remaining_note_ids = [
+        str(item.get("noteId") or "")
+        for item in probe_results
+        if isinstance(item, dict) and item.get("exists") and str(item.get("noteId") or "")
+    ]
 
     remaining_note_ids: list[str] = []
     rollback_complete = False
@@ -633,7 +726,31 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     if report_status == "block" and not remaining_note_ids:
         remaining_note_ids = rollback_remaining_note_ids(created_note_ids, deleted_count, failed_count, failures)
 
-    if status == "delete_pending_confirmation":
+    if probe_applies_to_deletion:
+        remaining_note_ids = probe_remaining_note_ids
+        if remaining_note_ids:
+            report_status = "block"
+            rollback_complete = False
+        else:
+            report_status = "pass"
+            rollback_complete = status in {"rolled_back", "rollback_failed"}
+
+    if probe_applies_to_deletion:
+        remaining_count = len(remaining_note_ids)
+        checked_count = safe_int(object_existence_probe.get("checkedCount"), len(probe_results))
+        if remaining_note_ids:
+            id_text = "、".join(remaining_note_ids[:8])
+            summary = f"MN 对象存在性验证 BLOCK：probe 已检查 {checked_count} 个对象，仍存在 {remaining_count} 个：{id_text}。"
+            next_actions.append(
+                {
+                    "id": "manual_cleanup",
+                    "label": "手动清理残留卡片",
+                    "reason": "MN 原生对象 probe 确认仍有新增对象存在。",
+                }
+            )
+        else:
+            summary = f"MN 对象存在性验证 PASS：probe 已确认 {checked_count} 个对象均不存在，无残留。"
+    elif status == "delete_pending_confirmation":
         remaining_count = len(target_note_ids)
         summary = f"删除建议 PENDING：{remaining_count} 个脑图节点等待二次确认。点删除才会真正删除；点忽略不会改动原脑图。"
     elif status == "delete_confirmed":
@@ -692,6 +809,7 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         rollback_complete=rollback_complete,
         target_note_ids=target_note_ids,
         summary=summary,
+        object_existence_probe=object_existence_probe,
     )
 
     return {
@@ -713,6 +831,7 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         "objectRef": object_ref,
         "mindmapDiffApply": mindmap_diff_apply,
         "deleteSuggestion": delete_suggestion,
+        "objectExistenceProbe": object_existence_probe,
         "requiresConfirmation": requires_confirmation,
         "availableActions": transaction_available_actions(transaction),
         "residualProof": proof,

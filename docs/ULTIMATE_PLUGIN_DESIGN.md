@@ -4,48 +4,64 @@
 目标版本：v3.0  
 状态：终局产品蓝图。当前 0.4.x 是 Chat Mode + Agent Workspace 雏形，不是终局。
 
-## 0. 先把话说清楚
+## 0. 终局选择：B + C，而不是 A
 
-Codex Companion 的终极形态**不是当前聊天插件的增强版**，也不是把当前 0.4.x 已经出现的对象面板、工作流面板、Mindmap Studio、Operation Ledger 换成更大的名字。当前版本有这些入口，只说明工程方向开始正确；它还没有形成终局产品。换句话说，当前 0.4.x 不是终局。
+终局不走“MarginNote 自带 AI 的超强版”这条路。那条路只会得到一个更会聊天、更会生成脑图的面板，和当前 0.4.x 的差异不够大。
 
-终极形态必须是 **MarginNote Knowledge Agent OS**：一个把 MarginNote 4 里的文档、选区、摘录、高亮、卡片、脑图节点、脑图子树、notebook、外部文件、外部自动化请求和长期知识关系都变成可寻址、可操作、可验证、可回滚对象的知识操作系统。
+终局路线必须是 **B + C**：
 
-所以判断终局时不能问“有没有聊天、有没有按钮、有没有脑图”。必须问：
+- **B：知识编辑工作台**。主界面像 Finder、IDE 和知识数据库的混合体，中心是真实 MarginNote 对象、对象关系、脑图 Diff、卡片覆盖率、操作账本和验证结果。
+- **C：自动学习代理**。代理不是漂在聊天框里的“目标”，而是在工作台里运行的 workflow。它有输入对象、计划、权限、确认点、执行日志、失败恢复和最终验收。
 
-- 用户能不能像 Finder 一样浏览整个 notebook 的知识对象？
-- 用户能不能读取并原地编辑真实现有脑图，而不是重新生成一棵相似的新树？
-- AI 的写入是否都经过 operation plan、Diff、dry-run、确认、native apply、verify 和 rollback？
-- 拒绝或回滚后，系统能不能证明 outline、实体卡片、链接和关系是否仍有残留？
-- 卡片是否进入学习目标、卡型、来源、复习队列和覆盖率闭环？
-- 跨文档回答是否列出授权范围、对象引用、noteId/page/quote 或 MN link？
-- 外部 URL/API 自动化是否也进入权限、workflow、ledger 和 callback 证据？
-- 技能包是否是带 schema、UI、权限、验收和迁移的发布对象，而不是自定义 prompt？
+Chat Mode 仍然保留，但它不是终局主产品。Chat Mode 只负责快速阅读问答和把用户意图转成可执行操作。真正的终局入口是 **Notebook Workspace**：打开一个 notebook 或文档后，用户首先看到的是这份材料的知识资产、缺口、待确认编辑、复习状态和可执行工作流，而不是一个空聊天框。
 
-终局的产品原则是：**对象优先、操作优先、证据优先**。不得把现有控件堆叠当作终局。聊天是入口，不是终局；Agent Workspace 才是生产系统。从回答按钮升级到对象操作，是当前 0.4.x 到 v3.0 的核心断层。
+这仍然是一个双模式产品：`Chat Mode` 是低摩擦对话入口，`Agent Workspace Mode` 是生产系统。聊天是入口，不是终局；Agent Workspace 才是生产系统。核心断层是从回答按钮升级到对象操作，从“能生成内容”升级到“能管理、验证、回滚真实 MarginNote 知识对象”。
 
-终局验收不按按钮数量算。默认入口必须能在 Chat Mode 和 Agent Workspace Mode 之间切换；如果不能切换，产品就会退回 AI Copilot 面板：看似能问、能生成、能点按钮，但真实知识结构仍然没有被对象化、事务化和证据化。
+终局的产品原则仍然是：对象优先、操作优先、证据优先。不得把现有控件堆叠当作终局，也不得用当前 0.4.x 的对象区、工作流区和账本区这些雏形来替代真正的 Notebook Workspace。当前 0.4.x 不是终局。
 
-只要首屏仍然像聊天框加按钮，就不算终极版。更准确地说：Chat Mode 可以像聊天框，但 Agent Workspace Mode 不能仍然只是聊天页下方的高级按钮区。如果用户的高阶工作仍只能靠输入一句话再点回答下方按钮，就不是终局。
+一句话定义：
 
-## 1. 代际定义：现在和终局到底差在哪里
+> Codex Companion v3.0 是 MarginNote 里的 Notebook Knowledge OS：把文档、摘录、高亮、卡片、脑图、概念、复习、外部文件和自动化请求统一成可浏览、可编辑、可验证、可回滚的知识对象系统。
 
-| 代际 | 名称 | 用户看到的产品 | 真实能力 | 不能宣称什么 |
+## 1. 三个不同产品，不允许混淆
+
+| 产品代际 | 第一眼像什么 | 用户主要在操作什么 | 典型动作 | 不能冒充什么 |
 | --- | --- | --- | --- | --- |
-| v0.4.x | AI Chat Plugin | 在 MN4 里问 AI、生成脑图草稿、生成卡片、看状态和日志 | Chat Mode + Agent Workspace 雏形，已有对象、workflow、ledger、Mindmap Studio 的第一阶段 | 不能说是知识操作系统；不能说已经能稳定管理 notebook 知识结构 |
-| v1.x | Native Study Copilot | 对标 MN4 自带 AI，但更可控 | 稳定读取选区、节点、全文缓存、目标脑图，队列、停止、历史、新对话、缓存状态灯成熟 | 不能说能原地重构复杂脑图 |
-| v2.x | Native Knowledge Editor | 像一个 MN 原生知识编辑器 | 真实读取脑图、卡片、摘录、高亮，做 Diff、逐节点确认、写入、验证、回滚和残留报告 | 不能说有完整跨 notebook 知识生态 |
-| v3.x | MarginNote Knowledge Agent OS | 面向 notebook 的知识 Agent 工作台 | Object Graph、Operation Ledger、Knowledge Graph、Workflow Runtime、External Automation Gateway、Skill Marketplace 全贯通 | 这是终局，必须经发布级验收 |
+| v0.4.x AI Chat Plugin | 聊天面板加工具按钮 | prompt、回答、草稿 | 问问题、生成卡片、生成脑图、看状态 | 不能叫知识工作台 |
+| v2.x Native Knowledge Editor | MN 原生知识编辑器 | 真实脑图节点、卡片、摘录和 Diff | 读取现有脑图、逐节点改写、合并、移动、删除、回滚、残留证明 | 不能叫全局知识 OS |
+| v3.x Notebook Knowledge OS | notebook 工作台 | notebook 对象图、知识图谱、学习目标、workflow、账本、复习系统 | 自动精读、重组知识结构、生成并排程卡片、跨文档对比、外部自动化、技能运行 | 这是终局 |
 
-当前 0.4.x 做得越多，越容易产生错觉：好像已有模块只是缺少 polish。实际上不是。当前 0.4.x 只是在 L2 边缘建立底座，仍然主要围绕“输入 prompt -> 得到回答 -> 点按钮”。终局必须围绕 “选择 MNObject -> 编译操作 -> 预览 Diff -> 原生写入 -> 验证 -> 接受/回滚 -> 账本证据”。
+当前 0.4.x 即使已经出现 Object Browser、Mindmap Studio、Card Factory、Workflow Runtime 和 Operation Ledger，也仍然是第一代产品。原因很简单：用户仍然主要通过“输入一句话、得到回答、点击按钮”来工作。终局必须把主语换掉：
 
-## 2. 双模式产品，不是单一聊天面板
+- 不是“回答下面生成脑图”，而是“当前脑图对象有哪些结构缺口，AI 提议了哪些节点级修改”。
+- 不是“把回答切成卡片”，而是“这份材料的学习目标覆盖了多少，哪些概念还没有复习卡，哪些卡片重复或太长”。
+- 不是“日志里有失败原因”，而是“Operation Ledger 能证明每个 MN 对象被创建、更新、删除、保留或残留”。
+- 不是“一个目标持续执行”，而是“一个 workflow 在 Notebook Workspace 里有计划、状态、确认点和验收报告”。
 
-终局必须是**双模式产品**：
+## 2. 终局首屏：Notebook Workspace，而不是聊天页
 
-- **Chat Mode**：对标 MarginNote 自带 AI 的轻量阅读对话。它保留输入框、上下文可见、选区解释、全文提问、卡片草稿、脑图草稿、队列、停止、新对话和历史。它负责低摩擦入口。
-- **Agent Workspace Mode**：面向真实知识结构的生产工作台。它围绕当前 `MNObject`、Object Browser、Object Graph、Mindmap Studio、Card Factory、Workflow Builder、Operation Ledger Explorer、Knowledge Graph Studio、Skill Center 和外部自动化运行。它负责可验证写入。
+终局打开后，默认首屏是 `Notebook Workspace`。聊天可以停靠在右侧或底部，但不能占据产品中心。
 
-两个模式要通过明确的信息架构分开，而不是把设置、日志、脑图、工作流、技能全部塞回聊天页。终局 UI 必须有明确的模式状态：
+终局首屏必须包含这些区域：
+
+- **Workspace Header**：当前 notebook、当前文档、目标脑图、授权上下文、AI 后端、MN 原生能力、缓存状态。
+- **Knowledge Console**：当前材料的知识资产摘要，包括文档、摘录、高亮、脑图节点、卡片、概念、复习任务、最近 workflow 和风险。
+- **Object Browser**：像 Finder 一样浏览 notebook 中的真实 MN 对象和插件对象，支持按文档、类型、标签、最近活动、残留风险、是否可写过滤。
+- **Mindmap Studio**：显示真实脑图树和 AI 提议的 Diff，用户逐节点接受、拒绝、改标题、改正文、移动、合并或删除。
+- **Card Factory**：显示学习目标、卡型覆盖、来源覆盖、长卡、重复卡、待复习和到期复习。
+- **Workflow Console**：显示正在跑的学习代理、步骤、输入输出、确认点、失败恢复和验收报告。
+- **Operation Ledger**：显示所有写入和外部请求的证据链，支持按对象追踪、回滚和残留检查。
+
+Chat Mode 的定位：
+
+- 可以解释选区、回答全文问题、把自然语言意图编译成 operation plan。
+- 可以提供“转入工作台执行”的按钮。
+- 不能绕过 workspace 直接修改真实 MN 对象。
+- 不能把回答下方的小按钮当成高阶工作流的主要入口。
+
+如果双模式壳层退化成 AI Copilot 面板，用户看起来能问、能生成、能点按钮，但知识结构仍没有被对象化、事务化和证据化。只要首屏仍然像聊天框加按钮，就不算终极版。
+
+兼容 0.4.x 的运行态 shell 仍然必须保留这些模式状态和控件，作为从当前版本迁移到 Notebook Workspace 的可验证台阶。默认入口必须能在 Chat Mode 和 Agent Workspace Mode 之间切换，但 v3.0 默认落点应是 Notebook Workspace：
 
 - `modeSwitchBar`
 - `chatModeButton`
@@ -56,47 +72,7 @@ Codex Companion 的终极形态**不是当前聊天插件的增强版**，也不
 - `Workspace Navigator`
 - `workspaceNavigator`
 
-Chat Mode 的回答下面可以有后续动作，例如“生成脑图树”“生成卡片”“转入 Agent Workspace”。但一旦动作会修改真实 MN 对象，就必须进入 Agent Workspace Mode 的工作流，而不是在聊天流里悄悄完成。
-
-## 3. 当前 0.4.x 已有底座，但不是终局
-
-本节只记录已有底座，目的不是证明终局接近完成，而是避免把已有功能误读为完成态。
-
-当前 0.4.x 已经有：
-
-- `MNObject Model`：`agent_plan` 能返回 `codex.mn.mnObject.v1` 和 `codex.mn.riskRegister.v1`。
-- `MNObject Registry` 第一阶段：`mn_object_registry` 返回 `codex.mn.mnObjectRegistry.v1`，持久记录已见对象的 objectRef、firstSeen/lastSeen、seenCount、evidenceTypes 和 topic/book 作用域。
-- Native object scan：`objectRegistryScanButton` / `扫描 MN` 调用 `request_mn_object_registry_scan`，通过 `scan_mn_objects` 接收 `mnObjectRegistryScanFinished`，并记录 `native_object_scan` 证据。
-- Native mindmap cache：`mindmapTreeReadFinished` 后，原生脑图树缓存中的节点会登记为 `mnobj:note:<noteId>` / `mn_note`，保留 noteId、parentNoteId 和 nodePath。
-- `object_browser`：返回 `codex.mn.objectBrowser.v1`，前端 `objectBrowserPanel` 能显示当前焦点对象、Object Graph 节点、对象活动、Operation Ledger 条目和 registry 对象，并提供 `browserAction`。
-- Object Graph 第一阶段：扫描对象会进入 Object Graph，并根据 sourceRef.parentNoteId/nodePath 生成 `native_object_scan 父子边`。点击扫描对象会打开该对象图谱，点击扫描对象会打开该对象活动和账本。
-- Knowledge Index 实体：实体带 `entityType/noteId/sourceRef/relations`，实体关系可转成 `knowledge_relation`。
-- Native mindmap tree cache：最近一次 MN 原生脑图树缓存可带 `nativeMindmapTreeEvidence` / `mindmap_tree_cache` 证据。
-- 手工关系：`object_graph_relation_save/delete` 可维护本地可编辑关系边，保存/删除事件进入 `object_graph_manual_relation`，并带 `manualRelation` 证据。
-- Operation Ledger 第一阶段：`operation_ledger_list/get` 能聚合 workflow、AI 编辑事务、external gateway request 和手工对象关系事件。
-- Operation Compiler 第一阶段：`agent_plan` 已经能把当前 `MNObject`、intent、workflow 和权限策略编译成 `codex.mn.operationPlan.v1`、`codex.mn.verificationPlan.v1` 和 `codex.mn.operationCompiler.v1`，并在操作区显示计划步骤、写入数量、dry-run/确认要求、验证义务和阻断原因。
-- Mindmap Studio 第一阶段：已有 `Mindmap Studio`、读取现有脑图、预览 Diff、应用所选、验证事务、回滚事务。它不是回答下方按钮的别名。
-- Card Factory 第一阶段：`generate_card` 返回 `codex.mn.cardFactory.v1`、`cardType`、`learningGoal`、`reviewPrompt`、来源 `source` 和 `codex.mn.cardFactoryCard.v1`，并显示 `卡片工厂` 摘要。
-- Workflow Runtime 第一阶段：已有 workflow start/status/list/cancel、外部 workflow start、`codex.mn.workflowRunInspector.v1` 和 `workflow_retry_step`。
-- Skill Marketplace 第一阶段：已有本地技能 manifest 和安装状态。
-
-这些底座改变了工程方向，但还没有形成终局。终局必须和当前版本拉开的可见断层是：真实对象浏览、真实脑图编辑、跨 notebook 知识层、复习闭环、残留验证、外部权限网关和技能生态。
-
-## 4. 终局必须和当前版本拉开的可见断层
-
-| 维度 | 当前 0.4.x | 终局 v3.0 |
-| --- | --- | --- |
-| 主入口 | 对话页为主，工作台是雏形 | Chat Mode 与 Agent Workspace Mode 信息架构分离 |
-| 产品中心 | prompt、回答、草稿和按钮 | `MNObject`、operation plan、Diff、native apply、verify、rollback |
-| 脑图 | 生成树、补到当前、第一阶段 Diff | 真实脑图工作台：读取现有 noteId 和父子关系，原地 create/update/merge/move/link/delete_suggest |
-| 卡片 | 把回答拆成短卡，并做质量提示 | Card Factory：按学习目标、卡型、来源、重复度、覆盖率和复习状态规划 |
-| 对象 | 当前对象和第一阶段 registry | Finder 式 Object Browser，浏览完整 notebook 对象和外部对象 |
-| 知识 | 当前文档、上传文件、轻量 Knowledge Index | 跨 notebook 知识层，显式维护支持、反驳、对比、先修和复习关系 |
-| 自动化 | 队列、workflow 雏形、本地外部接口 | External Automation Gateway，所有外部调用都进入权限、dry-run、ledger 和 callback |
-| 信任 | 状态消息、日志、事务中心雏形 | Operation Ledger Explorer，证明改了哪里、能否撤回、回滚后是否残留 |
-| 扩展 | 自定义 prompt、本地技能雏形 | Skill Marketplace，技能声明 schema、UI、权限、rollback、验收和版本迁移 |
-
-当前 0.4.x 做不到的事，不能用“已经有对象区”“已经有 workflow 区”“已经有 ledger 面板”来掩盖。v3.0 必须保留一个硬判断：如果用户的高阶工作仍只能靠输入一句话再点回答下方按钮，就不是终局。
+终局必须和当前版本拉开的可见断层是：当前 0.4.x 做不到的事不能用已有对象区、workflow 区或 ledger 区来掩盖。当前版本还不能稳定浏览整个 notebook 对象库，不能完整原地重构复杂脑图，不能证明所有实体卡片和关系残留，也不能把技能、复习、外部自动化和跨文档知识全部纳入同一个证据系统。
 
 v3.0 的硬边界：
 
@@ -105,6 +81,62 @@ v3.0 的硬边界：
 - 复习队列和覆盖率是 Card Factory 的必选闭环。
 - 外部自动化不能绕过 dry-run、确认、ledger 和回滚。
 - 技能包不是自定义 prompt。
+
+## 3. 终局的用户故事必须明显不同
+
+### 3.1 精读一篇论文
+
+当前版流程是：用户问“解读这篇论文”，插件回答，用户再点生成脑图或卡片。
+
+终局流程必须是：
+
+1. 用户打开论文，Notebook Workspace 自动识别当前文档、已有脑图、已有卡片、PDF 缓存、选区和历史操作。
+2. Knowledge Console 显示“全文结构覆盖率、已有卡片覆盖率、缺失章节、缺来源卡片、过长卡片、待复习数量、最近失败事务”。
+3. 用户选择 `精读论文 workflow`，系统先生成 operation plan，而不是直接生成内容。
+4. Mindmap Studio 读取现有脑图，显示“新增 18、更新 12、合并 4、移动 6、建议删除 3”的节点级 Diff。
+5. Card Factory 按“概念、公式、方法、实验、局限、对比、复习题”生成短卡，并显示来源和覆盖率。
+6. 用户逐批确认。每次写入都进入 Operation Ledger。
+7. 验收页输出：覆盖了哪些章节、创建了哪些 noteId、哪些卡片进入复习队列、哪些对象没有写入、哪些需要人工确认。
+
+### 3.2 合并和重组现有脑图
+
+当前版容易变成“又生成一棵树”。
+
+终局必须先读取当前真实脑图，并以现有 noteId 为主键做原地编辑：
+
+- 如果目标脑图不存在，先让用户创建或选择目标脑图。
+- 如果已有相似节点，默认提出 merge/update/move，而不是 create。
+- 如果删除旧节点，只能提出 delete_suggest，并进入二次确认。
+- 拒绝后必须证明 outline、实体卡片、链接关系、复习队列是否仍有残留。
+
+### 3.3 自动学习代理
+
+终局代理不是“按钮点了之后慢慢跑”。它必须是可检查的 workflow：
+
+- 输入对象：当前文档、选区、脑图子树、卡片集合、外部文件或跨文档授权范围。
+- 计划：步骤、模型调用、MN 原生动作、权限、dry-run、确认点。
+- 执行：每一步有状态、耗时、输出对象和失败原因。
+- 确认：写入前必须显示 Diff 或草稿；删除和外部请求必须二次确认。
+- 验收：最终生成学习报告、对象覆盖率、复习计划和 Operation Ledger 证据。
+
+## 4. 终局硬验收：这些不满足就不是 v3.0
+
+终局验收不按按钮数量算，也不按“有没有某个面板”算。必须逐项证明：
+
+| 验收项 | 终局要求 | 不合格表现 |
+| --- | --- | --- |
+| 主入口 | 默认进入 Notebook Workspace，Chat 是辅助入口 | 首屏仍是聊天框加按钮 |
+| 对象层 | notebook、document、摘录、高亮、card、mindmap node、subtree、workflow、ledger 都是可寻址对象 | 只能围绕当前消息附近对象工作 |
+| 真实脑图编辑 | 读取现有 noteId 和父子关系，做 create/update/merge/move/delete_suggest Diff | 重新生成一棵相似的新树 |
+| 卡片系统 | 有学习目标、卡型、来源、去重、覆盖率、复习队列 | 只是把回答拆成多张卡 |
+| 代理运行 | workflow 有计划、状态、确认点、失败恢复、验收报告 | 只是长任务或 pending 队列 |
+| 写入可信度 | 每次写入都有 operation plan、dry-run、native apply、verify、rollback 和 residual proof | 只显示“成功/失败” |
+| 回滚证明 | 拒绝后能检查真实 MN 对象是否仍存在 | 只删除 outline 或只按计数猜测 |
+| 跨文档知识 | 明确授权范围，回答列对象引用、page/quote/noteId/MN link | 默认偷偷扫全库或无引用回答 |
+| 外部自动化 | URL/API 请求进入权限、dry-run、workflow、ledger 和 callback 证据 | 外部脚本绕过插件账本 |
+| 技能生态 | 技能包有 manifest、schema、UI、权限、验收、迁移和回滚规则 | 自定义 prompt 冒充技能 |
+
+如果用户的高阶工作仍只能靠输入一句话再点回答下方按钮，就不是终局。换句话说，如果用户仍然必须靠“输入一句话，然后在回答下面点按钮”，它最多是 AI Chat Plugin 或 Study Copilot，不是 Notebook Knowledge OS。
 
 ## 5. 终局必须出现的九个一等界面
 

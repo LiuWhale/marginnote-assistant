@@ -13,6 +13,11 @@ All notable changes to Codex Companion are documented here.
 - Added first-stage Operation Compiler repair actions: blocked plans can now surface actionable recovery buttons such as refreshing MarginNote native capabilities, opening settings, or caching the current PDF.
 - Added first-stage per-operation dry-run evidence for mind-map operations: `operationDryRunDetails` now shows each planned node operation's mutation, noteId, required capability, status, reason, and verification level, and blocked local Diff apply responses return the same `codex.mn.perOperationDryRun.v1` payload.
 - Added `codex.mn.residualProof.v1` to AI edit transaction verification, so rollback/retain evidence can report each created or target note's expected state, actual state, residual flag, and native-event evidence level instead of only a residual count.
+- Added native MN object existence probing for edit transactions: Companion can enqueue `probe_mn_object_existence`, the MarginNote handler checks real note objects by `noteId`, and transaction verification uses the probe to report confirmed residual objects instead of relying only on deleted/failed counts.
+
+### Changed
+
+- Reframed the v3.0 ultimate design as `Notebook Knowledge OS`: the default end-state is a Notebook Workspace plus workflow-based learning agent, not a stronger chat page with more buttons.
 
 ## 0.4.28 - 2026-06-27
 
