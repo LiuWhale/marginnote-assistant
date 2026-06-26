@@ -89,7 +89,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.33"
+CURRENT_PLUGIN_VERSION = "0.4.34"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1714,6 +1714,25 @@ def notebook_runbook_summary(steps: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def notebook_runbook_continue_action(step: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(step, dict):
+        return {}
+    action = step.get("action") if isinstance(step.get("action"), dict) else {}
+    if not action.get("action"):
+        return {}
+    return {
+        "schema": "codex.mn.notebookRunbookContinue.v1",
+        "stepId": str(step.get("id") or ""),
+        "stepTitle": str(step.get("title") or ""),
+        "label": f"继续：{step.get('title') or action.get('label') or '下一步'}",
+        "action": str(action.get("action") or ""),
+        "payload": action.get("payload") if isinstance(action.get("payload"), dict) else {},
+        "surface": str(action.get("surface") or ""),
+        "detail": str(step.get("detail") or action.get("detail") or ""),
+        "tone": str(action.get("tone") or step.get("tone") or "primary"),
+    }
+
+
 def notebook_workspace_runbook(
     summary: dict[str, Any],
     primary_actions: list[dict[str, Any]],
@@ -1727,6 +1746,7 @@ def notebook_workspace_runbook(
     readiness = summary.get("readiness") if isinstance(summary.get("readiness"), dict) else {}
     has_context = bool(summary.get("topicid") or summary.get("bookmd5") or summary.get("documentTitle") or object_ref_has_identity(focus))
     registry_count = int(objects.get("registry") or 0)
+    native_scan_count = int(objects.get("nativeScan") or 0)
     mindmap_ready = str(mindmap.get("status") or "") == "available"
     workflow_count = int(workflows.get("runCount") or 0)
     ledger_total = int(ledger.get("total") or 0)
@@ -1743,10 +1763,10 @@ def notebook_workspace_runbook(
         notebook_runbook_step(
             "scan_objects",
             "扫描 MN 对象",
-            "ready" if registry_count > 0 else ("action_required" if mn_api_available else "blocked"),
-            f"Registry 已有 {registry_count} 个原生对象。" if registry_count > 0 else "需要扫描当前 notebook 的原生对象，Object Browser 才不是只看聊天和本地证据。",
+            "ready" if native_scan_count > 0 else ("action_required" if mn_api_available else "blocked"),
+            f"Native Scan 已确认 {native_scan_count} 个原生对象。" if native_scan_count > 0 else "需要扫描当前 notebook 的原生对象，Object Browser 才不是只看聊天和本地证据。",
             action=actions_by_id.get("scan_mn_objects"),
-            evidence=f"objects={int(objects.get('total') or 0)} / registry={registry_count}",
+            evidence=f"objects={int(objects.get('total') or 0)} / registry={registry_count} / nativeScan={native_scan_count}",
         ),
         notebook_runbook_step(
             "mindmap_baseline",
@@ -1783,11 +1803,27 @@ def notebook_workspace_runbook(
     ]
     counts = notebook_runbook_summary(steps)
     status = "blocked" if counts["blocked"] else ("action_required" if counts["actionRequired"] else ("ready" if counts["ready"] == counts["total"] else "pending"))
+    next_step: dict[str, Any] = {}
+    for status_group in ("action_required", "pending", "blocked"):
+        next_step = next(
+            (
+                step
+                for step in steps
+                if step.get("status") == status_group
+                and isinstance(step.get("action"), dict)
+                and step.get("action", {}).get("action")
+            ),
+            {},
+        )
+        if next_step:
+            break
     return {
         "schema": "codex.mn.notebookRunbook.v1",
         "status": status,
         "summary": counts,
         "steps": steps,
+        "nextStep": next_step if isinstance(next_step, dict) else {},
+        "continueAction": notebook_runbook_continue_action(next_step),
     }
 
 
@@ -1829,6 +1865,9 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
     review_summary = review_payload.get("summary") if isinstance(review_payload.get("summary"), dict) else {}
     workflow_runs = workflow_payload.get("workflowRuns") if isinstance(workflow_payload.get("workflowRuns"), list) else []
     object_counts = object_browser_payload.get("counts") if isinstance(object_browser_payload.get("counts"), dict) else {}
+    object_sources = object_browser_payload.get("sources") if isinstance(object_browser_payload.get("sources"), dict) else {}
+    registry_source = object_sources.get("registry") if isinstance(object_sources.get("registry"), dict) else {}
+    registry_evidence_counts = registry_source.get("evidenceTypes") if isinstance(registry_source.get("evidenceTypes"), dict) else {}
     ledger_counts = ledger_payload.get("counts") if isinstance(ledger_payload.get("counts"), dict) else {}
     review_total = int(review_summary.get("totalCount") or len(review_payload.get("items") if isinstance(review_payload.get("items"), list) else []))
     workflow_count = int(workflow_payload.get("runCount") or len(workflow_runs))
@@ -1853,6 +1892,7 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
             "status": "ready" if object_browser_payload.get("ok") else "blocked",
             "total": int(object_counts.get("total") or 0),
             "registry": int(object_counts.get("registry") or 0),
+            "nativeScan": int(registry_evidence_counts.get("native_object_scan") or 0),
             "graph": int(object_counts.get("object_graph") or 0),
             "activity": int(object_counts.get("object_activity") or 0),
             "ledger": int(object_counts.get("operation_ledger") or 0),
@@ -4478,7 +4518,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.33-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.34-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -6243,15 +6283,20 @@ def mn_object_registry(payload: dict[str, Any]) -> dict[str, Any]:
         objects.append(item)
     objects.sort(key=lambda item: str(item.get("lastSeenAt") or item.get("firstSeenAt") or ""), reverse=True)
     type_counts: dict[str, int] = {}
+    evidence_counts: dict[str, int] = {}
     for item in objects:
         kind = str(item.get("kind") or item.get("objectRef", {}).get("kind") or "unknown")
         type_counts[kind] = type_counts.get(kind, 0) + 1
+        for evidence_type in item.get("evidenceTypes") if isinstance(item.get("evidenceTypes"), list) else []:
+            evidence_key = str(evidence_type or "").strip()
+            if evidence_key:
+                evidence_counts[evidence_key] = evidence_counts.get(evidence_key, 0) + 1
     return {
         "ok": True,
         "schema": "codex.mn.mnObjectRegistry.v1",
         "message": f"已读取 MNObject Registry：{len(objects[:limit])} / {len(objects)} 个对象。",
         "objects": objects[:limit],
-        "counts": {"total": len(objects), "returned": len(objects[:limit]), "kinds": type_counts},
+        "counts": {"total": len(objects), "returned": len(objects[:limit]), "kinds": type_counts, "evidenceTypes": evidence_counts},
         "updatedAt": str(store.get("updatedAt") or ""),
     }
 

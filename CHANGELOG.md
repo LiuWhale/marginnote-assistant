@@ -4,6 +4,18 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.34 - 2026-06-27
+
+### Added
+
+- Added `nextStep` and `continueAction` to `codex.mn.notebookRunbook.v1`, plus the visible `notebookWorkspaceRunbookContinueButton`. The workspace now has a single "continue next step" entry that chooses the first actionable runbook gap instead of forcing the user to inspect every row.
+- Added registry evidence counting for `MNObject Registry`, so the notebook runbook can distinguish objects imported from cached mind-map trees from objects confirmed by a native MarginNote scan.
+
+### Changed
+
+- Tightened the "scan MN objects" runbook step: it is only ready after `native_object_scan` evidence exists. Cached mind-map nodes still appear in Object Browser, but they no longer make the native scan step look complete.
+- Runbook continuation now prioritizes `action_required` steps, then `pending` steps, and only falls back to blocked steps when nothing else can be executed.
+
 ## 0.4.33 - 2026-06-27
 
 ### Added

@@ -3802,6 +3802,11 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(runbook_steps["scan_objects"]["action"]["action"], "request_mn_object_registry_scan")
             self.assertEqual(runbook_steps["operation_plan"]["action"]["action"], "agent_plan")
             self.assertEqual(runbook_steps["operation_evidence"]["action"]["action"], "operation_ledger_list")
+            self.assertEqual(runbook["nextStep"]["id"], "scan_objects")
+            self.assertEqual(runbook["continueAction"]["schema"], "codex.mn.notebookRunbookContinue.v1")
+            self.assertEqual(runbook["continueAction"]["stepId"], "scan_objects")
+            self.assertEqual(runbook["continueAction"]["action"], "request_mn_object_registry_scan")
+            self.assertEqual(runbook["continueAction"]["surface"], "console")
             action_ids = [item["id"] for item in summary["primaryActions"]]
             self.assertEqual(action_ids[:3], ["scan_mn_objects", "read_mindmap_tree", "plan_next_operation"])
             self.assertEqual(workspace["objectBrowser"]["schema"], "codex.mn.objectBrowser.v1")

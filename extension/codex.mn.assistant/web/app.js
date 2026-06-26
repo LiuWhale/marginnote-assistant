@@ -2233,11 +2233,22 @@
     return status || '未知';
   }
 
+  function runNotebookWorkspaceContinue() {
+    var runbook = state.notebookWorkspace && state.notebookWorkspace.runbook ? state.notebookWorkspace.runbook : {};
+    var action = runbook.continueAction || {};
+    if (!action || !action.action) {
+      addFailureMessage('Notebook Runbook 暂无可继续步骤', {ok: false, message: '当前 runbook 没有可执行的下一步。'});
+      return;
+    }
+    runNotebookWorkspaceAction(action);
+  }
+
   function renderNotebookWorkspaceRunbook(runbook) {
     runbook = runbook || {};
     var panel = byId('notebookWorkspaceRunbook');
     var summaryNode = byId('notebookWorkspaceRunbookSummary');
     var list = byId('notebookWorkspaceRunbookList');
+    var continueButton = byId('notebookWorkspaceRunbookContinueButton');
     if (!panel || !summaryNode || !list) return;
     var counts = runbook.summary || {};
     var status = String(runbook.status || 'idle');
@@ -2250,6 +2261,20 @@
         ' / 阻断 ' + (counts.blocked || 0) +
         ' / 等待 ' + (counts.pending || 0)
     );
+    var continueAction = runbook.continueAction || {};
+    if (continueButton) {
+      if (continueAction && continueAction.action) {
+        continueButton.classList.remove('hidden');
+        continueButton.disabled = false;
+        continueButton.textContent = continueAction.label || '继续下一步';
+        continueButton.title = continueAction.detail || '';
+      } else {
+        continueButton.classList.add('hidden');
+        continueButton.disabled = true;
+        continueButton.textContent = '继续下一步';
+        continueButton.title = '';
+      }
+    }
     var steps = runbook.steps || [];
     if (!steps.length) {
       replaceElementChildren(list, [textNode('div', 'notebook-runbook-step empty', '等待工作台检查当前 notebook。')]);
@@ -8361,6 +8386,7 @@
     bindButton('notebookWorkspaceRefreshButton', function() {
       refreshNotebookWorkspace(true);
     });
+    bindButton('notebookWorkspaceRunbookContinueButton', runNotebookWorkspaceContinue);
     bindButton('conversationHistoryAllButton', function() {
       state.conversationHistoryScope = 'document';
       refreshConversationHistory();

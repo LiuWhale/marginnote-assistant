@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260627-notebook-runbook-v1">
+  <link rel="stylesheet" href="app.css?v=20260627-runbook-continue-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
@@ -96,6 +96,7 @@
             <div class="notebook-runbook-kicker">Notebook Runbook</div>
             <div id="notebookWorkspaceRunbookSummary" class="notebook-runbook-summary">等待工作台检查当前 notebook 的下一步。</div>
           </div>
+          <button id="notebookWorkspaceRunbookContinueButton" class="small-button notebook-runbook-continue hidden" type="button">继续下一步</button>
         </div>
         <div id="notebookWorkspaceRunbookList" class="notebook-runbook-list">
           <div class="notebook-runbook-step empty">上下文、MN 对象、脑图基线、操作计划、workflow 和账本证据会在这里排成可执行步骤。</div>
@@ -675,6 +676,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260627-notebook-runbook-v1"></script>
+  <script src="app.js?v=20260627-runbook-continue-v1"></script>
 </body>
 </html>
