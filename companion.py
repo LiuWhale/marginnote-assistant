@@ -90,7 +90,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.38"
+CURRENT_PLUGIN_VERSION = "0.4.39"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -2088,6 +2088,85 @@ def source_registry_file_status(path: Path) -> dict[str, Any]:
     }
 
 
+def notebook_source_registry_actions(
+    payload: dict[str, Any],
+    *,
+    topic_id: str,
+    book_md5: str,
+    document_title: str,
+    source_readable: bool,
+    pending_cache: bool,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    base_payload = {
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "documentTitle": document_title,
+        "source": "source-registry",
+    }
+    pdf_path = str(payload.get("pdfPath") or payload.get("documentPath") or payload.get("sourcePdfPath") or "").strip()
+    if pdf_path:
+        base_payload["pdfPath"] = pdf_path
+    actions = [
+        notebook_workspace_action(
+            "cache_current_pdf",
+            "缓存当前 PDF",
+            "request_pdf_cache",
+            base_payload,
+            "console",
+            "让 MN4 插件进程读取当前 PDF 并上传到 Companion 缓存；不会修改原文。",
+            "primary" if not source_readable else "secondary",
+        ),
+        notebook_workspace_action(
+            "choose_pdf_file",
+            "选择 PDF 文件",
+            "choose_pdf_cache_file",
+            {**base_payload, "clientOnly": True},
+            "source_registry",
+            "从本机选择一个 PDF 副本交给 Companion 缓存，用于权限受限或 MN4 无法提供路径时。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "manage_file_paths",
+            "管理文件路径",
+            "open_config_page",
+            {**base_payload, "section": "file_paths", "clientOnly": True},
+            "settings",
+            "打开设置页的文件路径管理，把 OneDrive、iCloud 或论文目录登记为搜索根。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "refresh_context",
+            "刷新上下文",
+            "refresh_context",
+            {**base_payload, "clientOnly": True},
+            "console",
+            "重新向 MarginNote 请求当前选区、文档和节点上下文。",
+            "secondary",
+        ),
+    ]
+    if source_readable:
+        status = "ready"
+        detail = "已有可读资料来源；仍可继续缓存、选择文件或管理路径。"
+        recommended_action = actions[3]
+    elif pending_cache:
+        status = "waiting_native"
+        detail = "正在等待 MN4 插件缓存当前 PDF；也可以手动选择 PDF 或管理文件路径。"
+        recommended_action = actions[1]
+    else:
+        status = "action_required"
+        detail = "缺少可读全文来源；建议先缓存当前 PDF，或选择本机 PDF 文件。"
+        recommended_action = actions[0]
+    plan = {
+        "schema": "codex.mn.sourceRegistryActionPlan.v1",
+        "status": status,
+        "detail": detail,
+        "recommendedActionId": str(recommended_action.get("id") or ""),
+        "recommendedAction": recommended_action,
+        "actionCount": len(actions),
+    }
+    return actions, plan
+
+
 def notebook_source_registry(
     payload: dict[str, Any],
     summary: dict[str, Any],
@@ -2200,7 +2279,16 @@ def notebook_source_registry(
     readable_upload_count = sum(1 for item in sources if item.get("kind") == "upload" and item.get("readable"))
     search_root_count = sum(1 for item in sources if item.get("kind") == "file_search_root")
     explicit_pdf_count = sum(1 for item in sources if item.get("kind") == "explicit_pdf" and item.get("readable"))
-    status = "ready" if cached_pdf_count or explicit_pdf_count or upload_count else ("waiting_native" if pending_cache else "missing")
+    source_readable = bool(cached_pdf_count or explicit_pdf_count or readable_upload_count)
+    status = "ready" if source_readable else ("waiting_native" if pending_cache else "missing")
+    source_actions, action_plan = notebook_source_registry_actions(
+        payload,
+        topic_id=topic_id,
+        book_md5=book_md5,
+        document_title=document_title,
+        source_readable=source_readable,
+        pending_cache=bool(pending_cache),
+    )
     return {
         "schema": "codex.mn.sourceRegistry.v1",
         "status": status,
@@ -2220,7 +2308,9 @@ def notebook_source_registry(
             "pendingNativeCache": 1 if pending_cache else 0,
         },
         "sources": sources[:40],
-        "primaryAction": actions_by_id.get("cache_current_pdf") or {},
+        "sourceActions": source_actions,
+        "actionPlan": action_plan,
+        "primaryAction": action_plan.get("recommendedAction") or actions_by_id.get("cache_current_pdf") or {},
     }
 
 
@@ -5170,7 +5260,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.38-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.39-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )

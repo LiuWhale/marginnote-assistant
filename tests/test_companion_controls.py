@@ -3950,12 +3950,44 @@ class CompanionControlsTests(unittest.TestCase):
             registry = workspace["notebookWorkspace"]["sourceRegistry"]
             self.assertEqual(registry["summary"]["uploads"], 1)
             self.assertEqual(registry["summary"]["readableUploads"], 0)
+            self.assertEqual(registry["status"], "missing")
             upload_sources = [item for item in registry["sources"] if item["kind"] == "upload"]
             self.assertEqual(upload_sources[0]["status"], "missing")
             self.assertFalse(upload_sources[0]["readable"])
             program = workspace["notebookWorkspace"]["studyProgram"]
             self.assertLess(program["coverage"]["sourceRegistry"], 100)
             self.assertIn("source_registry", [item["id"] for item in program["gaps"]])
+
+    def test_notebook_source_registry_returns_action_plan_for_material_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Needs Source Actions",
+                }
+            )
+
+            registry = workspace["notebookWorkspace"]["sourceRegistry"]
+            self.assertEqual(registry["actionPlan"]["schema"], "codex.mn.sourceRegistryActionPlan.v1")
+            self.assertEqual(registry["actionPlan"]["status"], "action_required")
+            action_ids = [item["id"] for item in registry["sourceActions"]]
+            self.assertEqual(
+                action_ids[:4],
+                ["cache_current_pdf", "choose_pdf_file", "manage_file_paths", "refresh_context"],
+            )
+            cache_action = registry["sourceActions"][0]
+            self.assertEqual(cache_action["schema"], "codex.mn.notebookWorkspaceAction.v1")
+            self.assertEqual(cache_action["action"], "request_pdf_cache")
+            self.assertEqual(cache_action["payload"]["topicid"], "T1")
+            self.assertEqual(cache_action["payload"]["bookmd5"], "B1")
+            self.assertEqual(cache_action["payload"]["source"], "source-registry")
+            self.assertEqual(registry["primaryAction"]["id"], "cache_current_pdf")
+            program = workspace["notebookWorkspace"]["studyProgram"]
+            source_gap = [item for item in program["gaps"] if item["id"] == "source_registry"][0]
+            self.assertEqual(source_gap["action"]["id"], "cache_current_pdf")
 
     def test_notebook_runbook_preflight_record_is_visible_in_workspace_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

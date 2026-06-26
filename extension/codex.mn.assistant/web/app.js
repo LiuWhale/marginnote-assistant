@@ -117,6 +117,7 @@
     'notebookWorkspaceSourceRegistry',
     'notebookWorkspaceSourceSummary',
     'notebookWorkspaceSourceList',
+    'notebookWorkspaceSourceActions',
     'notebookWorkspaceStudyProgram',
     'notebookWorkspaceStudyCoverage',
     'notebookWorkspaceStudyGaps',
@@ -2194,6 +2195,37 @@
     return kind || '来源';
   }
 
+  function renderNotebookSourceActions(actions, plan) {
+    var target = byId('notebookWorkspaceSourceActions');
+    if (!target) return;
+    actions = actions || [];
+    plan = plan || {};
+    if (!actions.length) {
+      replaceElementChildren(target, []);
+      return;
+    }
+    var recommendedActionId = String(plan.recommendedActionId || '');
+    var nodes = [];
+    for (var i = 0; i < Math.min(actions.length, 4); i++) {
+      (function(item) {
+        item = item || {};
+        var button = document.createElement('button');
+        button.type = 'button';
+        var tone = item.tone || (String(item.id || '') === recommendedActionId ? 'primary' : 'secondary');
+        button.className = 'notebook-source-action ' + tone;
+        button.textContent = item.label || actionLabel(item.action || '');
+        button.title = item.detail || '';
+        button.setAttribute('data-source-registry-action', item.id || item.action || 'source-action');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runNotebookWorkspaceAction(item);
+        });
+        nodes.push(button);
+      })(actions[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
   function renderNotebookSourceRegistry(registry) {
     registry = registry || {};
     var panel = byId('notebookWorkspaceSourceRegistry');
@@ -2212,6 +2244,7 @@
     var sources = registry.sources || [];
     if (!sources.length) {
       replaceElementChildren(listNode, [textNode('div', 'notebook-source-item empty', '当前材料还没有可登记来源。')]);
+      renderNotebookSourceActions(registry.sourceActions || [], registry.actionPlan || {});
       return;
     }
     var nodes = [];
@@ -2232,6 +2265,7 @@
       })(sources[i]);
     }
     replaceElementChildren(listNode, nodes);
+    renderNotebookSourceActions(registry.sourceActions || [], registry.actionPlan || {});
   }
 
   function renderNotebookStudyProgram(program) {
@@ -2347,6 +2381,26 @@
     if (action === 'operation_ledger_list') {
       refreshOperationLedger(true, payload);
       window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'choose_pdf_cache_file') {
+      choosePdfCacheFile();
+      done({ok: true, clientOnly: true});
+      return;
+    }
+    if (action === 'open_config_page') {
+      openConfigPage();
+      window.setTimeout(function() {
+        var target = byId('fileSearchRootsInput');
+        if (target && typeof target.scrollIntoView === 'function') target.scrollIntoView({block: 'center'});
+        if (target && typeof target.focus === 'function') target.focus();
+      }, 80);
+      done({ok: true, clientOnly: true});
+      return;
+    }
+    if (action === 'refresh_context') {
+      bridge('context', {});
+      window.setTimeout(function() { done({ok: true, delayed: true, clientOnly: true}); }, 500);
       return;
     }
     if (action) {

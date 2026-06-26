@@ -1,6 +1,6 @@
 # Codex Companion 产品手册
 
-适用版本：`0.4.38`
+适用版本：`0.4.39`
 更新时间：2026-06-27
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
@@ -132,7 +132,7 @@ Uninstall Codex Companion.command
 
 WebView 顶部先提供 `Chat Mode / Agent Workspace` 双模式切换。`Chat Mode` 展开完整 `Command Pane`，适合像 MarginNote 自带 AI 一样快速解释当前选区或连续追问；`Agent Workspace` 仍保留 Command Pane 的输入框和发送按钮，但默认收起对话历史，把 `Notebook Workspace`、对象、操作、知识和工作流工作区作为主界面。切到 `Chat Mode` 会展开完整对话；切回 `Agent Workspace` 会收起对话历史并恢复上一次非对话工作区。`Agent Workspace` 顶部还有 `Workspace Navigator`，可直接跳到 `Knowledge Console`、`Mindmap Studio`、`Card Factory`、`Operation Ledger`、`Knowledge Graph`、`Workflow Builder` 和 `Skill Center`，这些入口会选中对应工作区并滚动到目标模块。
 
-- `Notebook Workspace`：这是 Agent Workspace 的首屏工作台。上半部分显示当前焦点、对象数量、脑图基线、复习队列、workflow 和账本计数。`Source Registry` 会列出当前 MN 文档、显式 PDF、PDF 缓存、上传文件和文件搜索根，并标出哪些来源可读、哪些还需要缓存或权限；如果插件看不到全文，这里会先暴露原因，不再让你等模型回复后才发现“找不到 PDF”。随后 `Study Program` 会给出 zero-message 学习计划：覆盖率分数、资料来源/对象/脑图/复习卡/workflow/账本缺口，以及 `文档精读工作流`、`当前脑图重组工作流`、`选区制卡工作流` 等推荐入口。你不需要先输入一句 prompt 才知道当前材料下一步该做什么；点击推荐 workflow 后仍进入已有 workflow runtime，写入步骤继续受确认点、dry-run 和账本约束。下方的 `Notebook Runbook` 会把当前 notebook 的下一步排成检查清单。Runbook 现在包含确认上下文、扫描 MN 对象、读取脑图基线、生成操作计划、检查工作流、核对操作证据六步，每一步都有 `通过 / 需操作 / 阻断 / 等待` 状态、证据行和动作按钮。顶部的 `继续下一步` 会自动执行第一个真正可处理的缺口；`自动准备` 会把安全预检动作组成 `autoPlan` 顺序执行，例如还没有 `native_object_scan` 证据时先请求 MN4 原生对象扫描，再补脑图基线和操作计划。它不会直接写入 MarginNote，写入仍必须走 Diff、确认和账本；同时每次自动准备都会先记录 `running`，完成或失败后记录 `completed/failed`，并作为 `notebook_runbook_preflight` 出现在 Operation Ledger。Runbook 区会常驻显示最近一次自动准备状态。它的作用是让你先看到“这个 notebook 现在缺什么”，再由工作台带你进入对象、脑图、工作流或账本，而不是回到聊天消息里找按钮。
+- `Notebook Workspace`：这是 Agent Workspace 的首屏工作台。上半部分显示当前焦点、对象数量、脑图基线、复习队列、workflow 和账本计数。`Source Registry` 会列出当前 MN 文档、显式 PDF、PDF 缓存、上传文件和文件搜索根，并标出哪些来源可读、哪些还需要缓存或权限；如果插件看不到全文，这里会先暴露原因，不再让你等模型回复后才发现“找不到 PDF”。来源区底部有四个直接动作：`缓存当前 PDF` 会请求 MN4 插件读取并上传当前 PDF，`选择 PDF 文件` 用本机文件选择器缓存一个副本，`管理文件路径` 打开设置页的文件路径管理，`刷新上下文` 重新请求当前选区、节点和文档信息。随后 `Study Program` 会给出 zero-message 学习计划：覆盖率分数、资料来源/对象/脑图/复习卡/workflow/账本缺口，以及 `文档精读工作流`、`当前脑图重组工作流`、`选区制卡工作流` 等推荐入口。你不需要先输入一句 prompt 才知道当前材料下一步该做什么；点击推荐 workflow 后仍进入已有 workflow runtime，写入步骤继续受确认点、dry-run 和账本约束。下方的 `Notebook Runbook` 会把当前 notebook 的下一步排成检查清单。Runbook 现在包含确认上下文、扫描 MN 对象、读取脑图基线、生成操作计划、检查工作流、核对操作证据六步，每一步都有 `通过 / 需操作 / 阻断 / 等待` 状态、证据行和动作按钮。顶部的 `继续下一步` 会自动执行第一个真正可处理的缺口；`自动准备` 会把安全预检动作组成 `autoPlan` 顺序执行，例如还没有 `native_object_scan` 证据时先请求 MN4 原生对象扫描，再补脑图基线和操作计划。它不会直接写入 MarginNote，写入仍必须走 Diff、确认和账本；同时每次自动准备都会先记录 `running`，完成或失败后记录 `completed/failed`，并作为 `notebook_runbook_preflight` 出现在 Operation Ledger。Runbook 区会常驻显示最近一次自动准备状态。它的作用是让你先看到“这个 notebook 现在缺什么”，再由工作台带你进入对象、脑图、工作流或账本，而不是回到聊天消息里找按钮。
 - `对象`：显示当前 MarginNote 焦点，包括 PDF 选区、卡片、脑图节点、当前文档或 notebook；同时列出 notebook/document、上下文范围、选区/节点/文档证据，并给出解释对象、生成脑图树、找相关知识等对象级动作。
 - 对象区会显示一个 `MNObject` 引用。它是当前选区、节点、文档或脑图的稳定对象描述，包含 objectId、来源页码/quote/path 和可用动作数量；后续历史、写入计划、事务和日志都会引用这个对象。
 - 对象区有 `风险` 面板，来自 `agent_plan` 的 `codex.mn.riskRegister.v1`。它会把权限、上下文范围、目标脑图、dry-run 和确认点列成单独风险项，标出阻断、提醒和通过状态；这样你在执行前能先看到“当前对象能不能写、是否缺目标脑图、是否还没 dry-run、是否需要接受/拒绝确认”。
@@ -550,7 +550,7 @@ OpenAI Key 写在：
 
 ## 21. 当前预览版限制
 
-截至 2026-06-27，`v0.4.38` 是当前公开预览版发布候选；本轮目标是完成 GitHub Release、双语 README、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.38 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
+截至 2026-06-27，`v0.4.39` 是当前公开预览版发布候选；本轮目标是完成 GitHub Release、双语 README、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.39 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
 
 - MarginNote 原生可见高亮仍缺活跃 PDF 选区下的完整证据。
 - `release_sha256_manifest` 已覆盖 zip、`.mnaddon` 和 `.pkg` 并通过；当前阻塞不再来自 artifact hash manifest。
@@ -558,7 +558,7 @@ OpenAI Key 写在：
 - 还缺第二用户或第二机器的结构化安装验收。
 - 还缺同一文档完整按钮/工作流验收 PASS evidence。
 
-这些限制不影响使用 `v0.4.38` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
+这些限制不影响使用 `v0.4.39` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
 
 ## 22. 给用户的最短使用路径
 

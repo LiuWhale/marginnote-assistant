@@ -108,6 +108,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "notebookWorkspaceSourceRegistry",
             "notebookWorkspaceSourceSummary",
             "notebookWorkspaceSourceList",
+            "notebookWorkspaceSourceActions",
             "notebookWorkspaceStudyProgram",
             "notebookWorkspaceStudyCoverage",
             "notebookWorkspaceStudyGaps",

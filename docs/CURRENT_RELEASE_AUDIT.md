@@ -6,19 +6,32 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.38 公开预览版
-- MN4 插件 manifest：0.4.38
-- Companion：0.4.38
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.38`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.38-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.38-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.38-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.38-latest.mnaddon`
+- 当前发布候选：0.4.39 公开预览版
+- MN4 插件 manifest：0.4.39
+- Companion：0.4.39
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.39`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.39-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.39-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.39-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.39-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.38-latest.pkg`，已生成但未签名、未公证
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.39-latest.pkg`，已生成但未签名、未公证
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.39 发布候选：Actionable Source Registry
+
+本轮把 0.4.38 的 Source Registry 从“能看见材料状态”推进到“能直接处理材料缺口”。后端 `notebook_workspace` 现在返回 `codex.mn.sourceRegistryActionPlan.v1` 和 `sourceActions`，把缺全文时最常用的四个动作结构化：缓存当前 PDF、选择本机 PDF 文件、打开文件路径管理、刷新 MarginNote 上下文。Web 首屏新增 `notebookWorkspaceSourceActions`，这些动作直接复用现有 `request_pdf_cache`、PDF 文件选择器、设置页和 `bridge('context')`，不新增绕过权限和缓存机制的写入路径。
+
+主要变化包括：
+
+- `notebook_source_registry` 返回 `sourceActions`、`actionPlan` 和可执行 `primaryAction`；`source_registry` Study Program 缺口会指向推荐动作。
+- `sourceRegistryActionPlan.status` 会区分 `ready`、`waiting_native` 和 `action_required`，避免只给一段文字说明。
+- WebView 新增 `notebookWorkspaceSourceActions`，并渲染 `缓存当前 PDF`、`选择 PDF 文件`、`管理文件路径`、`刷新上下文` 四个按钮。
+- `doctor.py`、Web 静态检查和单文档验收 required controls 已更新到 Source Registry action 区域。
+
+本轮最终验证结果见 0.4.39 发布包生成记录；当前 release acceptance 仍保留最终正式发布阻塞项，不把公开预览误判成完整 v1.0。
 
 ### 2026-06-27 v0.4.38 发布候选：Notebook Source Registry
 
@@ -59,9 +72,9 @@ PASS, generated release/CodexCompanion-0.4.38-latest.pkg
 
 本轮 artifact：
 
-- `CodexCompanion-0.4.38-latest-dist.zip` sha256 `309c13ba5d777c584b7749b6d64c543ee904d586120c7d7a9e8eb024897f0daa`
-- `CodexCompanion-0.4.38-latest.mnaddon` sha256 `d9de935e3f7585ac2d9e8c1bbb7f9d425cb0809fe3b5e3fa5845e7f9ff7cb84b`
-- `CodexCompanion-0.4.38-latest.pkg` sha256 `ab47fbe5421b7a5e695b1ac990bd04c2a821b4edddaa7eea889fed0e87265799`
+- `CodexCompanion-0.4.38-latest-dist.zip` sha256 `966d183a472cbf37c30f3c2da7d97b1cea80bff020db29d38e119e9099293f2a`
+- `CodexCompanion-0.4.38-latest.mnaddon` sha256 `60285e7d78ca4db2426a559bb023a93ce3cb8e85198e798a5832691a611067ac`
+- `CodexCompanion-0.4.38-latest.pkg` sha256 `052d6dd0c1db4beafb7ea971e2bedf44245be27c02c7d952216456dd8c8e3ef2`
 - `SHA256SUMS.txt`
 
 本机安装替换已完成，`doctor.py` 报告 MN4 extension manifest 和 Companion service 均为 `0.4.38`。当前 release acceptance 剩余阻塞为：`runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install`、`single_document_acceptance`。前两项需要打开 MN4 notebook 并重新打开 Codex 面板后上报当前版本 WebView/native 能力事件；其余仍是最终 v1.0/正式发布门槛，不阻止 0.4.38 作为公开预览版发布。

@@ -4,6 +4,18 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.39 - 2026-06-27
+
+### Added
+
+- Added a first `Source Registry Action Plan` to `notebook_workspace`. The registry now returns `codex.mn.sourceRegistryActionPlan.v1` plus `sourceActions` for caching the current PDF, choosing a local PDF file, opening file-path management, and refreshing MarginNote context.
+- Added visible Source Registry action buttons in the Notebook Workspace through `notebookWorkspaceSourceActions`.
+- Promoted `notebookWorkspaceSourceActions` to required WebView/runtime controls in doctor and single-document acceptance checks.
+
+### Changed
+
+- Source Registry is now an actionable workspace component instead of a status-only panel. When full-document material is missing, the Study Program gap points directly to the recommended source action.
+
 ## 0.4.38 - 2026-06-27
 
 ### Added

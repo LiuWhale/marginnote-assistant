@@ -526,6 +526,40 @@ h1 {
   line-height: 1.28;
 }
 
+.notebook-source-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.notebook-source-action {
+  min-height: 34px;
+  padding: 6px 7px;
+  border: 1px solid #cfdae5;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.notebook-source-action.primary {
+  border-color: #1f856f;
+  background: #22836f;
+  color: #fff;
+}
+
+.notebook-source-action.secondary {
+  background: #f8fafc;
+}
+
+@media (max-width: 520px) {
+  .notebook-source-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .notebook-study-program {
   display: grid;
   gap: 7px;

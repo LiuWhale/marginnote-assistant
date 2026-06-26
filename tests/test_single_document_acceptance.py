@@ -43,6 +43,7 @@ CURRENT_WEB_CONTROLS = ",".join(
         "notebookWorkspaceSourceRegistry",
         "notebookWorkspaceSourceSummary",
         "notebookWorkspaceSourceList",
+        "notebookWorkspaceSourceActions",
         "notebookWorkspaceStudyProgram",
         "notebookWorkspaceStudyCoverage",
         "notebookWorkspaceStudyGaps",

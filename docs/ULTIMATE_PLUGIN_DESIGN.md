@@ -35,6 +35,8 @@ v3.0 必须看起来像一个 **Notebook Knowledge IDE**：
 
 0.4.38 补上第一阶段 `Source Registry`：`notebook_workspace` 返回 `codex.mn.sourceRegistry.v1`，把当前 MN 文档、显式 PDF 路径、PDF 缓存、上传文件和文件搜索根统一成来源对象，并在首屏显示可读来源数量。Study Program 不再只根据上下文猜测全文是否可用；如果没有可读 PDF 缓存、显式 PDF 或上传材料，它会报告 `source_registry` 缺口。它仍不是完整 v3 Source Registry，因为还没有把 OneDrive/iCloud/MN URL API、网页、外部数据和跨 notebook 授权索引全部纳入长期对象库，但它把“为什么找不到 PDF/全文”从设置页和错误消息推进到了 notebook-first 工作台。
 
+0.4.39 把 Source Registry 从“状态面板”推进到“可执行来源修复面板”：`notebook_workspace` 现在同时返回 `codex.mn.sourceRegistryActionPlan.v1` 和 `sourceActions`，Web 首屏显示 `缓存当前 PDF`、`选择 PDF 文件`、`管理文件路径`、`刷新上下文` 四个来源动作。Study Program 的 `source_registry` 缺口会指向推荐动作，而不是只写一条说明。这仍不是完整来源编排器，因为还没有自动追踪每个来源动作的结果、权限修复、跨文档来源索引和外部网页/API 来源，但它开始把“缺资料 -> 选择修复动作 -> 继续工作流”做成工作台路径。
+
 ### 0.1 终局选择：B + C，而不是 A
 
 终局不走“MarginNote 自带 AI 的超强版”这条路。那条路只会得到一个更会聊天、更会生成脑图的面板，和当前 0.4.x 的差异不够大。
