@@ -70,6 +70,10 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
     "ai-edit-undo-rollback-v2",
+    "native-mn-object-registry-scan-v1",
+    "native-mn-object-existence-probe-v1",
+    "native-mindmap-diff-apply-create-v1",
+    "native-mindmap-delete-suggestion-confirm-v1",
 ]
 INSTALL_EVIDENCE_CHECKS = [
     "MN4 extension manifest",

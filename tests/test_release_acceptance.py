@@ -23,6 +23,17 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_required_native_handler_features_cover_v2_object_workbench_actions(self) -> None:
+        module = self.load_module()
+
+        for feature in [
+            "native-mn-object-registry-scan-v1",
+            "native-mn-object-existence-probe-v1",
+            "native-mindmap-diff-apply-create-v1",
+            "native-mindmap-delete-suggestion-confirm-v1",
+        ]:
+            self.assertIn(feature, module.REQUIRED_NATIVE_HANDLER_FEATURES)
+
     def test_acceptance_blocks_unsigned_pkg_missing_native_highlight_and_cross_machine_evidence(self) -> None:
         module = self.load_module()
         doctor_checks = [
@@ -437,6 +448,10 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
+                            "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                     ],
                     "capabilityMatrix": {
                         "nativeCards": {"ready": True},
@@ -496,6 +511,10 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
+                            "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                 ],
                 "capabilityMatrix": {
                     "nativeCards": {"ready": True},
@@ -553,7 +572,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
             extension = Path(tmp) / "codex.mn.assistant"
             extension.mkdir(parents=True)
             (extension / "main.js").write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
                 encoding="utf-8",
             )
             module.LIVE_EXTENSION = extension
@@ -631,6 +650,10 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
+                            "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
             ],
         )
         self.assertIn("missing-native-handler-feature:native-highlight-arm-next-selection-default", result["problems"])

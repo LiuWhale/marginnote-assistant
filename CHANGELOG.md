@@ -4,6 +4,10 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+### Changed
+
+- Tightened runtime and release acceptance gates so `native-mn-object-registry-scan-v1`, `native-mn-object-existence-probe-v1`, `native-mindmap-diff-apply-create-v1`, and `native-mindmap-delete-suggestion-confirm-v1` are all required native handler features, matching the v2 object workbench capabilities declared by the MarginNote add-on.
+
 ## 0.4.29 - 2026-06-27
 
 ### Added

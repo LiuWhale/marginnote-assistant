@@ -31,6 +31,18 @@ def load_companion(root: Path) -> Any:
 
 
 class CompanionControlsTests(unittest.TestCase):
+    def test_required_native_handler_features_cover_v2_object_workbench_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            for feature in [
+                "native-mn-object-registry-scan-v1",
+                "native-mn-object-existence-probe-v1",
+                "native-mindmap-diff-apply-create-v1",
+                "native-mindmap-delete-suggestion-confirm-v1",
+            ]:
+                self.assertIn(feature, companion.REQUIRED_NATIVE_HANDLER_FEATURES)
+
     def test_default_ai_profile_is_gpt55_fast_with_medium_reasoning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -942,7 +954,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
                             "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                         ],
                     },
                 },
@@ -1010,7 +1025,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
                             "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                         ],
                     },
                 },
@@ -1076,7 +1094,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
                             "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                         ],
                     },
                 },
@@ -1102,7 +1123,7 @@ class CompanionControlsTests(unittest.TestCase):
             (extension / "web").mkdir(parents=True)
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-existence-probe-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
                 encoding="utf-8",
             )
             for relative in ("CodexWebPanelController.js", "web/app.js", "web/index.html", "web/app.css"):
@@ -1150,7 +1171,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
                             "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                 ],
             )
 
@@ -1202,7 +1226,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
                             "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                 ],
             )
             self.assertEqual(
@@ -1219,7 +1246,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
+                            "native-mn-object-registry-scan-v1",
                             "native-mn-object-existence-probe-v1",
+                            "native-mindmap-diff-apply-create-v1",
+                            "native-mindmap-delete-suggestion-confirm-v1",
                 ],
             )
             self.assertIn("native-handler-features", runtime["runtimeHandlerStaleActions"])
