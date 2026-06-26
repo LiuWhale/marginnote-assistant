@@ -1441,6 +1441,24 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.operation-compiler-repair-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.operation-compiler-repair-button {
+  min-height: 28px;
+  border: 1px solid #d7c48b;
+  border-radius: 7px;
+  background: #fffdf4;
+  color: #7a4b00;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
 .mindmap-diff-workbench {
   display: grid;
   gap: 7px;

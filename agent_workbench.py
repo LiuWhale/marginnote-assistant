@@ -449,8 +449,14 @@ def build_operation_plan(
         "requiredCapabilities": required_capabilities,
         "dryRun": {
             "status": str(dry_run.get("status") or "not_available"),
+            "message": _clean(dry_run.get("message"), 260),
             "blockedCount": int(dry_run.get("blockedCount") or 0),
             "unknownCount": int(dry_run.get("unknownCount") or 0),
+            "checks": [
+                item
+                for item in (dry_run.get("checks") if isinstance(dry_run.get("checks"), list) else [])
+                if isinstance(item, dict)
+            ][:8],
         },
         "verify": {
             "expectedCreatedItems": write_count,
@@ -487,6 +493,52 @@ def build_verification_plan(operation_plan: dict[str, Any]) -> dict[str, Any]:
             "review_queue_entries",
         ] if write_count else [],
     }
+
+
+def _repair_action(action_id: str, label: str, handler: str, detail: str = "") -> dict[str, str]:
+    return {
+        "id": action_id,
+        "label": label,
+        "handler": handler,
+        "detail": _clean(detail, 260),
+    }
+
+
+def _dedupe_repair_actions(actions: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    result: list[dict[str, str]] = []
+    for action in actions:
+        action_id = str(action.get("id") or "")
+        if not action_id or action_id in seen:
+            continue
+        seen.add(action_id)
+        result.append(action)
+    return result
+
+
+def operation_compiler_repair_actions(operation_plan: dict[str, Any], settings: dict[str, Any]) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    write_count = int(operation_plan.get("writeCount") or 0)
+    permission = _clean(settings.get("permission") or "notes", 80)
+    if write_count and permission == "read_only":
+        actions.append(_repair_action("open_settings", "打开设置", "openConfigPage", "把权限从 read_only 改为 notes 或 full。"))
+    dry_run = operation_plan.get("dryRun") if isinstance(operation_plan.get("dryRun"), dict) else {}
+    dry_status = str(dry_run.get("status") or "")
+    checks = dry_run.get("checks") if isinstance(dry_run.get("checks"), list) else []
+    if dry_status in {"blocked", "unknown"} or int(dry_run.get("blockedCount") or 0) or int(dry_run.get("unknownCount") or 0):
+        detail = _clean(dry_run.get("message") or "刷新 MN 原生能力后重新生成 Agent 操作计划。", 260)
+        actions.append(_repair_action("refresh_native_capabilities", "刷新 MN 能力", "refreshNativeCapabilities", detail))
+        actions.append(_repair_action("open_settings", "打开设置", "openConfigPage", "检查 MN API 后端、权限和 URL API Gateway 配置。"))
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        reason = str(check.get("reason") or "")
+        next_step = _clean(check.get("nextStep") or "", 260)
+        if reason in {"url-api-secret-missing"} or "URL API" in next_step or "Gateway" in next_step:
+            actions.append(_repair_action("open_settings", "配置 URL API", "openConfigPage", next_step or "配置 URL API Secret，或切回自动/原生插件后端。"))
+        if reason in {"needs-current-pdf-path", "needs-pdf-cache-or-path"} or "缓存 PDF" in next_step:
+            actions.append(_repair_action("cache_current_pdf", "缓存当前 PDF", "cacheCurrentPdf", next_step or "让 MN4 插件缓存当前 PDF 后重试。"))
+    return _dedupe_repair_actions(actions)
 
 
 def build_operation_compiler_report(
@@ -531,6 +583,7 @@ def build_operation_compiler_report(
         "status": "blocked" if any(item.get("tone") == "block" for item in checks) else ("needs_dry_run" if write_count else "ready"),
         "checkCount": len(checks),
         "checks": checks,
+        "repairActions": operation_compiler_repair_actions(operation_plan, settings),
     }
 
 

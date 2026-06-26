@@ -591,10 +591,13 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('id="operationCompilerPanel"', operation_html)
         self.assertIn('id="operationPlanStats"', operation_html)
         self.assertIn('id="operationCompilerChecks"', operation_html)
+        self.assertIn('id="operationCompilerRepairActions"', operation_html)
         for marker in [
             "state.agentOperation",
             "function renderAgentWorkbench",
             "function renderOperationCompilerPanel",
+            "function renderOperationCompilerRepairActions",
+            "function runOperationCompilerRepairAction",
             "function refreshAgentPlan",
             "function scheduleAgentPlanRefresh",
             "postCompanionAgentPlan",
@@ -605,6 +608,7 @@ class WebControlsStaticTests(unittest.TestCase):
             "operation.operationCompiler",
             "function operationActionGate",
             "data-operation-gate-status",
+            "data-operation-repair-action",
             "Operation Compiler 阻断",
             "写入需确认",
             "Dry-run",
@@ -621,6 +625,7 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".operation-compiler-panel", self.css)
         self.assertIn(".operation-plan-stat", self.css)
         self.assertIn(".operation-compiler-check", self.css)
+        self.assertIn(".operation-compiler-repair-actions", self.css)
         self.assertIn(".workbench-action-button:disabled", self.css)
         self.assertIn(".workbench-action-button.blocked", self.css)
 

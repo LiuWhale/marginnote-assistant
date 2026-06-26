@@ -51,6 +51,7 @@ CURRENT_WEB_CONTROLS = ",".join(
         "operationCompilerSummary",
         "operationPlanStats",
         "operationCompilerChecks",
+        "operationCompilerRepairActions",
         "operationWorkspaceNextActions",
         "mindmapStudioPanel",
         "mindmapStudioSummary",

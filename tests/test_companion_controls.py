@@ -3755,6 +3755,9 @@ class CompanionControlsTests(unittest.TestCase):
             compiler_checks = {item["id"]: item for item in planned["operationCompiler"]["checks"]}
             self.assertEqual(compiler_checks["dry_run"]["tone"], "block")
             self.assertIn("unverified-note-api", planned["dryRun"]["checks"][0]["reason"])
+            repair_actions = {item["id"]: item for item in planned["operationCompiler"]["repairActions"]}
+            self.assertEqual(repair_actions["refresh_native_capabilities"]["handler"], "refreshNativeCapabilities")
+            self.assertEqual(repair_actions["open_settings"]["handler"], "openConfigPage")
 
     def test_workflow_start_enqueues_safe_steps_and_pauses_at_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

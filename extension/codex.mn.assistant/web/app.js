@@ -161,6 +161,7 @@
     'operationCompilerSummary',
     'operationPlanStats',
     'operationCompilerChecks',
+    'operationCompilerRepairActions',
     'operationWorkspaceNextActions',
     'mindmapStudioPanel',
     'mindmapStudioSummary',
@@ -2735,6 +2736,57 @@
     return row;
   }
 
+  function runOperationCompilerRepairAction(action) {
+    action = action || {};
+    var handler = String(action.handler || '');
+    if (handler === 'refreshNativeCapabilities') {
+      refreshNativeCapabilities();
+      return;
+    }
+    if (handler === 'openConfigPage') {
+      openConfigPage();
+      return;
+    }
+    if (handler === 'cacheCurrentPdf') {
+      cacheCurrentPdf();
+      return;
+    }
+    if (handler === 'openPermissionSettings') {
+      openPermissionSettings();
+      return;
+    }
+    addMessage('assistant', action.detail || action.label || '这个修复动作暂未绑定处理器。');
+  }
+
+  function renderOperationCompilerRepairActions(compiler) {
+    var target = byId('operationCompilerRepairActions');
+    if (!target) return;
+    compiler = compiler || {};
+    var actions = compiler.repairActions || [];
+    if (!actions.length) {
+      replaceElementChildren(target, []);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < actions.length && i < 4; i++) {
+      (function(action) {
+        action = action || {};
+        var button = document.createElement('button');
+        button.className = 'operation-compiler-repair-button';
+        button.type = 'button';
+        button.textContent = action.label || action.id || '修复';
+        button.title = action.detail || '';
+        button.setAttribute('data-operation-repair-action', action.id || action.handler || 'repair');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runOperationCompilerRepairAction(action);
+        });
+        nodes.push(button);
+      })(actions[i]);
+    }
+    replaceElementChildren(target, nodes);
+  }
+
   function renderOperationCompilerPanel(operation) {
     operation = operation || {};
     var panel = byId('operationCompilerPanel');
@@ -2774,6 +2826,7 @@
         replaceElementChildren(checks, rows);
       }
     }
+    renderOperationCompilerRepairActions(compiler);
   }
 
   function refreshKnowledgeWorkspace(manual) {

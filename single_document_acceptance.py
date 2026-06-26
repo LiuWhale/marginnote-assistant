@@ -208,6 +208,7 @@ def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookm
         "operationCompilerSummary",
         "operationPlanStats",
         "operationCompilerChecks",
+        "operationCompilerRepairActions",
         "operationWorkspaceNextActions",
         "mindmapStudioPanel",
         "mindmapStudioSummary",
