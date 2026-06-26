@@ -89,7 +89,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.32"
+CURRENT_PLUGIN_VERSION = "0.4.33"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -1673,6 +1673,124 @@ def notebook_workspace_primary_actions(
     return actions
 
 
+def notebook_runbook_step(
+    step_id: str,
+    title: str,
+    status: str,
+    detail: str,
+    *,
+    action: dict[str, Any] | None = None,
+    evidence: str = "",
+) -> dict[str, Any]:
+    tone = {
+        "ready": "ready",
+        "action_required": "warning",
+        "blocked": "danger",
+        "pending": "secondary",
+    }.get(status, "secondary")
+    return {
+        "schema": "codex.mn.notebookRunbookStep.v1",
+        "id": step_id,
+        "title": title,
+        "status": status,
+        "tone": tone,
+        "detail": detail,
+        "evidence": evidence,
+        "action": action if isinstance(action, dict) else {},
+    }
+
+
+def notebook_runbook_summary(steps: list[dict[str, Any]]) -> dict[str, int]:
+    ready = sum(1 for step in steps if step.get("status") == "ready")
+    blocked = sum(1 for step in steps if step.get("status") == "blocked")
+    action_required = sum(1 for step in steps if step.get("status") == "action_required")
+    pending = sum(1 for step in steps if step.get("status") == "pending")
+    return {
+        "total": len(steps),
+        "ready": ready,
+        "blocked": blocked,
+        "actionRequired": action_required,
+        "pending": pending,
+    }
+
+
+def notebook_workspace_runbook(
+    summary: dict[str, Any],
+    primary_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    actions_by_id = {str(item.get("id") or ""): item for item in primary_actions if isinstance(item, dict)}
+    focus = summary.get("focusObject") if isinstance(summary.get("focusObject"), dict) else {}
+    objects = summary.get("objects") if isinstance(summary.get("objects"), dict) else {}
+    mindmap = summary.get("mindmap") if isinstance(summary.get("mindmap"), dict) else {}
+    workflows = summary.get("workflows") if isinstance(summary.get("workflows"), dict) else {}
+    ledger = summary.get("ledger") if isinstance(summary.get("ledger"), dict) else {}
+    readiness = summary.get("readiness") if isinstance(summary.get("readiness"), dict) else {}
+    has_context = bool(summary.get("topicid") or summary.get("bookmd5") or summary.get("documentTitle") or object_ref_has_identity(focus))
+    registry_count = int(objects.get("registry") or 0)
+    mindmap_ready = str(mindmap.get("status") or "") == "available"
+    workflow_count = int(workflows.get("runCount") or 0)
+    ledger_total = int(ledger.get("total") or 0)
+    mn_api_available = bool(readiness.get("mnApiAvailable"))
+
+    steps = [
+        notebook_runbook_step(
+            "context_scope",
+            "确认上下文",
+            "ready" if has_context else "blocked",
+            "已识别当前 notebook、文档或 MNObject。" if has_context else "还没有可用的 MarginNote 上下文。",
+            evidence=str(summary.get("documentTitle") or summary.get("bookmd5") or summary.get("topicid") or ""),
+        ),
+        notebook_runbook_step(
+            "scan_objects",
+            "扫描 MN 对象",
+            "ready" if registry_count > 0 else ("action_required" if mn_api_available else "blocked"),
+            f"Registry 已有 {registry_count} 个原生对象。" if registry_count > 0 else "需要扫描当前 notebook 的原生对象，Object Browser 才不是只看聊天和本地证据。",
+            action=actions_by_id.get("scan_mn_objects"),
+            evidence=f"objects={int(objects.get('total') or 0)} / registry={registry_count}",
+        ),
+        notebook_runbook_step(
+            "mindmap_baseline",
+            "读取脑图基线",
+            "ready" if mindmap_ready else ("action_required" if mn_api_available else "blocked"),
+            f"已读取 {int(mindmap.get('nodeCount') or 0)} 个脑图节点。" if mindmap_ready else "需要读取当前脑图树，后续 Diff/合并/回滚才有真实基线。",
+            action=actions_by_id.get("read_mindmap_tree"),
+            evidence=str(mindmap.get("rootTitle") or mindmap.get("updatedAt") or ""),
+        ),
+        notebook_runbook_step(
+            "operation_plan",
+            "生成操作计划",
+            "action_required" if has_context else "blocked",
+            "把当前对象、权限、目标脑图和写入意图编译成 Operation Plan，再决定是否写入。" if has_context else "缺少上下文，不能生成可靠操作计划。",
+            action=actions_by_id.get("plan_next_operation"),
+            evidence=f"permission={readiness.get('permission') or 'unknown'} / mnApi={readiness.get('mnApiBackend') or 'unknown'}",
+        ),
+        notebook_runbook_step(
+            "workflow_runtime",
+            "检查工作流",
+            "ready" if workflow_count > 0 else "pending",
+            f"已有 {workflow_count} 个 workflow run，最近状态：{workflows.get('latestStatus') or 'unknown'}。" if workflow_count > 0 else "还没有当前文档 workflow run；长任务应从这里进入可审计运行。",
+            action=actions_by_id.get("open_workflows"),
+            evidence=f"templates={int(workflows.get('templateCount') or 0)}",
+        ),
+        notebook_runbook_step(
+            "operation_evidence",
+            "核对操作证据",
+            "ready" if ledger_total > 0 else "pending",
+            f"Operation Ledger 已有 {ledger_total} 条证据。" if ledger_total > 0 else "还没有当前文档账本证据；写入、确认和回滚应在这里留痕。",
+            action=actions_by_id.get("open_operation_ledger"),
+            evidence=f"filtered={int(ledger.get('filteredTotal') or ledger_total)} / total={ledger_total}",
+        ),
+    ]
+    counts = notebook_runbook_summary(steps)
+    status = "blocked" if counts["blocked"] else ("action_required" if counts["actionRequired"] else ("ready" if counts["ready"] == counts["total"] else "pending"))
+    return {
+        "schema": "codex.mn.notebookRunbook.v1",
+        "status": status,
+        "summary": counts,
+        "steps": steps,
+    }
+
+
 def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
@@ -1767,7 +1885,7 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
             "nativeAvailable": bool(mn_api.get("nativeAvailable")),
         },
     }
-    summary["primaryActions"] = notebook_workspace_primary_actions(
+    primary_actions = notebook_workspace_primary_actions(
         payload,
         object_ref,
         mindmap_ready=mindmap_ready,
@@ -1775,6 +1893,8 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
         workflow_count=workflow_count,
         ledger_total=ledger_total,
     )
+    summary["primaryActions"] = primary_actions
+    summary["runbook"] = notebook_workspace_runbook(summary, primary_actions)
     return {
         "ok": True,
         "message": "已读取 Notebook Workspace。",
@@ -4358,7 +4478,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.32-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.33-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )

@@ -44,6 +44,9 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="notebookWorkspaceWorkflow"',
             'id="notebookWorkspaceLedger"',
             'id="notebookWorkspaceActions"',
+            'id="notebookWorkspaceRunbook"',
+            'id="notebookWorkspaceRunbookSummary"',
+            'id="notebookWorkspaceRunbookList"',
             'id="commandPanePanel"',
             'id="commandPaneHeader"',
             'id="commandPaneStatus"',
@@ -177,6 +180,9 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("postCompanion('notebook_workspace'", self.js)
         self.assertIn("notebookWorkspaceRefreshButton", self.js)
         self.assertIn("data-notebook-workspace-action", self.js)
+        self.assertIn("renderNotebookWorkspaceRunbook", self.js)
+        self.assertIn("data-notebook-runbook-step", self.js)
+        self.assertIn("data.runbook", self.js)
         self.assertIn("data-product-mode", self.js)
         self.assertIn("data-workspace-surface", self.js)
         self.assertIn("modeSwitchBar", self.js)
@@ -197,6 +203,8 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".notebook-workspace-panel", self.css)
         self.assertIn(".notebook-workspace-card", self.css)
         self.assertIn(".notebook-workspace-action", self.css)
+        self.assertIn(".notebook-runbook", self.css)
+        self.assertIn(".notebook-runbook-step", self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workbenchTabs', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] .workbench-panel', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workspaceNavigator', self.css)

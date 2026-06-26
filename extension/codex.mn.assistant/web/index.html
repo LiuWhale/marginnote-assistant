@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260627-mindmap-studio-v1">
+  <link rel="stylesheet" href="app.css?v=20260627-notebook-runbook-v1">
 </head>
 <body>
   <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
@@ -90,6 +90,17 @@
         <div id="notebookWorkspaceLedger" class="notebook-workspace-card">账本：等待证据</div>
       </div>
       <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
+      <section id="notebookWorkspaceRunbook" class="notebook-runbook idle" aria-label="Notebook Runbook">
+        <div class="notebook-runbook-header">
+          <div>
+            <div class="notebook-runbook-kicker">Notebook Runbook</div>
+            <div id="notebookWorkspaceRunbookSummary" class="notebook-runbook-summary">等待工作台检查当前 notebook 的下一步。</div>
+          </div>
+        </div>
+        <div id="notebookWorkspaceRunbookList" class="notebook-runbook-list">
+          <div class="notebook-runbook-step empty">上下文、MN 对象、脑图基线、操作计划、workflow 和账本证据会在这里排成可执行步骤。</div>
+        </div>
+      </section>
     </section>
 
     <section id="workbenchTabs" class="workbench-tabs" role="tablist" aria-label="工作台">
@@ -664,6 +675,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260627-mindmap-studio-v1"></script>
+  <script src="app.js?v=20260627-notebook-runbook-v1"></script>
 </body>
 </html>

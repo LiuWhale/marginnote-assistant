@@ -4,6 +4,13 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.33 - 2026-06-27
+
+### Added
+
+- Added the first `Notebook Runbook` inside `Notebook Workspace`. The Companion now returns `codex.mn.notebookRunbook.v1` from `notebook_workspace`, turning the notebook overview into an executable checklist for context scope, native MN object scanning, mind-map baseline reading, operation planning, workflow runtime, and Operation Ledger evidence. Each step carries status, evidence, and an action that drives the existing object scan, mind-map read, operation plan, workflow, or ledger surface.
+- Promoted the runbook to a required WebView/runtime surface by adding dedicated `notebookWorkspaceRunbook`, `notebookWorkspaceRunbookSummary`, and `notebookWorkspaceRunbookList` controls to the panel, static checks, doctor checks, and single-document acceptance control list.
+
 ## 0.4.32 - 2026-06-27
 
 ### Changed

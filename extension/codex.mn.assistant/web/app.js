@@ -2224,6 +2224,79 @@
     }
   }
 
+  function notebookRunbookStatusLabel(status) {
+    status = String(status || '');
+    if (status === 'ready') return '通过';
+    if (status === 'action_required') return '需操作';
+    if (status === 'blocked') return '阻断';
+    if (status === 'pending') return '等待';
+    return status || '未知';
+  }
+
+  function renderNotebookWorkspaceRunbook(runbook) {
+    runbook = runbook || {};
+    var panel = byId('notebookWorkspaceRunbook');
+    var summaryNode = byId('notebookWorkspaceRunbookSummary');
+    var list = byId('notebookWorkspaceRunbookList');
+    if (!panel || !summaryNode || !list) return;
+    var counts = runbook.summary || {};
+    var status = String(runbook.status || 'idle');
+    panel.className = 'notebook-runbook ' + status;
+    setText(
+      'notebookWorkspaceRunbookSummary',
+      'Runbook：' +
+        '通过 ' + (counts.ready || 0) +
+        ' / 需操作 ' + (counts.actionRequired || 0) +
+        ' / 阻断 ' + (counts.blocked || 0) +
+        ' / 等待 ' + (counts.pending || 0)
+    );
+    var steps = runbook.steps || [];
+    if (!steps.length) {
+      replaceElementChildren(list, [textNode('div', 'notebook-runbook-step empty', '等待工作台检查当前 notebook。')]);
+      return;
+    }
+    var nodes = [];
+    for (var i = 0; i < steps.length; i++) {
+      (function(step) {
+        step = step || {};
+        var rowStatus = String(step.status || 'pending');
+        var rowTone = String(step.tone || rowStatus || 'secondary');
+        var row = document.createElement('div');
+        row.className = 'notebook-runbook-step ' + rowTone + ' ' + rowStatus;
+        row.setAttribute('data-notebook-runbook-step', step.id || 'step');
+
+        var badge = textNode('div', 'notebook-runbook-step-status', notebookRunbookStatusLabel(rowStatus));
+        var main = document.createElement('div');
+        main.className = 'notebook-runbook-step-main';
+        main.appendChild(textNode('div', 'notebook-runbook-step-title', step.title || 'Notebook step'));
+        main.appendChild(textNode('div', 'notebook-runbook-step-detail', step.detail || '等待检查。'));
+        if (step.evidence) main.appendChild(textNode('div', 'notebook-runbook-step-evidence', step.evidence));
+        row.appendChild(badge);
+        row.appendChild(main);
+
+        var action = step.action || {};
+        if (action && action.action) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'notebook-runbook-action ' + (action.tone || rowTone || 'secondary');
+          button.textContent = action.label || actionLabel(action.action);
+          button.title = action.detail || '';
+          button.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runNotebookWorkspaceAction(action);
+          });
+          row.appendChild(button);
+        } else {
+          var spacer = document.createElement('span');
+          spacer.className = 'notebook-runbook-action-spacer';
+          row.appendChild(spacer);
+        }
+        nodes.push(row);
+      })(steps[i]);
+    }
+    replaceElementChildren(list, nodes);
+  }
+
   function renderNotebookWorkspace(data) {
     if (arguments.length) state.notebookWorkspace = data || {};
     data = state.notebookWorkspace || {};
@@ -2248,6 +2321,7 @@
     setText('notebookWorkspaceReview', notebookWorkspaceCardText('复习', review.total || 0, '到期 ' + (review.due || 0) + ' / 新卡 ' + (review.new || 0)));
     setText('notebookWorkspaceWorkflow', notebookWorkspaceCardText('工作流', workflows.runCount || 0, workflows.latestStatus || 'none'));
     setText('notebookWorkspaceLedger', notebookWorkspaceCardText('账本', ledger.total || 0, '证据项'));
+    renderNotebookWorkspaceRunbook(data.runbook || {});
     var target = byId('notebookWorkspaceActions');
     if (!target) return;
     var actions = data.primaryActions || [];

@@ -421,6 +421,164 @@ h1 {
   color: var(--ink);
 }
 
+.notebook-runbook {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 8px;
+  border: 1px solid #cfded8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.notebook-runbook.ready {
+  border-color: #bfdcd2;
+  background: #f4fbf8;
+}
+
+.notebook-runbook.warning,
+.notebook-runbook.action_required {
+  border-color: #f2d280;
+  background: #fff9e7;
+}
+
+.notebook-runbook.danger,
+.notebook-runbook.blocked {
+  border-color: #eab0a6;
+  background: #fff6f4;
+}
+
+.notebook-runbook-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notebook-runbook-kicker {
+  color: var(--accent-strong);
+  font-size: 10.5px;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.notebook-runbook-summary {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.notebook-runbook-list {
+  display: grid;
+  gap: 6px;
+}
+
+.notebook-runbook-step {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 7px;
+  border: 1px solid #d9e4ef;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.notebook-runbook-step.empty {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.notebook-runbook-step.ready {
+  border-color: #bfdcd2;
+  background: #f2fbf7;
+}
+
+.notebook-runbook-step.warning,
+.notebook-runbook-step.action_required {
+  border-color: #f2d280;
+  background: #fff9e7;
+}
+
+.notebook-runbook-step.danger,
+.notebook-runbook-step.blocked {
+  border-color: #eab0a6;
+  background: #fff6f4;
+}
+
+.notebook-runbook-step.pending,
+.notebook-runbook-step.secondary {
+  border-color: #d9e4ef;
+  background: #fbfcfd;
+}
+
+.notebook-runbook-step-status {
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.notebook-runbook-step-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.notebook-runbook-step-title {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.notebook-runbook-step-detail {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 720;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.notebook-runbook-step-evidence {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.notebook-runbook-action {
+  min-width: 54px;
+  min-height: 28px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+  padding: 4px 7px;
+}
+
+.notebook-runbook-action.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.notebook-runbook-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .workbench-tabs {
   display: none;
   gap: 6px;

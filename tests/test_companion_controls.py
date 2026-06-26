@@ -3791,6 +3791,17 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(summary["workflows"]["latestStatus"], workflow["summary"]["status"])
             self.assertGreaterEqual(summary["objects"]["total"], 1)
             self.assertGreaterEqual(summary["ledger"]["total"], 1)
+            runbook = summary["runbook"]
+            self.assertEqual(runbook["schema"], "codex.mn.notebookRunbook.v1")
+            self.assertEqual(runbook["summary"]["total"], 6)
+            self.assertGreaterEqual(runbook["summary"]["ready"], 2)
+            self.assertGreaterEqual(runbook["summary"]["actionRequired"], 1)
+            runbook_steps = {item["id"]: item for item in runbook["steps"]}
+            self.assertEqual(runbook_steps["context_scope"]["status"], "ready")
+            self.assertEqual(runbook_steps["mindmap_baseline"]["status"], "ready")
+            self.assertEqual(runbook_steps["scan_objects"]["action"]["action"], "request_mn_object_registry_scan")
+            self.assertEqual(runbook_steps["operation_plan"]["action"]["action"], "agent_plan")
+            self.assertEqual(runbook_steps["operation_evidence"]["action"]["action"], "operation_ledger_list")
             action_ids = [item["id"] for item in summary["primaryActions"]]
             self.assertEqual(action_ids[:3], ["scan_mn_objects", "read_mindmap_tree", "plan_next_operation"])
             self.assertEqual(workspace["objectBrowser"]["schema"], "codex.mn.objectBrowser.v1")
