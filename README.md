@@ -11,9 +11,9 @@ Codex Companion is a local-first AI assistant plugin for MarginNote 4. It connec
 
 It is not limited to academic papers. Papers, book chapters, course material, project documents, meeting notes, and any document that MarginNote can expose through its APIs can be used as context.
 
-The public 0.4.x line is still a preview and should not be mistaken for the end-state product. Its current chat panel, answer buttons, settings, queue, logs, and first Agent Workspace are migration scaffolding. The long-term target is **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
+The public 0.4.x line is still a preview and should not be mistaken for the end-state product. Its current chat panel, answer buttons, settings, queue, logs, and first Agent Workspace are migration scaffolding. The long-term target is **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, skills, external automation requests, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
 
-The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS: it opens into a Notebook Workspace, not a blank chat box. `Chat Mode` remains useful for quick reading questions and intent capture, but it becomes a command pane next to Object Browser, Mindmap Studio, Card Factory, Knowledge Graph, Workflow Builder, and Operation Ledger Explorer. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
+The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS: it opens into a Notebook Workspace, not a blank chat box. `Chat Mode` remains useful for quick reading questions and intent capture, but it becomes a command pane next to Object Browser, Mindmap Studio, Card Factory, Knowledge Graph, Workflow Builder, External Automation Gateway, Skill Center, and Operation Ledger Explorer. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. The seven non-negotiable kernels are Live MN Object Kernel, Source Registry, Operation Compiler, Transactional Native Editor, Workflow Runtime, Skill Runtime, and Verification Agent. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
 
 > This project is not affiliated with MarginNote, OpenAI, or Apple.
 
@@ -43,6 +43,8 @@ The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Compa
 - Show an object-scoped Object Browser in the object workspace. It aggregates the current focus object, Object Graph nodes, Object Activity items, Operation Ledger entries, and first-stage `MNObject Registry` entries into one browsable object list with per-object actions. The browser can now filter by object type, kind, and search text, so users can narrow the list to Registry entries, mind-map nodes, activity items, or ledger records. Native mind-map tree cache nodes are registered as `mnobj:note:<noteId>` objects when MarginNote reports `mindmapTreeReadFinished`; the `objectRegistryScanButton` can also request `request_mn_object_registry_scan`, enqueue `scan_mn_objects`, and ingest `mnObjectRegistryScanFinished` objects with `native_object_scan` evidence. Scanned objects are promoted into Object Graph as `mn_note` nodes, including `native_object_scan` parent-child `contains` edges; selecting a scanned object opens that object's graph, activity feed, and ledger with its own `mnObject` payload.
 - Show an object-scoped Object Graph in the object workspace, linking the current `MNObject` to related conversations, workflow runs, AI edit transactions, external automation requests, diagnostic evidence, Knowledge Index entities, cached native MarginNote mind-map nodes with parent-child edges, and user-maintained `manual_relation` edges between `MNObject` IDs. Saving or deleting those manual edges creates auditable `object_graph_manual_relation` ledger events with `manualRelation` evidence.
 - Show an object activity feed in the object workspace, aggregating conversations, workflow runs, AI edit transactions, and diagnostic logs for the current `MNObject`, with direct actions to open or inspect each item.
+- Use first-stage Skill Runtime instead of plain custom prompts. Valid skills must pass `codex.mn.skillManifest.v1` validation; write/delete skills require confirmation, dry-run, rollback, and acceptance rules before they can produce operation plans or skill-run evidence.
+- Inspect first-stage Verification Agent reports in the operation evidence path. `codex.mn.verificationReport.v1` uses strict `PASS`, `FAIL`, and `UNKNOWN`; missing native object probes remain `UNKNOWN` rather than being treated as success.
 - Show an object-scoped Operation Ledger that aggregates workflow runs, AI edit transactions, external gateway requests, and manual Object Graph relationship events for the current `MNObject`; it can filter audit entries by entry type, status, and keyword, and selecting a ledger item opens an evidence detail panel in the object workspace with operation plan, dry-run/apply path, native command, native event timeline, native apply, rollback/residual, workflow confirmation state, callback evidence, and manual relationship evidence.
 - Verify rollback residuals with a native MarginNote object existence probe: Companion can ask the plugin to check real `noteId` objects after an AI edit reject, and the verification report uses that probe instead of only inferring residuals from deleted/failed counts.
 - Show a first-stage Workflow Run Inspector in the workflow workspace. Recent workflow runs can be opened to inspect each step's status, queue id, confirmation requirement, warning/blocking tone, and next action; recoverable failed or blocked direct/queueable steps expose a retry action, while write/confirmation steps still require accept/reject.
@@ -289,20 +291,20 @@ curl http://127.0.0.1:48761/status
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.39
+python3 package_release.py 0.4.40
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.39-latest-dist.zip --mnaddon release/CodexCompanion-0.4.39-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.39-latest-dist.zip --mnaddon release/CodexCompanion-0.4.39-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --mnaddon release/CodexCompanion-0.4.40-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --mnaddon release/CodexCompanion-0.4.40-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.39-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.40-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

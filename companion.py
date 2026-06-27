@@ -27,11 +27,15 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import agent_workbench
 import diagnostic_log
+import external_gateway
 import knowledge_index
 import marginnote_api_adapter
+import object_kernel
 import operation_runtime
+import source_registry
 import skill_marketplace
 import transaction_manager
+import verification_agent
 import workflow_engine
 import update_manager
 from runtime_config import (
@@ -90,7 +94,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.39"
+CURRENT_PLUGIN_VERSION = "0.4.40"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -221,6 +225,7 @@ READ_ONLY_ACTIONS = {
     "request_mn_object_existence_probe",
     "notebook_workspace",
     "object_browser",
+    "source_registry_action_record",
     "object_graph",
     "object_graph_relation_save",
     "object_graph_relation_delete",
@@ -250,6 +255,8 @@ READ_ONLY_ACTIONS = {
     "workflow_status",
     "workflow_list",
     "workflow_cancel",
+    "workflow_resume",
+    "workflow_next_step",
     "workflow_retry_step",
     "external_gateway_start_workflow",
     "external_gateway_request_status",
@@ -257,6 +264,9 @@ READ_ONLY_ACTIONS = {
     "skill_marketplace_status",
     "skill_install",
     "skill_uninstall",
+    "skill_operation_plan",
+    "skill_run_record",
+    "skill_run_latest",
     "knowledge_index_status",
     "knowledge_index_search",
     "knowledge_index_ingest_context",
@@ -321,9 +331,13 @@ NATIVE_QUEUE_ACTIONS = {
 }
 
 diagnostic_log.configure(DIAGNOSTIC_LOG_PATH, max_lines=DIAGNOSTIC_LOG_MAX_LINES)
+external_gateway.configure(ROOT)
 knowledge_index.configure(ROOT)
+object_kernel.configure(ROOT)
+source_registry.configure(ROOT)
 skill_marketplace.configure(ROOT)
 transaction_manager.configure(ROOT)
+workflow_engine.configure(ROOT)
 SENSITIVE_LOG_KEYS = diagnostic_log.SENSITIVE_LOG_KEYS
 LARGE_LOG_KEYS = diagnostic_log.LARGE_LOG_KEYS
 diagnostic_timestamp = diagnostic_log.diagnostic_timestamp
@@ -1319,76 +1333,43 @@ def external_gateway_base_record(payload: dict[str, Any], request_id: str) -> di
 def write_external_gateway_record(record: dict[str, Any]) -> dict[str, Any]:
     record = dict(record)
     record["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    write_json_file(external_gateway_request_path(str(record.get("requestId") or "")), record)
-    return record
+    stored = external_gateway.record_request(record)
+    return stored.get("externalGateway") if isinstance(stored.get("externalGateway"), dict) else record
 
 
 def external_gateway_request_status(payload: dict[str, Any]) -> dict[str, Any]:
-    request_id = clean_external_gateway_id(payload.get("requestId") or payload.get("id") or "")
-    record = read_json_file(external_gateway_request_path(request_id), {})
-    if not isinstance(record, dict) or not record:
-        return {"ok": False, "message": "未找到外部自动化请求。", "requestId": request_id}
-    return {"ok": True, "message": "已读取外部自动化请求。", "externalGateway": record}
+    return external_gateway.request_status(payload)
 
 
 def external_gateway_callback_update(payload: dict[str, Any]) -> dict[str, Any]:
-    request_id = clean_external_gateway_id(payload.get("requestId") or payload.get("id") or "")
-    path = external_gateway_request_path(request_id)
-    record = read_json_file(path, {})
-    if not isinstance(record, dict) or not record:
-        return {"ok": False, "message": "未找到外部自动化请求，无法记录回调。", "requestId": request_id}
-
-    raw_status = str(payload.get("callbackStatus") or payload.get("status") or "").strip().lower()
-    if raw_status in {"ok", "done", "complete", "completed"}:
-        callback_status = "success"
-    elif raw_status in {"fail", "failed", "failure"}:
-        callback_status = "error"
-    elif raw_status in {"success", "error"}:
-        callback_status = raw_status
-    else:
-        callback_status = "unknown"
-
-    callback_payload = payload.get("payload")
-    if callback_payload is None:
-        callback_payload = payload.get("result") if "result" in payload else {}
-    if not isinstance(callback_payload, dict):
-        callback_payload = {"value": callback_payload}
-
-    callback = record.get("callback") if isinstance(record.get("callback"), dict) else {}
-    history = callback.get("history") if isinstance(callback.get("history"), list) else []
-    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    event = {
-        "status": callback_status,
-        "message": str(payload.get("message") or ""),
-        "payload": callback_payload,
-        "receivedAt": now,
-    }
-    callback = {
-        **callback,
-        "status": callback_status,
-        "message": event["message"],
-        "payload": callback_payload,
-        "receivedAt": now,
-        "receivedCount": len(history) + 1,
-        "history": [*history, event],
-    }
-    record = {
-        **record,
-        "stage": f"callback_{callback_status}" if callback_status in {"success", "error"} else "callback_received",
-        "callback": callback,
-        "result": {
-            **(record.get("result") if isinstance(record.get("result"), dict) else {}),
-            "callbackStatus": callback_status,
-            "callbackMessage": event["message"],
-        },
-    }
-    record = write_external_gateway_record(record)
-    return {"ok": True, "message": "已记录外部自动化回调。", "externalGateway": record}
+    return external_gateway.update_callback(payload)
 
 
 def external_gateway_start_workflow(payload: dict[str, Any]) -> dict[str, Any]:
-    request_id = clean_external_gateway_id(payload.get("requestId") or payload.get("_request_id") or "")
-    record = write_external_gateway_record(external_gateway_base_record(payload, request_id))
+    gateway_action = str(
+        payload.get("requestedAction")
+        or payload.get("externalAction")
+        or payload.get("gatewayAction")
+        or payload.get("operation")
+        or "workflow_start"
+    ).strip()
+    normalized = external_gateway.normalize_request({**payload, "action": gateway_action})
+    if not normalized.get("ok"):
+        return normalized
+    normalized_request = normalized.get("externalGatewayRequest") if isinstance(normalized.get("externalGatewayRequest"), dict) else {}
+    request_id = clean_external_gateway_id(normalized_request.get("requestId") or payload.get("requestId") or payload.get("_request_id") or "")
+    record = external_gateway_base_record(payload, request_id)
+    normalized_callback = normalized_request.get("callback") if isinstance(normalized_request.get("callback"), dict) else {}
+    if normalized_callback.get("success") or normalized_callback.get("error"):
+        record["callback"] = normalized_callback
+    record = write_external_gateway_record(
+        {
+            **record,
+            "requestedAction": str(normalized_request.get("requestedAction") or normalized_request.get("action") or "workflow_start"),
+            "gatewayRequest": normalized_request,
+            "agentOperation": normalized.get("agentOperation") if isinstance(normalized.get("agentOperation"), dict) else {},
+        }
+    )
     run_payload = {
         **payload,
         "source": "external_gateway",
@@ -1462,10 +1443,13 @@ def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
         action = str(step.get("action") or "")
         step_record = {
             **step,
+            "stepId": str(step.get("id") or step.get("action") or f"step_{index}"),
             "index": index,
             "status": "pending",
             "queueId": "",
             "message": "",
+            "evidence": {},
+            "events": [],
         }
         if action in WORKFLOW_DIRECT_ACTIONS:
             if action == "request_pdf_cache":
@@ -1476,6 +1460,7 @@ def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
             step_record["message"] = str(result.get("message") or "")
             if isinstance(result.get("queued"), dict):
                 step_record["queueId"] = str(result["queued"].get("id") or "")
+                step_record["evidence"]["queueId"] = step_record["queueId"]
                 queued_records.append(result["queued"])
             direct_results.append({"stepId": step.get("id"), "action": action, "ok": bool(result.get("ok")), "message": result.get("message")})
         elif action in WORKFLOW_QUEUEABLE_RAW_ACTIONS:
@@ -1501,6 +1486,7 @@ def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
             step_record["message"] = str(queued.get("message") or "")
             if isinstance(queued.get("queued"), dict):
                 step_record["queueId"] = str(queued["queued"].get("id") or "")
+                step_record["evidence"]["queueId"] = step_record["queueId"]
                 queued_records.append(queued["queued"])
         elif action in WORKFLOW_CONFIRMATION_ACTIONS or step.get("writes"):
             step_record["status"] = "waiting_confirmation" if step.get("writes") else "manual"
@@ -1515,7 +1501,9 @@ def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
         run_status = "partial"
     run = {
         "id": run_id,
+        "runId": run_id,
         "schema": "codex.mn.workflowRun.v1",
+        "runtimeSchema": "codex.mn.workflowRuntime.v2",
         "workflowId": str(workflow.get("id") or ""),
         "title": str(workflow.get("title") or ""),
         "status": run_status,
@@ -1528,11 +1516,18 @@ def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
         "prompt": str(payload.get("prompt") or ""),
         "preview": workflow,
         "steps": run_steps,
+        "events": [
+            {
+                "event": "workflow_created",
+                "ts": now,
+                "status": run_status,
+                "message": "workflow_start",
+            }
+        ],
     }
     if isinstance(payload.get("externalRequest"), dict):
         run["externalRequest"] = payload["externalRequest"]
-    WORKFLOW_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    write_json_file(workflow_run_path(run_id), run)
+    workflow_engine.save_run(run)
     summary = workflow_run_summary(run)
     return {
         "ok": True,
@@ -2167,6 +2162,16 @@ def notebook_source_registry_actions(
     return actions, plan
 
 
+def source_registry_action_record(payload: dict[str, Any]) -> dict[str, Any]:
+    result = source_registry.record_action_run(payload)
+    run = result.get("sourceActionRun") if isinstance(result.get("sourceActionRun"), dict) else {}
+    return {
+        "ok": bool(result.get("ok")),
+        "message": str(run.get("message") or "已记录来源动作状态。"),
+        "sourceActionRun": run,
+    }
+
+
 def notebook_source_registry(
     payload: dict[str, Any],
     summary: dict[str, Any],
@@ -2289,6 +2294,9 @@ def notebook_source_registry(
         source_readable=source_readable,
         pending_cache=bool(pending_cache),
     )
+    latest_run = source_registry.latest_action_run(topic_id, book_md5)
+    if latest_run:
+        action_plan["latestRun"] = latest_run
     return {
         "schema": "codex.mn.sourceRegistry.v1",
         "status": status,
@@ -2306,10 +2314,12 @@ def notebook_source_registry(
             "searchRoots": search_root_count,
             "explicitPdf": explicit_pdf_count,
             "pendingNativeCache": 1 if pending_cache else 0,
+            "latestActionStatus": str(latest_run.get("status") or "") if latest_run else "",
         },
         "sources": sources[:40],
         "sourceActions": source_actions,
         "actionPlan": action_plan,
+        "latestRun": latest_run,
         "primaryAction": action_plan.get("recommendedAction") or actions_by_id.get("cache_current_pdf") or {},
     }
 
@@ -2691,14 +2701,35 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
 
 def workflow_cancel(payload: dict[str, Any]) -> dict[str, Any]:
     run_id = str(payload.get("workflowRunId") or payload.get("id") or "")
-    loaded = load_workflow_run(run_id)
-    if not loaded.get("ok"):
-        return loaded
-    run = loaded["workflowRun"]
-    run["status"] = "cancelled"
-    run["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    write_json_file(workflow_run_path(str(run.get("id") or run_id)), run)
-    return {"ok": True, "message": "工作流已标记为取消。", "workflowRun": run, "summary": workflow_run_summary(run)}
+    cancelled = workflow_engine.cancel_run(run_id)
+    if not cancelled.get("ok"):
+        return {"ok": False, "message": str(cancelled.get("message") or "工作流取消失败。"), "workflowRunId": run_id}
+    run = cancelled["workflowRun"]
+    return {"ok": True, "message": "工作流已标记为取消。", "workflowRun": run, "summary": workflow_run_summary(run), "runInspector": workflow_run_inspector(run)}
+
+
+def workflow_resume(payload: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(payload.get("workflowRunId") or payload.get("id") or "")
+    resumed = workflow_engine.resume_run(run_id)
+    if not resumed.get("ok"):
+        return {"ok": False, "message": str(resumed.get("message") or "工作流恢复失败。"), "workflowRunId": run_id}
+    run = resumed["workflowRun"]
+    return {
+        "ok": True,
+        "message": "工作流已恢复。",
+        "workflowRun": run,
+        "summary": workflow_run_summary(run),
+        "runInspector": workflow_run_inspector(run),
+        "nextStep": resumed.get("nextStep") if isinstance(resumed.get("nextStep"), dict) else {},
+    }
+
+
+def workflow_next_step(payload: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(payload.get("workflowRunId") or payload.get("id") or "")
+    step = workflow_engine.next_runnable_step(run_id)
+    if not step.get("ok"):
+        return {"ok": False, "message": str(step.get("message") or "没有可继续的 workflow step。"), "workflowRunId": run_id}
+    return {"ok": True, "message": "已读取下一步 workflow step。", "nextStep": step}
 
 
 def knowledge_index_ingest_context(payload: dict[str, Any]) -> dict[str, Any]:
@@ -5260,7 +5291,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.39-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.40-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -6401,7 +6432,7 @@ def external_gateway_operation_ledger_entry(record: dict[str, Any]) -> dict[str,
     result = record.get("result") if isinstance(record.get("result"), dict) else {}
     callback = record.get("callback") if isinstance(record.get("callback"), dict) else {}
     caller = str(record.get("caller") or "external")
-    return operation_ledger_entry(
+    entry = operation_ledger_entry(
         ledger_id=operation_ledger_id("external", request_id),
         entry_type="external_gateway_request",
         source_id=request_id,
@@ -6419,6 +6450,20 @@ def external_gateway_operation_ledger_entry(record: dict[str, Any]) -> dict[str,
             "callbackReceived": int(callback.get("receivedCount") or 0),
         },
     )
+    entry["external"] = {
+        "schema": "codex.mn.externalGatewayEvidence.v1",
+        "requestId": request_id,
+        "caller": caller,
+        "action": str(record.get("requestedAction") or record.get("action") or "workflow_start"),
+        "workflowRunId": str(record.get("workflowRunId") or ""),
+        "callback": {
+            "success": str(callback.get("success") or ""),
+            "error": str(callback.get("error") or ""),
+            "status": str(callback.get("status") or "not_configured"),
+            "receivedCount": int(callback.get("receivedCount") or 0),
+        },
+    }
+    return entry
 
 
 def manual_relation_operation_ledger_entry(event: dict[str, Any]) -> dict[str, Any]:
@@ -6616,6 +6661,7 @@ def transaction_operation_chain_evidence(record: dict[str, Any], verification: d
     applied_operations = mindmap_apply.get("appliedOperations") if isinstance(mindmap_apply.get("appliedOperations"), list) else []
     mindmap_verification = mindmap_apply.get("verification") if isinstance(mindmap_apply.get("verification"), dict) else {}
     created_note_ids = transaction_manager.unique_strings(record.get("createdNoteIds"))
+    created_card_ids = transaction_manager.unique_strings(record.get("createdCardIds"))
     applied_note_ids = transaction_manager.unique_strings(record.get("appliedNoteIds"))
     raw_events = record.get("events") if isinstance(record.get("events"), list) else []
     timeline: list[dict[str, Any]] = []
@@ -6666,6 +6712,7 @@ def transaction_operation_chain_evidence(record: dict[str, Any], verification: d
             "appliedCount": int(record.get("appliedCount") or len(applied_operations) or 0),
             "failedCount": int(record.get("failedCount") or 0),
             "createdNoteIds": created_note_ids,
+            "createdCardIds": created_card_ids,
             "appliedNoteIds": applied_note_ids,
             "appliedOperations": applied_operations,
             "verification": mindmap_verification,
@@ -6674,7 +6721,11 @@ def transaction_operation_chain_evidence(record: dict[str, Any], verification: d
             "schema": "codex.mn.rollbackEvidence.v1",
             "status": str(record.get("status") or ""),
             "deletedCount": int(record.get("deletedCount") or 0),
+            "deletedNoteIds": transaction_manager.unique_strings(record.get("deletedNoteIds")),
+            "deletedCardIds": transaction_manager.unique_strings(record.get("deletedCardIds")),
             "failedCount": int(record.get("failedCount") or 0),
+            "failedNoteIds": transaction_manager.unique_strings(record.get("failedNoteIds")),
+            "failedCardIds": transaction_manager.unique_strings(record.get("failedCardIds")),
             "rollbackComplete": bool(verification.get("rollbackComplete")),
             "requiresConfirmation": bool(verification.get("requiresConfirmation")),
             "accepted": bool(verification.get("accepted")),
@@ -6686,7 +6737,13 @@ def transaction_operation_chain_evidence(record: dict[str, Any], verification: d
             "schema": "codex.mn.residualObjectEvidence.v1",
             "remainingCount": int(verification.get("remainingCount") or 0),
             "remainingNoteIds": verification.get("remainingNoteIds") if isinstance(verification.get("remainingNoteIds"), list) else [],
+            "remainingCardIds": verification.get("remainingCardIds") if isinstance(verification.get("remainingCardIds"), list) else [],
+            "residualNoteIds": verification.get("residualNoteIds") if isinstance(verification.get("residualNoteIds"), list) else [],
+            "residualCardIds": verification.get("residualCardIds") if isinstance(verification.get("residualCardIds"), list) else [],
             "createdNoteIds": created_note_ids,
+            "createdCardIds": created_card_ids,
+            "deletedNoteIds": verification.get("deletedNoteIds") if isinstance(verification.get("deletedNoteIds"), list) else [],
+            "deletedCardIds": verification.get("deletedCardIds") if isinstance(verification.get("deletedCardIds"), list) else [],
             "targetNoteIds": verification.get("targetNoteIds") if isinstance(verification.get("targetNoteIds"), list) else [],
             "residualProof": verification.get("residualProof") if isinstance(verification.get("residualProof"), dict) else {},
         },
@@ -6740,6 +6797,7 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
                     "waitingStepIds": [str(step.get("id") or step.get("action") or "") for step in waiting],
                     "blockedStepIds": [str(step.get("id") or step.get("action") or "") for step in blocked],
                 },
+                "verificationReport": verification_agent.verify_workflow_run(record),
             }
         )
     elif prefix == "transaction":
@@ -6747,6 +6805,8 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
         if not record:
             return {"ok": False, "message": "读取 Operation Ledger 失败：事务不存在。", "ledgerId": ledger_id}
         verification = transaction_manager.verification_report(record)
+        operation_chain = transaction_operation_chain_evidence(record, verification)
+        native_apply = operation_chain.get("nativeApply") if isinstance(operation_chain.get("nativeApply"), dict) else {}
         entry = transaction_operation_ledger_entry(transaction_manager.transaction_summary(record))
         evidence.update(
             {
@@ -6754,7 +6814,14 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
                 "status": str(verification.get("status") or "unknown"),
                 "summary": str(verification.get("summary") or ""),
                 "verification": verification,
-                "operationChain": transaction_operation_chain_evidence(record, verification),
+                "verificationReport": verification_agent.verify_transaction(
+                    {
+                        "createdNoteIds": native_apply.get("createdNoteIds") if isinstance(native_apply.get("createdNoteIds"), list) else [],
+                        "createdCardIds": native_apply.get("createdCardIds") if isinstance(native_apply.get("createdCardIds"), list) else [],
+                        "nativeProbe": record.get("nativeProbe") if isinstance(record.get("nativeProbe"), dict) else {},
+                    }
+                ),
+                "operationChain": operation_chain,
             }
         )
     elif prefix == "external":
@@ -6769,6 +6836,20 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
                 "entryType": "external_gateway_request",
                 "status": str(record.get("stage") or callback.get("status") or "unknown"),
                 "summary": str(result.get("message") or f"callback: {callback.get('status') or 'not_configured'}"),
+                "external": {
+                    "schema": "codex.mn.externalGatewayEvidence.v1",
+                    "requestId": str(record.get("requestId") or ""),
+                    "caller": str(record.get("caller") or "external"),
+                    "action": str(record.get("requestedAction") or record.get("action") or "workflow_start"),
+                    "workflowRunId": str(record.get("workflowRunId") or ""),
+                    "callback": {
+                        "success": str(callback.get("success") or ""),
+                        "error": str(callback.get("error") or ""),
+                        "status": str(callback.get("status") or "not_configured"),
+                        "receivedCount": int(callback.get("receivedCount") or 0),
+                        "history": callback.get("history") if isinstance(callback.get("history"), list) else [],
+                    },
+                },
                 "callback": {
                     "schema": "codex.mn.externalCallbackEvidence.v1",
                     "status": str(callback.get("status") or "not_configured"),
@@ -6972,6 +7053,66 @@ def clean_object_graph_object_ref(value: Any) -> dict[str, Any]:
     }
 
 
+def object_ref_to_kernel_object(ref: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    clean_ref = clean_object_graph_object_ref(ref)
+    source_ref = clean_ref.get("sourceRef") if isinstance(clean_ref.get("sourceRef"), dict) else {}
+    object_id = str(clean_ref.get("objectId") or "").strip()
+    note_id = str(source_ref.get("noteId") or "")
+    if not note_id and object_id.startswith("mnobj:note:"):
+        note_id = object_id.removeprefix("mnobj:note:")
+    kind = str(clean_ref.get("kind") or "")
+    if object_id.startswith("mnobj:note:"):
+        kind = "note"
+    return {
+        "schema": object_kernel.MN_OBJECT_SCHEMA,
+        "objectId": object_id,
+        "kind": kind or "unknown",
+        "title": str(clean_ref.get("title") or object_id),
+        "identifiers": {
+            "topicid": normalize_topic_id(payload),
+            "bookmd5": normalize_book_md5(payload),
+            "noteId": note_id,
+        },
+        "sourceRef": source_ref,
+        "relations": [],
+        "permissionBoundary": "notes",
+        "availableActions": [],
+        "evidenceTypes": [],
+    }
+
+
+def kernel_object_to_registry_entry(item: dict[str, Any]) -> dict[str, Any]:
+    identifiers = item.get("identifiers") if isinstance(item.get("identifiers"), dict) else {}
+    source_ref = item.get("sourceRef") if isinstance(item.get("sourceRef"), dict) else {}
+    object_ref = clean_object_graph_object_ref(
+        {
+            "objectId": item.get("objectId"),
+            "kind": item.get("kind"),
+            "title": item.get("title"),
+            "sourceRef": source_ref,
+        }
+    )
+    return {
+        "schema": "codex.mn.mnObjectRegistryEntry.v1",
+        "objectRef": object_ref,
+        "objectId": str(item.get("objectId") or ""),
+        "kind": str(item.get("kind") or object_ref.get("kind") or ""),
+        "title": str(item.get("title") or object_ref.get("title") or item.get("objectId") or ""),
+        "sourceRef": source_ref,
+        "topicid": str(identifiers.get("topicid") or item.get("topicid") or ""),
+        "bookmd5": str(identifiers.get("bookmd5") or item.get("bookmd5") or ""),
+        "firstSeenAt": str(item.get("firstSeen") or item.get("firstSeenAt") or ""),
+        "lastSeenAt": str(item.get("lastSeen") or item.get("lastSeenAt") or ""),
+        "seenCount": int(item.get("seenCount") or 1),
+        "evidenceTypes": [
+            str(value)
+            for value in item.get("evidenceTypes", [])
+            if isinstance(item.get("evidenceTypes"), list) and str(value)
+        ],
+        "source": {"source": "object_kernel", "registryPath": str(item.get("path") or "")},
+    }
+
+
 def mn_object_registry_store() -> dict[str, Any]:
     store = read_json_file(MN_OBJECT_REGISTRY_PATH, {})
     if not isinstance(store, dict):
@@ -7057,6 +7198,17 @@ def register_mn_objects(
             "source": source if isinstance(source, dict) else {},
         }
         by_id[object_id] = entry
+        try:
+            object_kernel.register_object(object_ref_to_kernel_object(merged_ref, payload), evidence_type=evidence_type)
+        except Exception as exc:
+            append_diagnostic_log(
+                "warning",
+                "objectKernelRegisterFailed",
+                str(exc),
+                extra={"objectId": object_id, "evidenceType": evidence_type},
+                object_ref=merged_ref,
+                request_id=object_id,
+            )
         changed += 1
     if changed:
         ordered = sorted(by_id.values(), key=lambda item: str(item.get("lastSeenAt") or ""), reverse=True)
@@ -7078,6 +7230,54 @@ def mn_object_registry(payload: dict[str, Any]) -> dict[str, Any]:
         if requested_book and item.get("bookmd5") and item.get("bookmd5") != requested_book:
             continue
         objects.append(item)
+    try:
+        kernel_registry = object_kernel.registry_list(
+            {
+                "topicid": requested_topic,
+                "bookmd5": requested_book,
+                "limit": max(limit, 500),
+            }
+        )
+    except Exception as exc:
+        append_diagnostic_log(
+            "warning",
+            "objectKernelRegistryReadFailed",
+            str(exc),
+            extra={"topicid": requested_topic, "bookmd5": requested_book},
+            request_id=f"{requested_topic}:{requested_book}",
+        )
+        kernel_registry = {}
+    objects_by_id: dict[str, dict[str, Any]] = {
+        str(item.get("objectId") or item.get("objectRef", {}).get("objectId") or ""): item
+        for item in objects
+        if isinstance(item, dict)
+    }
+    for kernel_object in kernel_registry.get("objects") if isinstance(kernel_registry.get("objects"), list) else []:
+        if not isinstance(kernel_object, dict):
+            continue
+        entry = kernel_object_to_registry_entry(kernel_object)
+        object_id = str(entry.get("objectId") or "")
+        if not object_id:
+            continue
+        previous = objects_by_id.get(object_id)
+        if previous:
+            evidence_types = set(
+                str(item)
+                for item in previous.get("evidenceTypes", [])
+                if isinstance(previous.get("evidenceTypes"), list) and str(item)
+            )
+            evidence_types.update(
+                str(item)
+                for item in entry.get("evidenceTypes", [])
+                if isinstance(entry.get("evidenceTypes"), list) and str(item)
+            )
+            previous["evidenceTypes"] = sorted(evidence_types)
+            previous["seenCount"] = max(int(previous.get("seenCount") or 0), int(entry.get("seenCount") or 0))
+            if not previous.get("lastSeenAt"):
+                previous["lastSeenAt"] = entry.get("lastSeenAt")
+        else:
+            objects.append(entry)
+            objects_by_id[object_id] = entry
     objects.sort(key=lambda item: str(item.get("lastSeenAt") or item.get("firstSeenAt") or ""), reverse=True)
     type_counts: dict[str, int] = {}
     evidence_counts: dict[str, int] = {}
@@ -12160,6 +12360,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return notebook_workspace(payload)
     if action == "notebook_runbook_preflight_record":
         return notebook_runbook_preflight_record(payload)
+    if action == "source_registry_action_record":
+        return source_registry_action_record(payload)
     if action == "agent_plan":
         return agent_plan(payload)
     if action == "operation_plan_preview":
@@ -12184,6 +12386,10 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return workflow_list(payload)
     if action == "workflow_cancel":
         return workflow_cancel(payload)
+    if action == "workflow_resume":
+        return workflow_resume(payload)
+    if action == "workflow_next_step":
+        return workflow_next_step(payload)
     if action == "workflow_retry_step":
         return workflow_retry_step(payload)
     if action == "external_gateway_start_workflow":
@@ -12198,6 +12404,13 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return skill_marketplace.install(str(payload.get("skillId") or payload.get("id") or ""))
     if action == "skill_uninstall":
         return skill_marketplace.uninstall(str(payload.get("skillId") or payload.get("id") or ""))
+    if action == "skill_operation_plan":
+        object_ref = payload.get("objectRef") if isinstance(payload.get("objectRef"), dict) else {}
+        return skill_marketplace.skill_operation_plan(str(payload.get("skillId") or payload.get("id") or ""), object_ref)
+    if action == "skill_run_record":
+        return skill_marketplace.record_skill_run(payload)
+    if action == "skill_run_latest":
+        return skill_marketplace.latest_skill_runs(payload.get("limit", 10))
     if action == "knowledge_index_status":
         return knowledge_index.status(normalize_topic_id(payload), normalize_book_md5(payload))
     if action == "knowledge_index_search":

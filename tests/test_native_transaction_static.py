@@ -84,6 +84,18 @@ class NativeTransactionStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, self.main_js)
 
+    def test_reject_transaction_carries_card_rollback_evidence(self) -> None:
+        for marker in [
+            "createdCardIds",
+            "createdCardIdsMap",
+            "recordAiEditCreatedCard",
+            "deletedCardIds",
+            "failedCardIds",
+            "deleteCardForAiEdit",
+            "reason: 'card-delete-unsupported'",
+        ]:
+            self.assertIn(marker, self.main_js)
+
     def test_native_object_registry_scan_command_posts_registry_event(self) -> None:
         for marker in [
             "scan_mn_objects",

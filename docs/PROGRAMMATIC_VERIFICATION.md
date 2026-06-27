@@ -83,6 +83,30 @@ python3 -m unittest \
 
 这些测试分别证明：Codex CLI `cloud config bundle` 启动超时会自动重试并给出可操作提示；发送按钮不会被运行中全局 `可排队` 伪元素追加第三行。
 
+检查 Knowledge Agent OS 内核切片：
+
+```bash
+python3 -m unittest \
+  tests.test_object_kernel \
+  tests.test_source_registry \
+  tests.test_external_gateway \
+  tests.test_transaction_manager \
+  tests.test_native_transaction_static \
+  tests.test_workflow_engine \
+  tests.test_skill_marketplace \
+  tests.test_verification_agent \
+  tests.test_web_controls_static \
+  tests.test_doctor_checks \
+  tests.test_single_document_acceptance \
+  tests.test_companion_controls.CompanionControlsTests.test_external_gateway_rejects_direct_write_and_strips_secret \
+  tests.test_companion_controls.CompanionControlsTests.test_operation_ledger_detail_separates_note_and_card_residuals \
+  tests.test_companion_controls.CompanionControlsTests.test_workflow_start_enqueues_safe_steps_and_pauses_at_confirmation \
+  tests.test_companion_controls.CompanionControlsTests.test_operation_ledger_lists_and_loads_object_scoped_operations \
+  tests.test_companion_controls.CompanionControlsTests.test_skill_runtime_actions_return_operation_plan_and_run_ledger
+```
+
+这些测试分别证明：MNObject 已有独立对象内核；Source Registry 能记录来源修复动作；External Automation Gateway 能拒绝外部直接写入、隐藏 secret、记录 callback lifecycle，并把 requestId、caller、action、workflowRunId、callback 证据挂到 Operation Ledger；Transactional Native Editor 证据能分离 note/card rollback 和 residual proof，避免“拒绝后结构删了但卡片残留”被误判为成功；Workflow Runtime v2 已有持久化 run store、下一步读取、恢复和取消事件证据；Skill Runtime v2 会拒绝缺少 `dryRun`、`rollback`、`acceptance` 的写入技能，并能生成 dry-run-first operation plan 和 `codex.mn.skillRun.v1`；Verification Agent 会输出 `codex.mn.verificationReport.v1`，没有 native probe 时是 `UNKNOWN` 而不是假 PASS；WebView、doctor 和 single-document acceptance 会要求 `knowledgeConsolePanel`、`studioCanvasPanel`、`operationLedgerDrawer`、`sourceRegistryPanel`、`verificationReportPanel`、`externalGatewayPanel`、`skillCenterPanel` 这些 Knowledge OS shell anchors。
+
 0.4.25 本机验收中，`runtime_web_controls` 和 `native_api_matrix` 已 PASS；最终 `release_acceptance.py` 仍会因为原生可见高亮、缺 signed/notarized pkg、缺跨机器证据和缺单文档完整 PASS evidence 返回非零。
 
 ## 验收判断

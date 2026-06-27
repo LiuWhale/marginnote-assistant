@@ -143,6 +143,10 @@ h1 {
   display: none;
 }
 
+.ai-chat-shell[data-product-mode="chat"] #knowledgeConsolePanel {
+  display: none;
+}
+
 .ai-chat-shell[data-product-mode="chat"] #notebookWorkspacePanel {
   display: none;
 }
@@ -177,6 +181,10 @@ h1 {
   display: block;
 }
 
+.ai-chat-shell[data-product-mode="workspace"] #knowledgeConsolePanel {
+  display: block;
+}
+
 .ai-chat-shell[data-product-mode="workspace"] #notebookWorkspacePanel {
   display: block;
 }
@@ -200,6 +208,23 @@ h1 {
     minmax(250px, 1.35fr)
     minmax(200px, 1fr)
     minmax(200px, 1fr);
+}
+
+.knowledge-console-panel,
+.studio-canvas-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.source-registry-panel,
+.operation-ledger-drawer,
+.verification-report-panel,
+.external-gateway-panel,
+.skill-center-panel {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
 }
 
 .command-pane-panel {
@@ -530,6 +555,37 @@ h1 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
+}
+
+.notebook-source-action-status {
+  min-height: 28px;
+  padding: 6px 7px;
+  border: 1px solid #d9e4ef;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.notebook-source-action-status.running {
+  border-color: #f2d280;
+  background: #fff9e7;
+  color: #7a5a10;
+}
+
+.notebook-source-action-status.completed {
+  border-color: #bfdcd2;
+  background: #f4fbf8;
+  color: #176552;
+}
+
+.notebook-source-action-status.failed {
+  border-color: #eab0a6;
+  background: #fff6f4;
+  color: #933323;
 }
 
 .notebook-source-action {
@@ -2467,8 +2523,14 @@ h1 {
   background: #f2fbf7;
 }
 
+.workflow-workspace-skill.invalid {
+  border-color: #f0b8b0;
+  background: #fff7f5;
+}
+
 .workflow-workspace-skill-title,
 .workflow-workspace-skill-meta,
+.workflow-workspace-skill-badges,
 .workflow-workspace-template-title,
 .workflow-workspace-template-meta,
 .workflow-workspace-run-title,
@@ -2476,11 +2538,42 @@ h1 {
   grid-column: 1;
 }
 
-.workflow-workspace-install,
+.workflow-workspace-skill-actions,
 .workflow-workspace-start,
 .workflow-workspace-open-run {
   grid-column: 2;
   grid-row: 1 / span 2;
+}
+
+.workflow-workspace-skill-actions {
+  display: grid;
+  gap: 4px;
+  align-self: center;
+}
+
+.workflow-workspace-skill-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workflow-workspace-skill-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  border: 1px solid #b9d8ce;
+  border-radius: 6px;
+  color: #15705c;
+  background: #edf8f4;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.workflow-workspace-skill-badge.invalid {
+  border-color: #efb5ae;
+  color: #a2382e;
+  background: #fff0ee;
 }
 
 .workflow-run-inspector-panel {
@@ -2593,7 +2686,15 @@ h1 {
   gap: 6px;
 }
 
-.workflow-run-inspector-retry {
+.workflow-run-inspector-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.workflow-run-inspector-retry,
+.workflow-run-inspector-next,
+.workflow-run-inspector-resume {
   min-width: 54px;
 }
 

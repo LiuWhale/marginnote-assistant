@@ -72,6 +72,7 @@
       </div>
     </section>
 
+    <section id="knowledgeConsolePanel" class="knowledge-console-panel" aria-label="Knowledge Console">
     <section id="notebookWorkspacePanel" class="notebook-workspace-panel" aria-label="Notebook Workspace">
       <div class="notebook-workspace-header">
         <div>
@@ -91,6 +92,7 @@
         <div id="notebookWorkspaceSources" class="notebook-workspace-card">来源：等待材料</div>
       </div>
       <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
+      <section id="sourceRegistryPanel" class="source-registry-panel" aria-label="Source Registry Panel">
       <section id="notebookWorkspaceSourceRegistry" class="notebook-source-registry idle" aria-label="Source Registry">
         <div class="notebook-source-header">
           <div>
@@ -101,7 +103,9 @@
         <div id="notebookWorkspaceSourceList" class="notebook-source-list">
           <div class="notebook-source-item empty">当前 MN 文档、PDF 缓存、上传文件和文件搜索根会显示在这里。</div>
         </div>
+        <div id="notebookWorkspaceSourceActionStatus" class="notebook-source-action-status idle">来源动作：尚未运行</div>
         <div id="notebookWorkspaceSourceActions" class="notebook-source-actions" aria-label="Source Registry 动作"></div>
+      </section>
       </section>
       <section id="notebookWorkspaceStudyProgram" class="notebook-study-program idle" aria-label="Study Program">
         <div class="notebook-study-header">
@@ -134,7 +138,9 @@
         </div>
       </section>
     </section>
+    </section>
 
+    <section id="studioCanvasPanel" class="studio-canvas-panel" aria-label="Studio Canvas">
     <section id="workbenchTabs" class="workbench-tabs" role="tablist" aria-label="工作台">
       <button id="workbenchTabObject" class="workbench-tab active" data-workbench-pane="object" type="button">对象</button>
       <button id="workbenchTabOperation" class="workbench-tab" data-workbench-pane="operation" type="button">操作</button>
@@ -298,6 +304,7 @@
             <div class="object-activity-row empty">历史、工作流、事务和诊断日志会按当前 MNObject 汇总到这里。</div>
           </div>
         </section>
+        <section id="operationLedgerDrawer" class="operation-ledger-drawer" aria-label="Operation Ledger Drawer">
         <section id="operationLedgerPanel" class="operation-ledger-panel idle" aria-label="Operation Ledger">
           <div class="operation-ledger-header">
             <div>
@@ -344,6 +351,7 @@
               <div class="operation-ledger-evidence-row empty">尚未打开账本项。</div>
             </div>
           </section>
+        </section>
         </section>
       </aside>
 
@@ -432,7 +440,9 @@
             <div class="mindmap-diff-workbench-row empty">生成脑图树后，这里会保留最近一次新增、更新、合并、移动和建议删除的变更预览。</div>
           </div>
         </section>
-        <div id="operationWorkspaceVerification" class="workbench-verification-line">验证：等待操作结果</div>
+        <section id="verificationReportPanel" class="verification-report-panel idle" aria-label="Verification Report">
+          <div id="operationWorkspaceVerification" class="workbench-verification-line">验证：等待操作结果</div>
+        </section>
 
         <section id="mindmapTargetBar" class="mindmap-target-bar" aria-label="目标脑图">
           <span id="mindmapTargetLight" class="mindmap-target-light" aria-hidden="true"></span>
@@ -506,11 +516,15 @@
         </header>
         <div id="workflowWorkspaceSummary" class="workbench-panel-text">精读、卡片生成、重组、复习和外部自动化会进入可审计 workflow run。</div>
         <div id="workflowWorkspaceRuns" class="workflow-workspace-card">运行：等待 workflow 状态</div>
-        <div id="workflowWorkspaceGateway" class="workflow-workspace-card">External Automation Gateway：等待 MN API 状态</div>
+        <section id="externalGatewayPanel" class="external-gateway-panel" aria-label="External Automation Gateway">
+          <div id="workflowWorkspaceGateway" class="workflow-workspace-card">External Automation Gateway：等待 MN API 状态</div>
+        </section>
+        <section id="skillCenterPanel" class="skill-center-panel" aria-label="Skill Center">
         <div id="workflowWorkspaceSkills" class="workflow-workspace-card">Skill Marketplace：等待技能包配置</div>
         <div id="workflowWorkspaceSkillsList" class="workflow-workspace-skills" aria-label="技能包">
           <div class="workflow-workspace-skill empty">等待 Skill Marketplace 技能包清单。</div>
         </div>
+        </section>
         <div id="workflowWorkspaceTemplates" class="workflow-workspace-templates" aria-label="工作流模板">
           <div class="workflow-workspace-template empty">等待 workflow 模板列表。</div>
         </div>
@@ -532,6 +546,7 @@
         </section>
         <div id="workflowWorkspaceActions" class="workbench-action-list" aria-label="工作流动作"></div>
       </aside>
+    </section>
     </section>
   </main>
 

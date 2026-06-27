@@ -33,6 +33,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="workspaceNavKnowledgeGraphButton"',
             'id="workspaceNavWorkflowBuilderButton"',
             'id="workspaceNavSkillCenterButton"',
+            'id="knowledgeConsolePanel"',
             'id="notebookWorkspacePanel"',
             'id="notebookWorkspaceTitle"',
             'id="notebookWorkspaceSummary"',
@@ -44,6 +45,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="notebookWorkspaceWorkflow"',
             'id="notebookWorkspaceLedger"',
             'id="notebookWorkspaceActions"',
+            'id="sourceRegistryPanel"',
             'id="notebookWorkspaceRunbook"',
             'id="notebookWorkspaceRunbookSummary"',
             'id="notebookWorkspaceRunbookAutoButton"',
@@ -60,6 +62,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="workbenchTabOperation"',
             'id="workbenchTabKnowledge"',
             'id="workbenchTabWorkflow"',
+            'id="studioCanvasPanel"',
             'id="workbenchLayout"',
             'id="objectWorkspacePanel"',
             'id="operationWorkspacePanel"',
@@ -91,6 +94,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="objectActivityRefreshButton"',
             'id="objectActivitySummary"',
             'id="objectActivityList"',
+            'id="operationLedgerDrawer"',
             'id="operationLedgerPanel"',
             'id="operationLedgerRefreshButton"',
             'id="operationLedgerSummary"',
@@ -106,6 +110,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="operationLedgerDetailCloseButton"',
             'id="operationWorkspaceTitle"',
             'id="operationWorkspaceMeta"',
+            'id="verificationReportPanel"',
             'id="operationCompilerPanel"',
             'id="operationCompilerSummary"',
             'id="operationPlanStats"',
@@ -133,7 +138,9 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="workflowWorkspaceTitle"',
             'id="workflowWorkspaceSummary"',
             'id="workflowWorkspaceRuns"',
+            'id="externalGatewayPanel"',
             'id="workflowWorkspaceGateway"',
+            'id="skillCenterPanel"',
             'id="workflowWorkspaceSkills"',
             'id="workflowWorkspaceActions"',
             'id="mindmapTreeCacheStatus"',
@@ -186,9 +193,15 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("notebookWorkspaceSourceRegistry", self.html)
         self.assertIn("notebookWorkspaceSourceSummary", self.html)
         self.assertIn("notebookWorkspaceSourceList", self.html)
+        self.assertIn("notebookWorkspaceSourceActionStatus", self.html)
         self.assertIn("notebookWorkspaceSourceActions", self.html)
         self.assertIn("function renderNotebookSourceRegistry", self.js)
         self.assertIn("function renderNotebookSourceActions", self.js)
+        self.assertIn("function sourceRegistryActionStatusText", self.js)
+        self.assertIn("function renderNotebookSourceActionStatus", self.js)
+        self.assertIn("function recordSourceRegistryActionRun", self.js)
+        self.assertIn("function runSourceRegistryTrackedAction", self.js)
+        self.assertIn("source_registry_action_record", self.js)
         self.assertIn("data-source-registry-kind", self.js)
         self.assertIn("data-source-registry-action", self.js)
         self.assertIn("data.sourceRegistry", self.js)
@@ -608,10 +621,14 @@ class WebControlsStaticTests(unittest.TestCase):
             "function renderWorkflowTemplates",
             "function renderWorkflowRuns",
             "function renderWorkflowSkills",
+            "function renderWorkflowSkillBadges",
+            "function previewWorkflowSkillPlan",
             "function workflowRunInspectorStep",
             "function renderWorkflowRunInspector",
             "function openWorkflowRunInspector",
             "function retryWorkflowRunStep",
+            "function workflowRunNextStep",
+            "function resumeWorkflowRun",
             "function closeWorkflowRunInspector",
             "function startWorkflowTemplate",
             "function installWorkflowSkill",
@@ -622,14 +639,20 @@ class WebControlsStaticTests(unittest.TestCase):
             "data-workflow-step-id",
             "data-workflow-step-action",
             "data-workflow-skill-id",
+            "data-workflow-skill-risk",
             "postCompanion('knowledge_index_search'",
             "postCompanion('workflow_start'",
             "postCompanion('workflow_status'",
+            "postCompanion('workflow_next_step'",
+            "postCompanion('workflow_resume'",
             "postCompanion('workflow_retry_step'",
             "postCompanion('skill_marketplace_status'",
             "postCompanion('skill_install'",
+            "postCompanion('skill_operation_plan'",
+            "postCompanion('skill_run_latest'",
             "workflowTemplates",
             "workflowSkills",
+            "skillRuns",
             "knowledgeWorkspaceResults",
             "knowledgeWorkspaceReviewQueue",
             "knowledgeWorkspaceReviewList",
@@ -638,6 +661,8 @@ class WebControlsStaticTests(unittest.TestCase):
             "workflowWorkspaceSkillsList",
             "runInspector",
             "retryable",
+            "workflow-run-inspector-next",
+            "workflow-run-inspector-resume",
             "重试",
             "加入复习队列",
         ]:
@@ -652,6 +677,9 @@ class WebControlsStaticTests(unittest.TestCase):
             ".workflow-workspace-template",
             ".workflow-workspace-run",
             ".workflow-workspace-skill",
+            ".workflow-workspace-skill.invalid",
+            ".workflow-workspace-skill-badges",
+            ".workflow-workspace-skill-badge",
             ".workflow-run-inspector-panel",
             ".workflow-run-inspector-step",
             ".workflow-run-inspector-step-status",
@@ -799,6 +827,10 @@ class WebControlsStaticTests(unittest.TestCase):
             "actualState",
             "expectedState",
             "逐对象残留证明",
+            "验证：残留 cardId",
+            "remainingCardIds",
+            "failedCardIds",
+            "创建卡片",
             "objectRef",
             "mnObjectId",
             "事务对象",
@@ -814,6 +846,7 @@ class WebControlsStaticTests(unittest.TestCase):
             "function showAiEditTransactionEvidence",
             "function bridgeAiEditTransactionWithEvidence",
             "createdNoteIds: (tx.createdNoteIds || []).join('|')",
+            "createdCardIds: (tx.createdCardIds || []).join('|')",
             "targetNoteIds: (tx.targetNoteIds || []).join('|')",
             "bridge(path, payload)",
             "bridgeAiEditTransactionWithEvidence('accept_ai_edit_transaction'",

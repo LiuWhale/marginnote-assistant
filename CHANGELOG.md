@@ -4,6 +4,36 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+No unreleased changes.
+
+## 0.4.40 - 2026-06-27
+
+### Added
+
+- Added the first standalone `object_kernel.py` module for the future Live MN Object Kernel. It builds stable `codex.mn.mnObject.v1` objects, persists a scoped `codex.mn.mnObjectRegistry.v1`, and ingests native scan results as `codex.mn.mnObjectRegistryScan.v1`.
+- Added the first standalone `source_registry.py` module for the future Source Registry kernel. It builds `codex.mn.sourceRegistry.v1` from cached PDFs, explicit paths, uploads, file roots, and current MarginNote document metadata, then records `codex.mn.sourceRegistryActionRun.v1` lifecycle evidence for source-repair actions.
+- Added the first standalone `external_gateway.py` module for the future External Automation Gateway. It normalizes external URL/API/Shortcuts-style requests, rejects direct write/delete actions with `DIRECT_WRITE_FORBIDDEN`, strips secret-bearing callback query fields, and records callback lifecycle evidence.
+- Added a visible Source Registry action-status line in Notebook Workspace. Caching, file selection, file-path management, and context refresh actions now record running/completed/failed/opened state and refresh workspace evidence after completion.
+- Added note/card-separated AI edit transaction evidence. Rollback and residual proof now distinguish `createdNoteIds`, `createdCardIds`, `deletedNoteIds`, `deletedCardIds`, `failedNoteIds`, `failedCardIds`, `residualNoteIds`, and `residualCardIds`; Operation Ledger details expose the same split.
+- Added the first Workflow Runtime v2 state-machine slice in `workflow_engine.py`. Workflow runs can now be created, persisted, updated per step, inspected for the next runnable/confirmation step, resumed, and cancelled with event evidence.
+- Added Skill Runtime v2 manifest validation and run evidence. Publishable skills now declare schema, permissions, dry-run, rollback and acceptance rules; invalid write/delete manifests are rejected; installed skills can produce dry-run-first operation plans and record `codex.mn.skillRun.v1` ledger entries.
+- Added the first `verification_agent.py` module. Transaction, source-registry, workflow-run and skill-run verification now produce `codex.mn.verificationReport.v1` with strict `PASS`/`FAIL`/`UNKNOWN` status values.
+- Added the first Knowledge OS shell anchors in the WebView: `knowledgeConsolePanel`, `studioCanvasPanel`, `operationLedgerDrawer`, `sourceRegistryPanel`, `verificationReportPanel`, `externalGatewayPanel`, and `skillCenterPanel`.
+- Added `docs/superpowers/plans/2026-06-27-knowledge-agent-os-implementation.md`, a phased implementation plan for the Knowledge Agent OS architecture.
+
+### Changed
+
+- Rewrote the ultimate design documentation around object, source, transaction, workflow, automation, skill, and verification kernels instead of treating the end state as stronger chat/card/mind-map/settings buttons.
+- Began routing `companion.py` MNObject registration through the new object kernel while preserving the existing WebView registry format and Object Browser behavior.
+- Began routing Notebook Workspace source readability through the new Source Registry kernel while preserving existing source-action behavior.
+- Began routing external workflow requests, status reads, and callback updates through the new External Automation Gateway kernel while preserving existing `/external/workflow/start` and callback routes.
+- Tightened the native AI edit reject path so card rollback is reported explicitly. If a card cannot be resolved/deleted through the native object path, the plugin reports `card-delete-unsupported` instead of counting the reject action as a clean rollback.
+- Began routing Companion workflow persistence through the Workflow Runtime v2 kernel while preserving existing queue behavior and `workflowRun` response shape. The WebView Workflow Inspector now has "next step" and "resume" actions.
+- Upgraded the WebView Skill Center from prompt-style entries to validated skill cards with safety badges, invalid-manifest disabling, dry-run plan preview, and recent skill-run refresh.
+- Operation Ledger transaction and workflow details now include a Verification Agent report. Missing native object probes are reported as `UNKNOWN` instead of being treated as proof of success.
+- Release acceptance can now enforce a final/v3 claim gate that requires at least one current-document `PASS` verification report while leaving preview releases unaffected.
+- Runtime Web controls, doctor checks, and single-document acceptance now require the Knowledge OS shell anchors so a deployed plugin cannot silently fall back to the old chat-only surface.
+
 ## 0.4.39 - 2026-06-27
 
 ### Added

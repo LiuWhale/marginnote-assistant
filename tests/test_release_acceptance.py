@@ -120,6 +120,48 @@ class ReleaseAcceptanceTests(unittest.TestCase):
         self.assertTrue(report["releasable"], report)
         self.assertFalse([item for item in report["gates"] if item["status"] == "BLOCK"])
 
+    def test_final_claim_requires_current_document_verification_report(self) -> None:
+        module = self.load_module()
+        doctor_checks = [
+            {"name": "MN4 runtime Web controls", "status": "OK", "detail": "controls loaded"},
+            {"name": "MN4 native API probe", "status": "OK", "detail": "ready_actions=3 capability_matrix=True"},
+            {"name": "Native highlight blobs", "status": "OK", "detail": "2 rows have ZHIGHLIGHTS"},
+            {"name": "Release SHA256 manifest", "status": "OK", "detail": "local and OneDrive SHA256SUMS match"},
+            {
+                "name": "Latest RC pkg",
+                "status": "OK",
+                "detail": "signed notarized nopayload pkg; local and OneDrive hashes match",
+                "evidence": {"signed": True, "notarized": True, "staplerReturnCode": 0, "spctlReturnCode": 0},
+            },
+        ]
+        base = dict(
+            unit_tests_ok=True,
+            syntax_ok=True,
+            smoke={"ok": True, "installDryRun": {"ok": True}},
+            doctor_checks=doctor_checks,
+            cross_machine_verified=True,
+            single_document_acceptance={"ok": True, "path": "/tmp/single-document.json"},
+            final_claim=True,
+        )
+
+        blocked = module.evaluate_acceptance(**base, verification_reports=[])
+        passed = module.evaluate_acceptance(
+            **base,
+            verification_reports=[
+                {
+                    "schema": "codex.mn.verificationReport.v1",
+                    "scope": "current_document",
+                    "status": "PASS",
+                    "subjectType": "transaction",
+                }
+            ],
+        )
+
+        blockers = {item["name"]: item for item in blocked["blockers"]}
+        self.assertIn("verification_agent", blockers)
+        self.assertFalse(blocked["releasable"])
+        self.assertTrue(passed["releasable"], passed)
+
     def test_acceptance_blocks_without_single_document_acceptance_evidence(self) -> None:
         module = self.load_module()
         doctor_checks = [

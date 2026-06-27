@@ -102,6 +102,7 @@
     'workspaceNavKnowledgeGraphButton',
     'workspaceNavWorkflowBuilderButton',
     'workspaceNavSkillCenterButton',
+    'knowledgeConsolePanel',
     'notebookWorkspacePanel',
     'notebookWorkspaceTitle',
     'notebookWorkspaceSummary',
@@ -114,9 +115,11 @@
     'notebookWorkspaceLedger',
     'notebookWorkspaceSources',
     'notebookWorkspaceActions',
+    'sourceRegistryPanel',
     'notebookWorkspaceSourceRegistry',
     'notebookWorkspaceSourceSummary',
     'notebookWorkspaceSourceList',
+    'notebookWorkspaceSourceActionStatus',
     'notebookWorkspaceSourceActions',
     'notebookWorkspaceStudyProgram',
     'notebookWorkspaceStudyCoverage',
@@ -133,6 +136,7 @@
     'workbenchTabOperation',
     'workbenchTabKnowledge',
     'workbenchTabWorkflow',
+    'studioCanvasPanel',
     'workbenchLayout',
     'objectWorkspacePanel',
     'operationWorkspacePanel',
@@ -169,6 +173,7 @@
     'objectActivityRefreshButton',
     'objectActivitySummary',
     'objectActivityList',
+    'operationLedgerDrawer',
     'operationLedgerPanel',
     'operationLedgerRefreshButton',
     'operationLedgerSummary',
@@ -184,6 +189,7 @@
     'operationLedgerDetailCloseButton',
     'operationWorkspaceTitle',
     'operationWorkspaceMeta',
+    'verificationReportPanel',
     'operationCompilerPanel',
     'operationCompilerSummary',
     'operationPlanStats',
@@ -217,7 +223,9 @@
     'workflowWorkspaceTitle',
     'workflowWorkspaceSummary',
     'workflowWorkspaceRuns',
+    'externalGatewayPanel',
     'workflowWorkspaceGateway',
+    'skillCenterPanel',
     'workflowWorkspaceSkills',
     'workflowWorkspaceSkillsList',
     'workflowWorkspaceTemplates',
@@ -2119,13 +2127,13 @@
 
   function workspaceSurfaceAnchor(surface) {
     var map = {
-      console: 'objectWorkspacePanel',
+      console: 'knowledgeConsolePanel',
       mindmap_studio: 'mindmapDiffWorkbench',
       card_factory: 'knowledgeWorkspaceReviewQueue',
-      ledger_explorer: 'operationLedgerPanel',
+      ledger_explorer: 'operationLedgerDrawer',
       knowledge_graph: 'knowledgeWorkspacePanel',
       workflow_builder: 'workflowWorkspaceTemplates',
-      skill_center: 'workflowWorkspaceSkills'
+      skill_center: 'skillCenterPanel'
     };
     return map[surface] || 'objectWorkspacePanel';
   }
@@ -2226,6 +2234,77 @@
     replaceElementChildren(target, nodes);
   }
 
+  function sourceRegistryActionStatusText(run) {
+    run = run || {};
+    var status = String(run.status || 'idle');
+    var label = run.actionLabel || run.actionId || '来源动作';
+    var message = run.message || '';
+    if (status === 'running') return '来源动作：运行中 / ' + label + (message ? ' / ' + message : '');
+    if (status === 'completed') return '来源动作：已完成 / ' + label + (message ? ' / ' + message : '');
+    if (status === 'failed') return '来源动作：失败 / ' + label + (message ? ' / ' + message : '');
+    if (status === 'opened') return '来源动作：已打开 / ' + label + (message ? ' / ' + message : '');
+    return '来源动作：尚未运行';
+  }
+
+  function renderNotebookSourceActionStatus(run) {
+    var node = byId('notebookWorkspaceSourceActionStatus');
+    if (!node) return;
+    run = run || {};
+    var status = String(run.status || 'idle');
+    node.className = 'notebook-source-action-status ' + status;
+    node.textContent = sourceRegistryActionStatusText(run);
+  }
+
+  function isSourceRegistryWorkspaceAction(item) {
+    item = item || {};
+    var payload = item.payload || {};
+    var id = String(item.id || '');
+    if (payload.source === 'source-registry') return true;
+    return ['cache_current_pdf', 'choose_pdf_file', 'manage_file_paths', 'refresh_context'].indexOf(id) !== -1;
+  }
+
+  function sourceRegistryRunId() {
+    return 'src_' + Date.now() + '_' + Math.random().toString(16).slice(2, 10);
+  }
+
+  function recordSourceRegistryActionRun(item, status, result, runId, done) {
+    item = item || {};
+    var payload = item.payload || {};
+    result = result || {};
+    var record = Object.assign({}, payload, {
+      action: 'source_registry_action_record',
+      runId: runId || sourceRegistryRunId(),
+      actionId: item.id || item.action || '',
+      actionLabel: item.label || actionLabel(item.action || ''),
+      status: status || 'running',
+      event: status || 'running',
+      message: result.message || result.reason || '',
+      result: result
+    });
+    postCompanion('source_registry_action_record', record, function(response) {
+      var run = response && response.sourceActionRun ? response.sourceActionRun : record;
+      renderNotebookSourceActionStatus(run);
+      if (typeof done === 'function') done(response || {});
+    }, {showReply: false});
+  }
+
+  function runSourceRegistryTrackedAction(item, done) {
+    item = item || {};
+    done = typeof done === 'function' ? done : function() {};
+    var runId = sourceRegistryRunId();
+    recordSourceRegistryActionRun(item, 'running', {message: '已开始执行来源修复动作。'}, runId, function() {
+      var tracked = Object.assign({}, item, {_sourceRegistryTracked: true});
+      runNotebookWorkspaceAction(tracked, function(result) {
+        var status = result && result.ok === false ? 'failed' : 'completed';
+        if (result && result.clientOnly && item.action === 'open_config_page') status = 'opened';
+        recordSourceRegistryActionRun(item, status, result || {}, runId, function() {
+          refreshNotebookWorkspace(false);
+          done(result || {});
+        });
+      });
+    });
+  }
+
   function renderNotebookSourceRegistry(registry) {
     registry = registry || {};
     var panel = byId('notebookWorkspaceSourceRegistry');
@@ -2235,6 +2314,7 @@
     var summary = registry.summary || {};
     var status = String(registry.status || 'idle');
     panel.className = 'notebook-source-registry ' + status;
+    renderNotebookSourceActionStatus(registry.latestRun || (registry.actionPlan || {}).latestRun || {});
     summaryNode.textContent =
       '来源：可读 ' + (summary.readable || 0) +
       ' / PDF缓存 ' + (summary.cachedPdf || 0) +
@@ -2338,6 +2418,10 @@
     var action = String(item.action || '');
     var surface = String(item.surface || '');
     var payload = item.payload || {};
+    if (!item._sourceRegistryTracked && isSourceRegistryWorkspaceAction(item)) {
+      runSourceRegistryTrackedAction(item, done);
+      return;
+    }
     if (surface) switchWorkspaceSurface(surface);
     if (action === 'request_mn_object_registry_scan') {
       if (state.objectRegistryScanInFlight) {
@@ -3135,6 +3219,27 @@
       return;
     }
     var nodes = [];
+    var actions = document.createElement('div');
+    actions.className = 'workflow-run-inspector-actions';
+    var nextButton = document.createElement('button');
+    nextButton.className = 'small-button workflow-run-inspector-next';
+    nextButton.type = 'button';
+    nextButton.textContent = '下一步';
+    nextButton.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      workflowRunNextStep();
+    });
+    var resumeButton = document.createElement('button');
+    resumeButton.className = 'small-button workflow-run-inspector-resume';
+    resumeButton.type = 'button';
+    resumeButton.textContent = '恢复';
+    resumeButton.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      resumeWorkflowRun();
+    });
+    actions.appendChild(nextButton);
+    actions.appendChild(resumeButton);
+    nodes.push(actions);
     for (var i = 0; i < steps.length; i++) nodes.push(workflowRunInspectorStep(steps[i]));
     replaceElementChildren(stepsTarget, nodes);
   }
@@ -3168,6 +3273,39 @@
     }, {showReply: false});
   }
 
+  function workflowRunNextStep() {
+    var workflowRunId = state.workflowRunInspector && state.workflowRunInspector.workflowRunId;
+    workflowRunId = String(workflowRunId || '');
+    if (!workflowRunId) return;
+    postCompanion('workflow_next_step', {workflowRunId: workflowRunId}, function(result) {
+      if (!result || result.ok === false) {
+        addFailureMessage('读取 workflow 下一步失败', result || {});
+        return;
+      }
+      var step = result.nextStep || {};
+      setText(
+        'workflowRunInspectorSummary',
+        '下一步：' + (step.stepId || step.action || 'unknown') +
+          ' / ' + (step.status || 'unknown') +
+          (step.requiresConfirmation ? ' / 需要确认' : '')
+      );
+    }, {showReply: false});
+  }
+
+  function resumeWorkflowRun() {
+    var workflowRunId = state.workflowRunInspector && state.workflowRunInspector.workflowRunId;
+    workflowRunId = String(workflowRunId || '');
+    if (!workflowRunId) return;
+    postCompanion('workflow_resume', {workflowRunId: workflowRunId}, function(result) {
+      if (!result || result.ok === false) {
+        addFailureMessage('恢复 workflow 失败', result || {});
+        return;
+      }
+      renderWorkflowRunInspector(result.runInspector || {});
+      refreshWorkflowWorkspace(false);
+    }, {showReply: false});
+  }
+
   function closeWorkflowRunInspector() {
     state.workflowRunInspector = null;
     renderWorkflowRunInspector(null);
@@ -3180,6 +3318,22 @@
       if (!result || result.ok === false) addFailureMessage('启动工作流失败', result || {});
       else refreshWorkflowWorkspace(false);
     }, {showReply: true});
+  }
+
+  function renderWorkflowSkillBadges(skill) {
+    skill = skill || {};
+    var wrapper = document.createElement('div');
+    wrapper.className = 'workflow-workspace-skill-badges';
+    var validation = skill.validation || {};
+    var labels = Array.isArray(skill.safetyBadges) ? skill.safetyBadges.slice(0, 5) : [];
+    labels.unshift(validation.ok === false ? '无效' : '有效');
+    for (var i = 0; i < labels.length; i++) {
+      var badge = document.createElement('span');
+      badge.className = 'workflow-workspace-skill-badge ' + (validation.ok === false ? 'invalid' : '');
+      badge.textContent = labels[i];
+      wrapper.appendChild(badge);
+    }
+    return wrapper;
   }
 
   function renderWorkflowSkills(data) {
@@ -3197,31 +3351,51 @@
     for (var i = 0; i < Math.min(skills.length, 6); i++) {
       (function(skill) {
         skill = skill || {};
+        var validation = skill.validation || {};
+        var invalid = validation.ok === false || validation.status === 'invalid';
+        var risk = skill.riskLevel || validation.riskLevel || skill.permission || 'read';
         var row = document.createElement('div');
-        row.className = 'workflow-workspace-skill' + (skill.installed ? ' installed' : '');
+        row.className = 'workflow-workspace-skill' + (skill.installed ? ' installed' : '') + (invalid ? ' invalid' : '');
         row.setAttribute('data-workflow-skill-id', String(skill.id || ''));
+        row.setAttribute('data-workflow-skill-risk', String(risk || 'read'));
         var title = document.createElement('div');
         title.className = 'workflow-workspace-skill-title';
         title.textContent = (skill.installed ? '已安装 · ' : '') + (skill.title || skill.id || '未命名技能');
         var meta = document.createElement('div');
         meta.className = 'workflow-workspace-skill-meta';
         meta.textContent = [
+          risk,
           skill.permission || 'read_only',
           skill.requiresConfirmation ? '需确认' : '只读/无需确认',
-          skill.rollback && skill.rollback.strategy ? ('rollback ' + skill.rollback.strategy) : ''
+          skill.rollback && skill.rollback.strategy ? ('rollback ' + skill.rollback.strategy) : '',
+          invalid ? ((validation.missing || []).join('、') || 'manifest 无效') : ''
         ].filter(Boolean).join(' / ');
+        var actions = document.createElement('div');
+        actions.className = 'workflow-workspace-skill-actions';
         var button = document.createElement('button');
         button.className = 'small-button workflow-workspace-install';
         button.type = 'button';
-        button.textContent = skill.installed ? '已安装' : '安装';
-        button.disabled = !!skill.installed;
+        button.textContent = invalid ? '不可用' : (skill.installed ? '已安装' : '安装');
+        button.disabled = !!skill.installed || invalid;
         button.addEventListener('click', function(ev) {
           releaseButtonFocus(ev.currentTarget);
           installWorkflowSkill(skill.id || '');
         });
+        var planButton = document.createElement('button');
+        planButton.className = 'small-button workflow-workspace-plan';
+        planButton.type = 'button';
+        planButton.textContent = '计划';
+        planButton.disabled = invalid || !skill.installed;
+        planButton.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          previewWorkflowSkillPlan(skill.id || '');
+        });
         row.appendChild(title);
         row.appendChild(meta);
-        row.appendChild(button);
+        row.appendChild(renderWorkflowSkillBadges(skill));
+        actions.appendChild(button);
+        actions.appendChild(planButton);
+        row.appendChild(actions);
         nodes.push(row);
       })(skills[i]);
     }
@@ -3244,6 +3418,33 @@
     }, {showReply: false});
   }
 
+  function previewWorkflowSkillPlan(skillId) {
+    var objectRef = currentMnObjectRef();
+    postCompanion('skill_operation_plan', {skillId: skillId || '', objectRef: objectRef}, function(result) {
+      if (!result || result.ok === false) {
+        addFailureMessage('生成技能操作计划失败', result || {});
+        return;
+      }
+      var operations = result.operations || [];
+      addMessage(
+        'assistant',
+        '技能操作计划：' + (result.title || result.skillId || '技能') +
+          '\n风险：' + (result.riskLevel || 'unknown') +
+          '\n模式：' + (result.executionMode || 'unknown') +
+          '\n操作：' + operations.map(function(item) { return item.operation; }).join('、')
+      );
+      postCompanion('skill_run_record', {
+        skillId: skillId || '',
+        objectRef: objectRef,
+        status: 'planned',
+        phase: result.executionMode || 'operation_plan',
+        acceptance: {status: 'pending', operationCount: operations.length}
+      }, function(recorded) {
+        if (recorded && recorded.ok !== false) refreshWorkflowWorkspace(false);
+      }, {showReply: false});
+    }, {showReply: false});
+  }
+
   function renderWorkflowWorkspace(data) {
     if (arguments.length) state.workflowWorkspace = data || {};
     data = state.workflowWorkspace || {};
@@ -3258,6 +3459,7 @@
     var mnApi = state.mnApi || {};
     var gatewayBackend = mnApi.backend || mnApi.mn_api_backend || 'auto';
     var skillCount = data.skillCount || (data.workflowSkills && data.workflowSkills.length) || (data.skills && data.skills.length) || 0;
+    var skillRuns = data.skillRuns || [];
     setText('workflowWorkspaceTitle', 'Workflow Runtime');
     setText(
       'workflowWorkspaceSummary',
@@ -3265,7 +3467,7 @@
     );
     setText('workflowWorkspaceRuns', '运行：' + runCount + ' 个 workflow run / 最近状态：' + (data.latestStatus || data.status || '等待状态'));
     setText('workflowWorkspaceGateway', 'External Automation Gateway：' + gatewayBackend + ' / requestId、权限和回调会进入 ledger');
-    setText('workflowWorkspaceSkills', 'Skill Marketplace：' + skillCount + ' 个技能包 / 已安装 ' + (data.installedSkillCount || data.installedCount || 0) + ' 个 / 写入技能需声明权限、回滚和验收规则');
+    setText('workflowWorkspaceSkills', 'Skill Runtime：' + skillCount + ' 个技能包 / 已安装 ' + (data.installedSkillCount || data.installedCount || 0) + ' 个 / 最近 skill run ' + skillRuns.length + ' 个 / 写入技能需声明权限、dry-run、回滚和验收规则');
     renderWorkflowSkills(data);
     renderWorkflowTemplates(data);
     renderWorkflowRuns(data);
@@ -3504,11 +3706,23 @@
         state.workflowWorkspace = Object.assign({}, state.workflowWorkspace || {}, {
           workflowSkills: result.skills || [],
           skillCount: result.skillCount || 0,
-          installedSkillCount: result.installedCount || 0
+          installedSkillCount: result.installedCount || 0,
+          invalidSkillCount: result.invalidSkillCount || 0
         });
         renderWorkflowWorkspace(state.workflowWorkspace || {});
       } else if (manual) {
         addFailureMessage('刷新技能市场失败', result || {});
+      }
+    }, {showReply: false});
+    postCompanion('skill_run_latest', {limit: 5}, function(result) {
+      if (result && result.ok !== false) {
+        state.workflowWorkspace = Object.assign({}, state.workflowWorkspace || {}, {
+          skillRuns: result.runs || [],
+          skillRunCount: result.runCount || 0
+        });
+        renderWorkflowWorkspace(state.workflowWorkspace || {});
+      } else if (manual) {
+        addFailureMessage('刷新技能运行记录失败', result || {});
       }
     }, {showReply: false});
   }
@@ -4440,6 +4654,9 @@
       if (verification.remainingNoteIds && verification.remainingNoteIds.length) {
         rows.push(operationLedgerEvidenceRow('验证：残留 noteId', verification.remainingNoteIds.join(', '), 'warn'));
       }
+      if (verification.remainingCardIds && verification.remainingCardIds.length) {
+        rows.push(operationLedgerEvidenceRow('验证：残留 cardId', verification.remainingCardIds.join(', '), 'warn'));
+      }
     }
     if (callback.schema) {
       rows.push(operationLedgerEvidenceRow(
@@ -4509,7 +4726,8 @@
           (nativeApply.nativeAction || 'native') +
             ' / 应用 ' + (nativeApply.appliedCount || 0) +
             ' / 失败 ' + (nativeApply.failedCount || 0) +
-            ' / 创建 ' + ((nativeApply.createdNoteIds || []).length || 0),
+            ' / 创建节点 ' + ((nativeApply.createdNoteIds || []).length || 0) +
+            ' / 创建卡片 ' + ((nativeApply.createdCardIds || []).length || 0),
           nativeApply.failedCount ? 'warn' : 'pass'
         ));
       }
@@ -4519,14 +4737,17 @@
           (rollback.status || 'unknown') +
             ' / 已删 ' + (rollback.deletedCount || 0) +
             ' / 失败 ' + (rollback.failedCount || 0) +
+            ((rollback.failedCardIds || []).length ? (' / 卡片失败 ' + rollback.failedCardIds.join(', ')) : '') +
             (rollback.requiresConfirmation ? ' / 等待确认' : '')
         ));
       }
       if (residual.schema) {
+        var residualIds = [];
+        if ((residual.remainingNoteIds || []).length) residualIds.push('note ' + residual.remainingNoteIds.join(', '));
+        if ((residual.remainingCardIds || []).length) residualIds.push('card ' + residual.remainingCardIds.join(', '));
         rows.push(operationLedgerEvidenceRow(
           '残留',
-          '剩余 ' + (residual.remainingCount || 0) +
-            ((residual.remainingNoteIds || []).length ? (' / ' + residual.remainingNoteIds.join(', ')) : ''),
+          '剩余 ' + (residual.remainingCount || 0) + (residualIds.length ? (' / ' + residualIds.join(' / ')) : ''),
           residual.remainingCount ? 'warn' : 'pass'
         ));
       }
@@ -4994,6 +5215,7 @@
       var payload = {
         transactionId: transactionId,
         createdNoteIds: (tx.createdNoteIds || []).join('|'),
+        createdCardIds: (tx.createdCardIds || []).join('|'),
         targetNoteIds: (tx.targetNoteIds || []).join('|'),
         topicid: tx.topicid || '',
         bookmd5: tx.bookmd5 || '',

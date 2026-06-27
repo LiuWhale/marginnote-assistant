@@ -3189,6 +3189,39 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(uninstalled["ok"], uninstalled)
             self.assertNotIn("workflow.deep_reading_writer", uninstalled["installedSkillIds"])
 
+    def test_skill_runtime_actions_return_operation_plan_and_run_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.handle_action({"action": "skill_install", "skillId": "workflow.deep_reading_writer"})
+            plan = companion.handle_action(
+                {
+                    "action": "skill_operation_plan",
+                    "skillId": "workflow.deep_reading_writer",
+                    "objectRef": {"objectType": "document", "objectId": "DOC1"},
+                }
+            )
+            self.assertTrue(plan["ok"], plan)
+            self.assertEqual(plan["schema"], "codex.mn.skillOperationPlan.v1")
+            self.assertEqual(plan["executionMode"], "dry_run_first")
+            self.assertIn("回滚", plan["safetyBadges"])
+
+            saved = companion.handle_action(
+                {
+                    "action": "skill_run_record",
+                    "skillId": "workflow.deep_reading_writer",
+                    "objectRef": {"objectType": "document", "objectId": "DOC1"},
+                    "status": "completed",
+                    "phase": "accepted",
+                    "acceptance": {"createdCards": 4},
+                }
+            )
+            latest = companion.handle_action({"action": "skill_run_latest", "limit": 1})
+
+            self.assertTrue(saved["ok"], saved)
+            self.assertEqual(latest["runs"][0]["skillId"], "workflow.deep_reading_writer")
+            self.assertEqual(latest["runs"][0]["acceptance"]["createdCards"], 4)
+
     def test_mindmap_diff_preview_reports_structured_changes_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -3989,6 +4022,50 @@ class CompanionControlsTests(unittest.TestCase):
             source_gap = [item for item in program["gaps"] if item["id"] == "source_registry"][0]
             self.assertEqual(source_gap["action"]["id"], "cache_current_pdf")
 
+    def test_source_registry_action_record_is_visible_in_notebook_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            started = companion.handle_action(
+                {
+                    "action": "source_registry_action_record",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Needs Source Actions",
+                    "actionId": "cache_current_pdf",
+                    "actionLabel": "缓存当前 PDF",
+                    "status": "running",
+                    "event": "started",
+                    "message": "开始缓存当前 PDF。",
+                }
+            )
+            self.assertTrue(started["ok"], started)
+            completed = companion.handle_action(
+                {
+                    **started["sourceActionRun"],
+                    "action": "source_registry_action_record",
+                    "status": "completed",
+                    "event": "completed",
+                    "message": "缓存动作完成。",
+                    "result": {"ok": True},
+                }
+            )
+            self.assertTrue(completed["ok"], completed)
+
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Needs Source Actions",
+                }
+            )
+
+            registry = workspace["notebookWorkspace"]["sourceRegistry"]
+            self.assertEqual(registry["latestRun"]["status"], "completed")
+            self.assertEqual(registry["latestRun"]["actionId"], "cache_current_pdf")
+            self.assertEqual(registry["actionPlan"]["latestRun"]["message"], "缓存动作完成。")
+            self.assertEqual(registry["summary"]["latestActionStatus"], "completed")
+
     def test_notebook_runbook_preflight_record_is_visible_in_workspace_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -4187,6 +4264,9 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertTrue(started["ok"], started)
             self.assertEqual(started["workflowRun"]["workflowId"], "selection_to_cards")
+            self.assertEqual(started["workflowRun"]["runtimeSchema"], "codex.mn.workflowRuntime.v2")
+            self.assertEqual(started["workflowRun"]["runId"], started["summary"]["id"])
+            self.assertEqual(started["workflowRun"]["events"][0]["event"], "workflow_created")
             self.assertEqual(started["workflowRun"]["mnObject"]["schema"], "codex.mn.mnObject.v1")
             self.assertTrue(started["workflowRun"]["mnObject"]["objectId"].startswith("mnobj:selection:"))
             self.assertEqual(started["workflowRun"]["objectRef"]["objectId"], started["workflowRun"]["mnObject"]["objectId"])
@@ -4213,6 +4293,17 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual([step["nextAction"] for step in inspector["steps"]], ["watch_queue", "watch_queue", "review_dry_run", "confirm_or_reject"])
             self.assertEqual(inspector["steps"][-1]["statusTone"], "warn")
 
+            next_step = companion.handle_action({"action": "workflow_next_step", "workflowRunId": started["summary"]["id"]})
+            self.assertTrue(next_step["ok"], next_step)
+            self.assertEqual(next_step["nextStep"]["stepId"], "write")
+            self.assertEqual(next_step["nextStep"]["status"], "waiting_confirmation")
+            self.assertTrue(next_step["nextStep"]["requiresConfirmation"])
+
+            resumed = companion.handle_action({"action": "workflow_resume", "workflowRunId": started["summary"]["id"]})
+            self.assertTrue(resumed["ok"], resumed)
+            self.assertEqual(resumed["nextStep"]["stepId"], "write")
+            self.assertEqual(resumed["workflowRun"]["events"][-1]["event"], "workflow_resumed")
+
             listed = companion.handle_action({"action": "workflow_list", "topicid": "T1", "bookmd5": "B1"})
             self.assertEqual(len(listed["workflowRuns"]), 1)
             self.assertEqual(listed["workflowRuns"][0]["mnObjectId"], started["workflowRun"]["mnObject"]["objectId"])
@@ -4223,6 +4314,8 @@ class CompanionControlsTests(unittest.TestCase):
 
             cancelled = companion.handle_action({"action": "workflow_cancel", "workflowRunId": started["summary"]["id"]})
             self.assertEqual(cancelled["summary"]["status"], "cancelled")
+            self.assertEqual(cancelled["workflowRun"]["events"][-1]["event"], "workflow_cancelled")
+            self.assertTrue(all(step["status"] == "cancelled" for step in cancelled["workflowRun"]["steps"]))
 
     def test_workflow_start_respects_read_only_permission_before_queueing_note_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4357,6 +4450,28 @@ class CompanionControlsTests(unittest.TestCase):
             after_callback = companion.handle_action({"action": "external_gateway_request_status", "requestId": "REQ_EXT_1"})
             self.assertEqual(after_callback["externalGateway"]["callback"]["status"], "success")
             self.assertEqual(after_callback["externalGateway"]["callback"]["history"][0]["status"], "success")
+
+    def test_external_gateway_rejects_direct_write_and_strips_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.handle_action(
+                {
+                    "action": "external_gateway_start_workflow",
+                    "requestId": "REQ_EXT_WRITE",
+                    "caller": "shortcuts",
+                    "requestedAction": "write",
+                    "secret": "mnsec_test",
+                    "payload": {"path": "@id:n1", "content": "direct write"},
+                }
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result["code"], "DIRECT_WRITE_FORBIDDEN")
+            self.assertNotIn("mnsec_test", json.dumps(result, ensure_ascii=False))
+
+            status = companion.handle_action({"action": "external_gateway_request_status", "requestId": "REQ_EXT_WRITE"})
+            self.assertFalse(status["ok"], status)
 
     def test_external_gateway_http_route_maps_to_workflow_start_action(self) -> None:
         source = COMPANION_PATH.read_text(encoding="utf-8")
@@ -4531,12 +4646,21 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(all(item["ledgerAction"]["action"] == "operation_ledger_get" for item in ledger["entries"]))
 
             external_entry = next(item for item in ledger["entries"] if item["entryType"] == "external_gateway_request")
+            self.assertEqual(external_entry["external"]["schema"], "codex.mn.externalGatewayEvidence.v1")
+            self.assertEqual(external_entry["external"]["requestId"], "REQ_LEDGER")
+            self.assertEqual(external_entry["external"]["caller"], "shortcuts")
+            self.assertEqual(external_entry["external"]["action"], "workflow_start")
+            self.assertTrue(external_entry["external"]["workflowRunId"])
+            self.assertEqual(external_entry["external"]["callback"]["status"], "pending")
             detail = companion.handle_action({"action": "operation_ledger_get", "ledgerId": external_entry["ledgerId"]})
 
             self.assertTrue(detail["ok"], detail)
             self.assertEqual(detail["schema"], "codex.mn.operationLedgerEntryDetail.v1")
             self.assertEqual(detail["entry"]["ledgerId"], external_entry["ledgerId"])
             self.assertEqual(detail["entry"]["entryType"], "external_gateway_request")
+            self.assertEqual(detail["evidence"]["external"]["requestId"], "REQ_LEDGER")
+            self.assertEqual(detail["evidence"]["external"]["action"], "workflow_start")
+            self.assertEqual(detail["evidence"]["external"]["callback"]["status"], "pending")
             self.assertEqual(detail["record"]["requestId"], "REQ_LEDGER")
             self.assertEqual(detail["record"]["objectRef"]["objectId"], "mnobj:selection:ledger1")
 
@@ -4548,6 +4672,12 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(transaction_detail["evidence"]["ledgerId"], transaction_entry["ledgerId"])
             self.assertEqual(transaction_detail["evidence"]["status"], "pass")
             self.assertEqual(transaction_detail["evidence"]["verification"]["schema"], "codex.mn.aiEditVerification.v1")
+            self.assertEqual(
+                transaction_detail["evidence"]["verificationReport"]["schema"],
+                "codex.mn.verificationReport.v1",
+            )
+            self.assertEqual(transaction_detail["evidence"]["verificationReport"]["status"], "UNKNOWN")
+            self.assertIn("native_probe_missing", transaction_detail["evidence"]["verificationReport"]["problems"])
             self.assertEqual(transaction_detail["evidence"]["verification"]["transactionId"], "ledger-tx")
             self.assertEqual(transaction_detail["evidence"]["verification"]["remainingCount"], 1)
             chain = transaction_detail["evidence"]["operationChain"]
@@ -5353,6 +5483,13 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(by_id["mnobj:note:scan-child"]["objectRef"]["sourceRef"]["parentNoteId"], "scan-root")
             self.assertIn("native_object_scan", by_id["mnobj:note:scan-child"]["evidenceTypes"])
             self.assertEqual(registry["counts"]["kinds"]["mindmap_node"], 2)
+
+            kernel_registry = companion.object_kernel.registry_list({"topicid": "T1", "bookmd5": "B1"})
+            kernel_by_id = {item["objectId"]: item for item in kernel_registry["objects"]}
+            self.assertIn("mnobj:note:scan-root", kernel_by_id)
+            self.assertIn("mnobj:note:scan-child", kernel_by_id)
+            self.assertEqual(kernel_by_id["mnobj:note:scan-child"]["sourceRef"]["parentNoteId"], "scan-root")
+            self.assertIn("native_object_scan", kernel_by_id["mnobj:note:scan-child"]["evidenceTypes"])
 
             browser = companion.handle_action(
                 {
@@ -6935,6 +7072,67 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(any(item["residual"] for item in verified["verification"]["residualProof"]["objects"]))
             self.assertIn("回滚验证", verified["reply"])
 
+    def test_operation_ledger_detail_separates_note_and_card_residuals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-card-ledger",
+                        "draftId": "draft-card-ledger",
+                        "createdNoteIds": ["N1", "N2"],
+                        "createdCardIds": ["C1"],
+                        "createdCount": 2,
+                        "card_count": 1,
+                        "has_mindmap": True,
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "aiEditTransactionRejected",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-card-ledger",
+                        "ok": False,
+                        "deleted": 1,
+                        "failed": 2,
+                        "deletedNoteIds": ["N1"],
+                        "failedNoteIds": ["N2"],
+                        "deletedCardIds": [],
+                        "failedCardIds": ["C1"],
+                        "failures": [
+                            {"noteId": "N2", "reason": "still-exists-after-delete"},
+                            {"cardId": "C1", "objectType": "card", "reason": "card-delete-unsupported"},
+                        ],
+                    },
+                }
+            )
+
+            ledger = companion.handle_action({"action": "operation_ledger_list", "topicid": "T1", "bookmd5": "B1"})
+            self.assertTrue(ledger["ok"], ledger)
+            transaction_entry = next(item for item in ledger["entries"] if item["entryType"] == "ai_edit_transaction")
+            detail = companion.handle_action({"action": "operation_ledger_get", "ledgerId": transaction_entry["ledgerId"]})
+
+            self.assertTrue(detail["ok"], detail)
+            chain = detail["evidence"]["operationChain"]
+            self.assertEqual(chain["rollback"]["deletedNoteIds"], ["N1"])
+            self.assertEqual(chain["rollback"]["deletedCardIds"], [])
+            self.assertEqual(chain["rollback"]["failedNoteIds"], ["N2"])
+            self.assertEqual(chain["rollback"]["failedCardIds"], ["C1"])
+            self.assertEqual(chain["residual"]["remainingNoteIds"], ["N2"])
+            self.assertEqual(chain["residual"]["remainingCardIds"], ["C1"])
+            self.assertEqual(chain["residual"]["residualNoteIds"], ["N2"])
+            self.assertEqual(chain["residual"]["residualCardIds"], ["C1"])
+            proof = chain["residual"]["residualProof"]
+            self.assertIn("C1", proof["residualCardIds"])
+            self.assertEqual({item.get("objectType") for item in proof["objects"]}, {"mindmap_node", "card"})
+
     def test_status_exposes_latest_ai_edit_transaction_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -6992,7 +7190,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(proof["createdCount"], 3)
             self.assertEqual(proof["deletedCount"], 1)
             self.assertEqual(proof["remainingCount"], 2)
-            self.assertEqual(proof["sourceFields"], ["createdNoteIds", "deletedCount", "failedCount", "failures"])
+            self.assertEqual(proof["sourceFields"], ["createdNoteIds", "failedNoteIds", "deletedCount", "failedCount", "failures"])
             by_note = {item["noteId"]: item for item in proof["objects"]}
             self.assertEqual(by_note["N1"]["expectedState"], "deleted_after_rollback")
             self.assertEqual(by_note["N1"]["actualState"], "deleted_reported")

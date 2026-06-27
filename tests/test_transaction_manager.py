@@ -243,6 +243,66 @@ class TransactionManagerTests(unittest.TestCase):
             self.assertEqual(tx["failures"][0]["noteId"], "N2")
             self.assertEqual(tx["undoRollback"]["method"], "undo")
 
+    def test_reject_report_distinguishes_outline_and_card_residuals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transaction_manager.configure(Path(tmp))
+            transaction_manager.apply_native_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-card-residual",
+                        "draftId": "draft-card",
+                        "createdNoteIds": ["N1", "N2"],
+                        "createdCardIds": ["C1"],
+                        "createdCount": 2,
+                        "card_count": 1,
+                        "has_mindmap": True,
+                    },
+                }
+            )
+
+            rejected = transaction_manager.apply_native_event(
+                {
+                    "event": "aiEditTransactionRejected",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-card-residual",
+                        "ok": False,
+                        "deleted": 1,
+                        "failed": 2,
+                        "deletedNoteIds": ["N1"],
+                        "failedNoteIds": ["N2"],
+                        "deletedCardIds": [],
+                        "failedCardIds": ["C1"],
+                        "failures": [
+                            {"noteId": "N2", "reason": "still-exists-after-delete"},
+                            {"cardId": "C1", "reason": "card-delete-unsupported"},
+                        ],
+                    },
+                }
+            )
+
+            tx = rejected["transaction"]
+            self.assertEqual(tx["deletedNoteIds"], ["N1"])
+            self.assertEqual(tx["failedNoteIds"], ["N2"])
+            self.assertEqual(tx["createdCardIds"], ["C1"])
+            self.assertEqual(tx["deletedCardIds"], [])
+            self.assertEqual(tx["failedCardIds"], ["C1"])
+            report = transaction_manager.verification_report(tx)
+            residual = report["residualProof"]
+            self.assertEqual(report["status"], "block")
+            self.assertEqual(residual["schema"], "codex.mn.residualProof.v1")
+            self.assertEqual(residual["status"], "block")
+            self.assertIn("N2", residual["residualNoteIds"])
+            self.assertIn("C1", residual["residualCardIds"])
+            self.assertEqual(residual["remainingCount"], 2)
+            by_object = {item["objectId"]: item for item in residual["objects"]}
+            self.assertEqual(by_object["mnobj:note:N2"]["objectType"], "mindmap_node")
+            self.assertEqual(by_object["mnobj:card:C1"]["objectType"], "card")
+
     def test_verification_report_distinguishes_complete_and_failed_rollback(self) -> None:
         complete = {
             "transactionId": "ai-edit-ok",

@@ -11,35 +11,44 @@ class ReleaseDocsTests(unittest.TestCase):
     def read_doc(self, name: str) -> str:
         return (ROOT / name).read_text(encoding="utf-8")
 
-    def test_release_status_matrix_names_current_button_layout_controls(self) -> None:
+    def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
         text = self.read_doc("docs/RELEASE_STATUS_MATRIX.md")
 
         for marker in [
-            "toolActionGrid",
-            "goalActionStrip",
-            "mainActionStack",
-            "goalRunPanel",
-            "sourceToolPanel",
-            "healthCheckButton",
+            "knowledgeConsolePanel",
+            "studioCanvasPanel",
+            "operationLedgerDrawer",
+            "sourceRegistryPanel",
+            "verificationReportPanel",
+            "externalGatewayPanel",
+            "skillCenterPanel",
+            "Live MN Object Kernel",
+            "Source Registry action evidence",
+            "External Automation Gateway v2",
+            "Transactional Native Editor",
+            "Workflow Runtime v2",
+            "Skill Runtime v2",
+            "Verification Agent",
+            "codex.mn.verificationReport.v1",
+            "final/v3 claim",
             "Collect Single Document Acceptance.command",
             "single_document_acceptance.py",
             "single_document_acceptance",
             "singleDocumentAcceptanceButton",
             "single_document_acceptance_summary",
             "本文档验收",
-            "常用网格是 2x2",
-            "`mainActionStack` 按一次性目标、常用任务、工具区顺序排列",
-            "`goalRunPanel` 是独立的一次性目标区",
-            "stagedActionLine",
-            "`workflowActionPanel` 常驻显示",
-            "mindmapActionGrid",
-            "sourceToolPanel",
-            "可排队",
-            "空闲时显示 `队列`",
         ]:
             self.assertIn(marker, text)
 
         for stale in [
+            "toolActionGrid",
+            "goalActionStrip",
+            "mainActionStack",
+            "goalRunPanel",
+            "sourceToolPanel",
+            "stagedActionLine",
+            "workflowActionPanel",
+            "mindmapActionGrid",
             "moreToolsPanel",
             "moreToolsSummary",
             "secondaryToolsPanel",

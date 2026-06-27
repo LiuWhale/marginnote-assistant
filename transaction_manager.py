@@ -26,6 +26,7 @@ VERIFICATION_SCHEMA = "codex.mn.aiEditVerification.v1"
 RESIDUAL_PROOF_SCHEMA = "codex.mn.residualProof.v1"
 OBJECT_EXISTENCE_PROBE_SCHEMA = "codex.mn.objectExistenceProbe.v1"
 TRANSACTION_STATUS_SCHEMA = "codex.mn.aiEditTransactionStatus.v1"
+TRANSACTION_SCHEMA = "codex.mn.operationTransaction.v1"
 
 
 def configure(root: Path | str) -> None:
@@ -95,6 +96,8 @@ def clean_failures(values: Any) -> list[dict[str, Any]]:
         out.append(
             {
                 "noteId": str(value.get("noteId") or ""),
+                "cardId": str(value.get("cardId") or ""),
+                "objectType": str(value.get("objectType") or ("card" if value.get("cardId") else "note")),
                 "method": str(value.get("method") or ""),
                 "reason": str(value.get("reason") or ""),
             }
@@ -237,6 +240,7 @@ def transaction_requires_confirmation(transaction: dict[str, Any]) -> bool:
 def base_transaction(transaction_id: str, record: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
     ts = str(record.get("ts") or now_timestamp())
     return {
+        "schema": TRANSACTION_SCHEMA,
         "transactionId": transaction_id,
         "draftId": str(extra.get("draftId") or extra.get("id") or ""),
         "topicid": str(record.get("topicid") or extra.get("topicid") or ""),
@@ -244,6 +248,16 @@ def base_transaction(transaction_id: str, record: dict[str, Any], extra: dict[st
         "docmd5": str(record.get("docmd5") or extra.get("docmd5") or ""),
         "status": "started",
         "createdNoteIds": [],
+        "createdCardIds": [],
+        "updatedNoteIds": [],
+        "movedNoteIds": [],
+        "suggestedDeleteNoteIds": [],
+        "deletedNoteIds": [],
+        "deletedCardIds": [],
+        "failedNoteIds": [],
+        "failedCardIds": [],
+        "residualNoteIds": [],
+        "residualCardIds": [],
         "createdCount": 0,
         "cardCount": int(extra.get("cards") or extra.get("card_count") or 0),
         "hasMindmap": bool(extra.get("hasMindmap") or extra.get("has_mindmap")),
@@ -293,6 +307,7 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
     if not transaction:
         transaction = base_transaction(transaction_id, record, extra)
 
+    transaction["schema"] = str(transaction.get("schema") or TRANSACTION_SCHEMA)
     transaction["transactionId"] = transaction_id
     transaction["draftId"] = str(extra.get("draftId") or extra.get("id") or transaction.get("draftId") or "")
     transaction["topicid"] = str(record.get("topicid") or extra.get("topicid") or transaction.get("topicid") or "")
@@ -306,6 +321,7 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
     if event_name == "aiEditTransactionStarted":
         transaction["status"] = "started"
         transaction["cardCount"] = int(extra.get("cards") or extra.get("card_count") or transaction.get("cardCount") or 0)
+        transaction["createdCardIds"] = unique_strings(extra.get("createdCardIds")) or unique_strings(transaction.get("createdCardIds"))
         transaction["hasMindmap"] = bool(extra.get("hasMindmap") or extra.get("has_mindmap") or transaction.get("hasMindmap"))
     elif event_name == "mindmapDiffApplyRequested":
         plan = extra.get("mindmapDiffOperationPlan") if isinstance(extra.get("mindmapDiffOperationPlan"), dict) else {}
@@ -317,10 +333,14 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
         transaction["message"] = str(extra.get("message") or "脑图 Diff 局部应用已请求。")
     elif event_name == "aiEditOperationReady":
         created_note_ids = unique_strings(extra.get("createdNoteIds"))
+        created_card_ids = unique_strings(extra.get("createdCardIds"))
         transaction["status"] = "ready"
         transaction["createdNoteIds"] = created_note_ids
+        transaction["createdCardIds"] = created_card_ids or unique_strings(transaction.get("createdCardIds"))
+        transaction["updatedNoteIds"] = unique_strings(extra.get("updatedNoteIds")) or unique_strings(transaction.get("updatedNoteIds"))
+        transaction["movedNoteIds"] = unique_strings(extra.get("movedNoteIds")) or unique_strings(transaction.get("movedNoteIds"))
         transaction["createdCount"] = int(extra.get("createdCount") or len(created_note_ids))
-        transaction["cardCount"] = int(extra.get("card_count") or extra.get("cards") or transaction.get("cardCount") or 0)
+        transaction["cardCount"] = int(extra.get("card_count") or extra.get("cards") or len(transaction["createdCardIds"]) or transaction.get("cardCount") or 0)
         transaction["hasMindmap"] = bool(extra.get("has_mindmap") or extra.get("hasMindmap") or transaction.get("hasMindmap"))
         transaction["mindmapTitle"] = str(extra.get("mindmap_title") or transaction.get("mindmapTitle") or "")
         transaction["writeTarget"] = str(extra.get("write_target") or transaction.get("writeTarget") or "")
@@ -330,14 +350,33 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
     elif event_name == "aiEditTransactionRejected":
         ok = bool(extra.get("ok"))
         failed_count = int(extra.get("failed") or 0)
+        deleted_count = int(extra.get("deleted") or 0)
+        deleted_note_ids = unique_strings(extra.get("deletedNoteIds"))
+        failed_note_ids = unique_strings(extra.get("failedNoteIds"))
+        deleted_card_ids = unique_strings(extra.get("deletedCardIds"))
+        failed_card_ids = unique_strings(extra.get("failedCardIds"))
+        failures = clean_failures(extra.get("failures"))
+        if not failed_note_ids:
+            failed_note_ids = unique_strings([item.get("noteId") for item in failures if isinstance(item, dict)])
+        if not failed_card_ids:
+            failed_card_ids = unique_strings([item.get("cardId") for item in failures if isinstance(item, dict)])
+        failed_count = max(failed_count, len(failed_note_ids) + len(failed_card_ids))
+        deleted_count = max(deleted_count, len(deleted_note_ids) + len(deleted_card_ids))
         transaction["status"] = "rolled_back" if ok and failed_count == 0 else "rollback_failed"
-        transaction["deletedCount"] = int(extra.get("deleted") or 0)
+        transaction["deletedCount"] = deleted_count
         transaction["failedCount"] = failed_count
-        transaction["failures"] = clean_failures(extra.get("failures"))
+        transaction["deletedNoteIds"] = deleted_note_ids or unique_strings(transaction.get("deletedNoteIds"))
+        transaction["failedNoteIds"] = failed_note_ids
+        transaction["deletedCardIds"] = deleted_card_ids or unique_strings(transaction.get("deletedCardIds"))
+        transaction["failedCardIds"] = failed_card_ids
+        transaction["residualNoteIds"] = failed_note_ids
+        transaction["residualCardIds"] = failed_card_ids
+        transaction["failures"] = failures
         transaction["undoRollback"] = clean_undo_rollback(extra.get("undoRollback"))
         transaction["message"] = str(extra.get("message") or transaction.get("message") or "")
     elif event_name == "mindmapDiffApplyFinished":
         created_note_ids = unique_strings(extra.get("createdNoteIds"))
+        created_card_ids = unique_strings(extra.get("createdCardIds"))
         applied_operations = extra.get("appliedOperations") if isinstance(extra.get("appliedOperations"), list) else []
         applied_note_ids = unique_strings(
             [item.get("noteId") for item in applied_operations if isinstance(item, dict)]
@@ -353,6 +392,7 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
         transaction["status"] = "pending_confirmation" if failed_count == 0 and verification_status != "block" else "apply_failed"
         transaction["hasMindmap"] = True
         transaction["createdNoteIds"] = created_note_ids
+        transaction["createdCardIds"] = created_card_ids or unique_strings(transaction.get("createdCardIds"))
         transaction["appliedNoteIds"] = applied_note_ids
         transaction["createdCount"] = int(extra.get("createdCount") or len(created_note_ids))
         transaction["appliedCount"] = int(extra.get("appliedCount") or len(applied_note_ids))
@@ -374,6 +414,7 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
         transaction["status"] = "delete_pending_confirmation"
         transaction["hasMindmap"] = True
         transaction["targetNoteIds"] = target_note_ids
+        transaction["suggestedDeleteNoteIds"] = target_note_ids
         transaction["deleteSuggestion"] = {
             "targetNoteIds": target_note_ids,
             "deleteOperations": delete_operations,
@@ -386,6 +427,10 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
         deleted_count = int(extra.get("deleted") or 0)
         transaction["status"] = "delete_confirmed" if ok and failed_count == 0 else "delete_failed"
         transaction["targetNoteIds"] = unique_strings(extra.get("targetNoteIds")) or unique_strings(transaction.get("targetNoteIds"))
+        transaction["suggestedDeleteNoteIds"] = unique_strings(transaction.get("targetNoteIds"))
+        transaction["deletedNoteIds"] = unique_strings(extra.get("deletedNoteIds")) or transaction["targetNoteIds"][:deleted_count]
+        transaction["failedNoteIds"] = unique_strings(extra.get("failedNoteIds")) or unique_strings([item.get("noteId") for item in clean_failures(extra.get("failures"))])
+        transaction["residualNoteIds"] = transaction["failedNoteIds"]
         transaction["deletedCount"] = deleted_count
         transaction["failedCount"] = failed_count
         transaction["failures"] = clean_failures(extra.get("failures"))
@@ -393,6 +438,7 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
     elif event_name == "mindmapDeleteSuggestionDismissed":
         transaction["status"] = "delete_dismissed"
         transaction["targetNoteIds"] = unique_strings(extra.get("targetNoteIds")) or unique_strings(transaction.get("targetNoteIds"))
+        transaction["suggestedDeleteNoteIds"] = unique_strings(transaction.get("targetNoteIds"))
         transaction["message"] = str(extra.get("message") or "已忽略本次脑图删除建议。")
     elif event_name == "mnObjectExistenceProbeFinished":
         probe = clean_object_existence_probe(extra, transaction_id=transaction_id)
@@ -411,9 +457,12 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
 
 def transaction_summary(transaction: dict[str, Any]) -> dict[str, Any]:
     created_note_ids = unique_strings(transaction.get("createdNoteIds"))
+    created_card_ids = unique_strings(transaction.get("createdCardIds"))
     applied_note_ids = unique_strings(transaction.get("appliedNoteIds"))
     object_ref = clean_object_ref({}, transaction.get("objectRef") if isinstance(transaction.get("objectRef"), dict) else {})
+    verification_status = verification_report(transaction).get("status") if str(transaction.get("_summaryVerificationGuard") or "") != "1" else ""
     return {
+        "schema": str(transaction.get("schema") or TRANSACTION_SCHEMA),
         "transactionId": str(transaction.get("transactionId") or ""),
         "draftId": str(transaction.get("draftId") or ""),
         "topicid": str(transaction.get("topicid") or ""),
@@ -422,11 +471,21 @@ def transaction_summary(transaction: dict[str, Any]) -> dict[str, Any]:
         "status": str(transaction.get("status") or ""),
         "createdCount": int(transaction.get("createdCount") or len(created_note_ids)),
         "createdNoteIds": created_note_ids,
+        "createdCardIds": created_card_ids,
+        "updatedNoteIds": unique_strings(transaction.get("updatedNoteIds")),
+        "movedNoteIds": unique_strings(transaction.get("movedNoteIds")),
+        "suggestedDeleteNoteIds": unique_strings(transaction.get("suggestedDeleteNoteIds")),
         "appliedCount": int(transaction.get("appliedCount") or len(applied_note_ids)),
         "appliedNoteIds": applied_note_ids,
         "deletedCount": int(transaction.get("deletedCount") or 0),
+        "deletedNoteIds": unique_strings(transaction.get("deletedNoteIds")),
+        "deletedCardIds": unique_strings(transaction.get("deletedCardIds")),
         "failedCount": int(transaction.get("failedCount") or 0),
-        "cardCount": int(transaction.get("cardCount") or 0),
+        "failedNoteIds": unique_strings(transaction.get("failedNoteIds")),
+        "failedCardIds": unique_strings(transaction.get("failedCardIds")),
+        "residualNoteIds": unique_strings(transaction.get("residualNoteIds")),
+        "residualCardIds": unique_strings(transaction.get("residualCardIds")),
+        "cardCount": int(transaction.get("cardCount") or len(created_card_ids) or 0),
         "hasMindmap": bool(transaction.get("hasMindmap")),
         "mindmapTitle": str(transaction.get("mindmapTitle") or ""),
         "writeTarget": str(transaction.get("writeTarget") or ""),
@@ -436,6 +495,7 @@ def transaction_summary(transaction: dict[str, Any]) -> dict[str, Any]:
         "mindmapDiffApply": transaction.get("mindmapDiffApply") if isinstance(transaction.get("mindmapDiffApply"), dict) else {},
         "deleteSuggestion": transaction.get("deleteSuggestion") if isinstance(transaction.get("deleteSuggestion"), dict) else {},
         "targetNoteIds": unique_strings(transaction.get("targetNoteIds")),
+        "verification": {"status": str(verification_status or "")},
         "requiresConfirmation": transaction_requires_confirmation(transaction),
         "availableActions": transaction_available_actions(transaction),
     }
@@ -474,7 +534,12 @@ def rollback_remaining_note_ids(
 def residual_proof_source_fields(
     *,
     created_note_ids: list[str],
+    created_card_ids: list[str],
     target_note_ids: list[str],
+    deleted_note_ids: list[str],
+    deleted_card_ids: list[str],
+    failed_note_ids: list[str],
+    failed_card_ids: list[str],
     deleted_count: int,
     failed_count: int,
     failures: list[dict[str, Any]],
@@ -486,6 +551,16 @@ def residual_proof_source_fields(
         fields.append("targetNoteIds")
     if created_note_ids:
         fields.append("createdNoteIds")
+    if created_card_ids:
+        fields.append("createdCardIds")
+    if deleted_note_ids:
+        fields.append("deletedNoteIds")
+    if deleted_card_ids:
+        fields.append("deletedCardIds")
+    if failed_note_ids:
+        fields.append("failedNoteIds")
+    if failed_card_ids:
+        fields.append("failedCardIds")
     if status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"} or deleted_count:
         fields.append("deletedCount")
     if status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"} or failed_count:
@@ -557,13 +632,19 @@ def residual_proof(
     transaction: dict[str, Any],
     report_status: str,
     created_note_ids: list[str],
+    created_card_ids: list[str],
     created_count: int,
     deleted_count: int,
     failed_count: int,
     remaining_note_ids: list[str],
+    remaining_card_ids: list[str],
     failures: list[dict[str, Any]],
     rollback_complete: bool,
     target_note_ids: list[str],
+    deleted_note_ids: list[str],
+    deleted_card_ids: list[str],
+    failed_note_ids: list[str],
+    failed_card_ids: list[str],
     summary: str,
     object_existence_probe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -578,6 +659,11 @@ def residual_proof(
         for item in failures
         if isinstance(item, dict) and str(item.get("noteId") or "")
     }
+    failures_by_card = {
+        str(item.get("cardId") or ""): item
+        for item in failures
+        if isinstance(item, dict) and str(item.get("cardId") or "")
+    }
     probe = object_existence_probe if isinstance(object_existence_probe, dict) else {}
     probe_results = probe.get("results") if isinstance(probe.get("results"), list) else []
     probe_by_note = {
@@ -586,7 +672,13 @@ def residual_proof(
         if isinstance(item, dict) and str(item.get("noteId") or "")
     }
     objects: list[dict[str, Any]] = []
+    deleted_note_set = set(deleted_note_ids)
+    failed_note_set = set(failed_note_ids)
+    remaining_note_set = set(remaining_note_ids)
     for index, note_id in enumerate(note_ids):
+        note_remaining = list(remaining_note_ids)
+        if failed_note_set or deleted_note_set:
+            note_remaining = sorted((failed_note_set | remaining_note_set) - deleted_note_set)
         actual_state, residual, verification_level = residual_actual_state_for_note(
             note_id=note_id,
             index=index,
@@ -594,7 +686,7 @@ def residual_proof(
             delete_mode=delete_mode,
             deleted_count=deleted_count,
             rollback_complete=rollback_complete,
-            remaining_note_ids=remaining_note_ids,
+            remaining_note_ids=note_remaining,
             failures_by_note=failures_by_note,
             probe_by_note=probe_by_note,
         )
@@ -622,10 +714,63 @@ def residual_proof(
                 },
             }
         )
+    deleted_card_set = set(deleted_card_ids)
+    failed_card_set = set(failed_card_ids)
+    remaining_card_set = set(remaining_card_ids)
+    for card_id in created_card_ids:
+        failure = failures_by_card.get(card_id, {})
+        if card_id in deleted_card_set:
+            actual_state = "deleted_reported"
+            residual = False
+            verification_level = "native_event"
+        elif card_id in failed_card_set or card_id in remaining_card_set:
+            actual_state = "remaining_reported"
+            residual = True
+            verification_level = "native_failure"
+        elif status == "accepted":
+            actual_state = "retained_by_user"
+            residual = False
+            verification_level = "transaction_state"
+        elif status in {"ready", "started", "pending_confirmation", "apply_failed"}:
+            actual_state = "created_pending_user_decision"
+            residual = False
+            verification_level = "transaction_state"
+        elif status in {"rolled_back", "rollback_failed", "delete_confirmed", "delete_failed"}:
+            actual_state = "unknown_after_native_event"
+            residual = True
+            verification_level = "card_delete_unverified"
+        else:
+            actual_state = "unknown"
+            residual = False
+            verification_level = "transaction_state"
+        objects.append(
+            {
+                "objectId": f"mnobj:card:{card_id}",
+                "objectType": "card",
+                "cardId": card_id,
+                "expectedState": expected_state,
+                "actualState": actual_state,
+                "residual": bool(residual),
+                "verificationLevel": verification_level,
+                "evidence": {
+                    "source": "ai_edit_transaction_native_event",
+                    "transactionStatus": status,
+                    "deletedCardIds": deleted_card_ids,
+                    "failedCardIds": failed_card_ids,
+                    "failureReason": str(failure.get("reason") or ""),
+                    "failureMethod": str(failure.get("method") or ""),
+                },
+            }
+        )
     residual_count = sum(1 for item in objects if item.get("residual"))
     source_fields = residual_proof_source_fields(
         created_note_ids=created_note_ids,
+        created_card_ids=created_card_ids,
         target_note_ids=target_note_ids,
+        deleted_note_ids=deleted_note_ids,
+        deleted_card_ids=deleted_card_ids,
+        failed_note_ids=failed_note_ids,
+        failed_card_ids=failed_card_ids,
         deleted_count=deleted_count,
         failed_count=failed_count,
         failures=failures,
@@ -649,7 +794,15 @@ def residual_proof(
         "failedCount": failed_count,
         "remainingCount": residual_count,
         "createdNoteIds": created_note_ids,
-        "remainingNoteIds": [item["noteId"] for item in objects if item.get("residual")],
+        "createdCardIds": created_card_ids,
+        "deletedNoteIds": deleted_note_ids,
+        "deletedCardIds": deleted_card_ids,
+        "failedNoteIds": failed_note_ids,
+        "failedCardIds": failed_card_ids,
+        "remainingNoteIds": [item["noteId"] for item in objects if item.get("residual") and item.get("noteId")],
+        "remainingCardIds": [item["cardId"] for item in objects if item.get("residual") and item.get("cardId")],
+        "residualNoteIds": [item["noteId"] for item in objects if item.get("residual") and item.get("noteId")],
+        "residualCardIds": [item["cardId"] for item in objects if item.get("residual") and item.get("cardId")],
         "targetNoteIds": target_note_ids,
         "sourceFields": source_fields,
         "objects": objects,
@@ -658,12 +811,25 @@ def residual_proof(
 
 def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     created_note_ids = unique_strings(transaction.get("createdNoteIds"))
+    created_card_ids = unique_strings(transaction.get("createdCardIds"))
     created_count = safe_int(transaction.get("createdCount"), len(created_note_ids))
     if created_count < len(created_note_ids):
         created_count = len(created_note_ids)
     deleted_count = safe_int(transaction.get("deletedCount"), 0)
     failed_count = safe_int(transaction.get("failedCount"), 0)
     failures = clean_failures(transaction.get("failures"))
+    deleted_note_ids = unique_strings(transaction.get("deletedNoteIds"))
+    deleted_card_ids = unique_strings(transaction.get("deletedCardIds"))
+    failed_note_ids = unique_strings(transaction.get("failedNoteIds"))
+    failed_card_ids = unique_strings(transaction.get("failedCardIds"))
+    if not failed_note_ids:
+        failed_note_ids = unique_strings([item.get("noteId") for item in failures if isinstance(item, dict)])
+    if not failed_card_ids:
+        failed_card_ids = unique_strings([item.get("cardId") for item in failures if isinstance(item, dict)])
+    if deleted_note_ids or deleted_card_ids:
+        deleted_count = max(deleted_count, len(deleted_note_ids) + len(deleted_card_ids))
+    if failed_note_ids or failed_card_ids:
+        failed_count = max(failed_count, len(failed_note_ids) + len(failed_card_ids))
     status = str(transaction.get("status") or "")
     transaction_id = str(transaction.get("transactionId") or "")
     object_ref = clean_object_ref({}, transaction.get("objectRef") if isinstance(transaction.get("objectRef"), dict) else {})
@@ -693,6 +859,7 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     ]
 
     remaining_note_ids: list[str] = []
+    remaining_card_ids: list[str] = []
     rollback_complete = False
     accepted = status == "accepted"
     report_status = "pending"
@@ -709,10 +876,14 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
     elif status == "delete_dismissed":
         report_status = "pass"
     elif status == "rolled_back":
-        rollback_complete = failed_count == 0 and deleted_count >= created_count
+        card_rollback_complete = not created_card_ids or (
+            not failed_card_ids and all(card_id in set(deleted_card_ids) for card_id in created_card_ids)
+        )
+        rollback_complete = failed_count == 0 and deleted_count >= created_count and card_rollback_complete
         report_status = "pass" if rollback_complete else "block"
     elif status == "rollback_failed":
         remaining_note_ids = rollback_remaining_note_ids(created_note_ids, deleted_count, failed_count, failures)
+        remaining_card_ids = failed_card_ids or [card_id for card_id in created_card_ids if card_id not in set(deleted_card_ids)]
         report_status = "block"
     elif accepted:
         report_status = "pass"
@@ -725,6 +896,8 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
 
     if report_status == "block" and not remaining_note_ids:
         remaining_note_ids = rollback_remaining_note_ids(created_note_ids, deleted_count, failed_count, failures)
+    if report_status == "block" and not remaining_card_ids and created_card_ids:
+        remaining_card_ids = failed_card_ids or [card_id for card_id in created_card_ids if card_id not in set(deleted_card_ids)]
 
     if probe_applies_to_deletion:
         remaining_note_ids = probe_remaining_note_ids
@@ -740,7 +913,9 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         checked_count = safe_int(object_existence_probe.get("checkedCount"), len(probe_results))
         if remaining_note_ids:
             id_text = "、".join(remaining_note_ids[:8])
-            summary = f"MN 对象存在性验证 BLOCK：probe 已检查 {checked_count} 个对象，仍存在 {remaining_count} 个：{id_text}。"
+            if remaining_card_ids:
+                id_text = id_text + "；卡片 " + "、".join(remaining_card_ids[:8])
+            summary = f"MN 对象存在性验证 BLOCK：probe 已检查 {checked_count} 个对象，仍存在 {remaining_count + len(remaining_card_ids)} 个：{id_text}。"
             next_actions.append(
                 {
                     "id": "manual_cleanup",
@@ -782,8 +957,9 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         remaining_count = max(created_count - deleted_count, 0)
         summary = "回滚验证 PENDING：AI 编辑事务尚未接受或拒绝，等待用户确认。"
     else:
-        remaining_count = max(len(remaining_note_ids), failed_count, created_count - deleted_count, 0)
-        id_text = "、".join(remaining_note_ids[:8]) if remaining_note_ids else "未知对象"
+        remaining_count = max(len(remaining_note_ids) + len(remaining_card_ids), failed_count, created_count - deleted_count, 0)
+        remaining_labels = [*remaining_note_ids[:8], *remaining_card_ids[:8]]
+        id_text = "、".join(remaining_labels) if remaining_labels else "未知对象"
         failure_text = ""
         if failures:
             first_failure = failures[0]
@@ -816,13 +992,19 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         transaction=transaction,
         report_status=report_status,
         created_note_ids=created_note_ids,
+        created_card_ids=created_card_ids,
         created_count=created_count,
         deleted_count=deleted_count,
         failed_count=failed_count,
         remaining_note_ids=remaining_note_ids,
+        remaining_card_ids=remaining_card_ids,
         failures=failures,
         rollback_complete=rollback_complete,
         target_note_ids=target_note_ids,
+        deleted_note_ids=deleted_note_ids,
+        deleted_card_ids=deleted_card_ids,
+        failed_note_ids=failed_note_ids,
+        failed_card_ids=failed_card_ids,
         summary=summary,
         object_existence_probe=object_existence_probe,
     )
@@ -834,10 +1016,18 @@ def verification_report(transaction: dict[str, Any]) -> dict[str, Any]:
         "transactionStatus": status,
         "createdCount": created_count,
         "createdNoteIds": created_note_ids,
+        "createdCardIds": created_card_ids,
         "deletedCount": deleted_count,
+        "deletedNoteIds": deleted_note_ids,
+        "deletedCardIds": deleted_card_ids,
         "failedCount": failed_count,
+        "failedNoteIds": failed_note_ids,
+        "failedCardIds": failed_card_ids,
         "remainingCount": remaining_count,
         "remainingNoteIds": remaining_note_ids,
+        "remainingCardIds": remaining_card_ids,
+        "residualNoteIds": proof.get("residualNoteIds") if isinstance(proof.get("residualNoteIds"), list) else [],
+        "residualCardIds": proof.get("residualCardIds") if isinstance(proof.get("residualCardIds"), list) else [],
         "targetNoteIds": target_note_ids,
         "rollbackComplete": rollback_complete,
         "accepted": accepted,

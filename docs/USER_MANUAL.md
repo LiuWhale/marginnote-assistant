@@ -1,13 +1,13 @@
 # Codex Companion 产品手册
 
-适用版本：`0.4.39`
+适用版本：`0.4.40`
 更新时间：2026-06-27
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
 
 当前 0.4.x 是可通过 GitHub Releases 安装的公开预览版，不是最终 v1.0。基础问答、草稿制卡、草稿脑图、目标任务、队列、文件上传、PDF 缓存、标注 PDF 副本导出、运行态诊断和双语 README 已经具备；可靠的 MarginNote 原生可见高亮、签名安装包、公证安装包和跨机器验收仍在补证据。
 
-更远的终极目标不是“聊天框加几个按钮”，而是 **MarginNote Knowledge Agent OS**。当前 0.4.x 的聊天页、回答按钮、设置、日志和第一阶段 Agent Workspace 都只是过渡壳层；v1.x 才是对标 MarginNote 自带 AI 的 Study Copilot，v2.x 是能原地编辑真实 `noteId` 的 Native Knowledge Editor，v3.x 才是 Notebook Knowledge OS。v3 必须默认打开 Notebook Workspace，把 MarginNote 里的 PDF 选区、卡片、脑图节点、文档、notebook 和外部文件都当成可操作对象，把每次 AI 写入记录成可验证、可回滚的 Operation Ledger，并把跨 notebook 知识层、工作流运行时、外部 URL/API 自动化和可分享技能包做成一套生产系统。聊天是入口，不是终局；Agent Workspace 才是生产系统。只要高阶工作仍只能靠输入一句话再点回答下方按钮，就不算终极版。
+更远的终极目标不是“聊天框加几个按钮”，而是 **MarginNote Knowledge Agent OS**。当前 0.4.x 的聊天页、回答按钮、设置、日志和第一阶段 Agent Workspace 都只是过渡壳层；v1.x 才是对标 MarginNote 自带 AI 的 Study Copilot，v2.x 是能原地编辑真实 `noteId` 的 Native Knowledge Editor，v3.x 才是 Notebook Knowledge OS。v3 必须默认打开 Notebook Workspace，把 MarginNote 里的 PDF 选区、卡片、脑图节点、文档、notebook、workflow、技能、外部文件和外部自动化请求都当成可操作对象，把每次 AI 写入记录成可验证、可回滚的 Operation Ledger，并把跨 notebook 知识层、工作流运行时、外部 URL/API 自动化和可分享技能包做成一套生产系统。聊天是入口，不是终局；Agent Workspace 才是生产系统。只要高阶工作仍只能靠输入一句话再点回答下方按钮，就不算终极版。终局需要 Live MN Object Kernel、Source Registry、Operation Compiler、Transactional Native Editor、Workflow Runtime、Skill Runtime 和 Verification Agent 七个系统内核，而不只是更多按钮。
 
 ## 这份手册怎么读
 
@@ -139,11 +139,11 @@ WebView 顶部先提供 `Chat Mode / Agent Workspace` 双模式切换。`Chat Mo
 - 对象区有 `Object Browser` 面板，会把当前焦点对象、Object Graph 节点、对象活动、Operation Ledger 条目和第一阶段 `MNObject Registry` 条目合成一个可浏览对象列表。它用于快速看“围绕这个 MNObject 现在有哪些对象可以继续操作”，每一行右侧按钮会刷新图谱、查看活动、打开账本证据或进入对应节点动作。面板里的 `类型` 下拉、`Kind` 输入和 `关键词` 搜索会一起传给后端 `object_browser`，可用来只看 Registry 对象、`mindmap_node`、活动、账本或标题/ID/sourceRef 命中的对象。当前 registry 会记录插件已经见过的对象，也会在读取当前脑图树后把缓存里的 MN 原生节点登记为 `mnobj:note:<noteId>`；对象区的 `扫描 MN` 按钮对应 `objectRegistryScanButton`，会请求 `request_mn_object_registry_scan`，让 MN4 原生队列执行 `scan_mn_objects`，并把 `mnObjectRegistryScanFinished` 返回的对象保存成 `native_object_scan` 证据。扫描对象会进入 Object Graph，显示成 `mn_note` 节点，并按 sourceRef.parentNoteId/nodePath 形成 `native_object_scan 父子边`；点击扫描对象会打开该对象图谱，点击扫描对象会打开该对象活动和账本，而不是只刷新当前焦点对象；但它还不是完整 notebook 全库浏览器。
 - 对象区有 `Object Graph` 面板，会按当前 objectId 把相关历史对话、workflow run、AI 编辑事务、外部自动化请求、诊断证据、已索引的知识实体、最近一次 MN 原生脑图树缓存和用户手工维护关系连成节点。图谱里的 `知识` 节点来自 Knowledge Index，可能是卡片、脑图节点或摘录，并保留 noteId、页码、quote 和支持/包含等关系；图谱里的 `MN节点` 来自当前脑图树缓存，保留 noteId、层级、path 和父子 `contains` 关系；图谱里的手工关系来自本地 `manual_relation`，可通过对象区的“添加关系”把当前 `MNObject` 连到另一个对象 ID。保存或删除手工关系会形成 `object_graph_manual_relation` 账本事件，并保留 `manualRelation` 证据。切换文档、选区或节点后，图谱会按新对象重新读取；点图谱节点可以进入历史对话、workflow、事务、Operation Ledger 证据详情、知识检索、请求 MarginNote 读取某个 MN 节点子树，或删除手工关系。
 - 对象区还有 `对象活动` 面板，会按当前 objectId 汇总最近历史对话、workflow run、AI 编辑事务、手工对象关系事件和诊断日志。它更像时间线；图谱用于看关系，活动用于看最近发生了什么。活动条目右侧的按钮可以直接打开历史对话、查看 workflow、查看 AI 编辑事务、打开手工关系账本证据，或把日志详情展开到对话区。
-- 对象区还提供 `Operation Ledger` 面板。它不是普通日志，而是按当前 objectId 聚合 workflow run、AI 编辑事务、外部自动化请求和手工对象关系事件；`类型`、`状态` 和 `关键词` 控件会一起传给 `operation_ledger_list`，可用来只看工作流、事务、外部请求、手工关系，或只看 `saved`、`deleted`、`failed`、`pass` 等状态。每条账本项都有 `ledgerId`，点开后会在对象区打开证据详情面板，查看来源 ID、状态、对象、摘要、operation plan、dry-run/apply path、原生命令、原生事件线、原生执行、回滚/残留、workflow 确认/阻断状态、external callback evidence 和手工关系证据，不需要回到聊天消息里找审计信息。当前是第一阶段可筛选证据账本，后续会继续把更多 MN 原生存在性检测和逐节点 verify 并入同一账本。
+- 对象区还提供 `Operation Ledger` 面板。它不是普通日志，而是按当前 objectId 聚合 workflow run、AI 编辑事务、外部自动化请求和手工对象关系事件；`类型`、`状态` 和 `关键词` 控件会一起传给 `operation_ledger_list`，可用来只看工作流、事务、外部请求、手工关系，或只看 `saved`、`deleted`、`failed`、`pass` 等状态。每条账本项都有 `ledgerId`，点开后会在对象区打开证据详情面板，查看来源 ID、状态、对象、摘要、operation plan、dry-run/apply path、原生命令、原生事件线、原生执行、回滚/残留、workflow 确认/阻断状态、external callback evidence 和手工关系证据，不需要回到聊天消息里找审计信息。现在账本详情还会带 `codex.mn.verificationReport.v1`：`PASS` 表示当前证据证明通过，`FAIL` 表示发现缺失或失败，`UNKNOWN` 表示缺少足够原生 probe，不能把日志成功当成真实证明。当前是第一阶段可筛选证据账本，后续会继续把更多 MN 原生存在性检测和逐节点 verify 并入同一账本。
 - `对话`：保留聊天历史、输入框和发送按钮。Enter 和点击发送都可提交；如果当前已有任务在执行，新请求会自动排队。
 - `操作`：集中显示目标脑图、当前脑图树缓存、Operation Compiler、Mindmap Studio、最新脑图 Diff 编辑台、Agent 操作计划、下一步动作、执行验证和事务中心。Operation Compiler 会把当前意图先编译成 `operationPlan` 和 `verificationPlan`，显示计划步骤、写入数量、验证状态，以及 schema、上下文、权限、native capability dry-run、确认点和回滚检查；出现阻断时，这里会先告诉你为什么不能把回答当成真实 MN 编辑，并把写入链路或确认类下一步按钮变灰，只保留只读检索等安全动作。阻断面板还会显示第一阶段修复动作，例如刷新 MN 能力、打开设置或缓存当前 PDF。Mindmap Studio 不是回答下方按钮的别名，它是第一阶段脑图对象操作台：点击 `读取现有脑图` 可以刷新真实脑图树，点击 `预览 Diff` 会按当前回答或输入生成变更预览，点击 `应用所选` 会应用当前选中的 Diff，点击 `验证事务` 会刷新最近事务证据，点击 `回滚事务` 会请求 MN4 删除本次事务新增节点并返回残留结果。生成脑图后，即使聊天滚动到别处，最近一次 Diff 的新增/更新/合并/移动/建议删除统计仍会留在这里；接受或拒绝 AI 编辑后，最近事务的回滚状态、事务对象、创建 noteId 和残留 noteId 也会留在这里。局部脑图 Diff apply 也会进入事务中心，显示本次 transactionId、created/applied noteId、失败数和逐操作验证摘要；生成成功后先等待确认，你可以直接点 `保留`，也可以点 `回滚` 删除本次新增节点，或点 `验证/证据` 查看事务报告。如果 Diff 里包含删除建议，普通接受不会直接删除旧卡片；事务中心会另外显示 `删除 / 忽略`，需要你二次确认后才删除目标 noteId。
 - `知识`：显示 Knowledge Graph 状态，包括当前索引范围、实体类型统计、关系统计和显式检索入口。你可以直接输入关键词检索当前授权范围内的索引命中，结果会显示实体、摘要、来源和页码线索；它不会默认扫描或注入全库。
-- `工作流`：显示 Workflow Runtime、External Automation Gateway 和 Skill Marketplace 的当前状态。这里会列出可用工作流模板、最近 workflow run 和本地技能包；点击模板可按当前对象启动工作流，生成类步骤进入队列，写入类步骤仍需要确认。最近 run 右侧的 `查看` 会打开 Run Inspector，显示每一步的状态、queueId、确认要求、提醒/阻断状态和下一步动作；可恢复的失败/阻断 direct 或 queueable 步骤会显示 `重试`，重试后会重新入队并刷新检查器。写入/确认步骤不会显示重试按钮，仍然必须走接受或拒绝。技能包会标明只读或写入权限、是否需要确认、回滚策略和验收规则。外部脚本、快捷指令或其他本地 Agent 可以 POST 到 `/external/workflow/start` 创建 workflow run；Companion 会记录 requestId、caller、权限、对象引用、callback 和执行结果，仍然沿用同一套权限与确认点。外部系统也可以 POST 到 `/external/callback/success` 或 `/external/callback/error`，把执行结果写回同一个 request ledger。
+- `工作流`：显示 Workflow Runtime、External Automation Gateway 和 Skill Runtime / Skill Marketplace 的当前状态。这里会列出可用工作流模板、最近 workflow run 和本地技能包；点击模板可按当前对象启动工作流，生成类步骤进入队列，写入类步骤仍需要确认。最近 run 右侧的 `查看` 会打开 Run Inspector，显示每一步的状态、queueId、确认要求、提醒/阻断状态和下一步动作；可恢复的失败/阻断 direct 或 queueable 步骤会显示 `重试`，重试后会重新入队并刷新检查器。写入/确认步骤不会显示重试按钮，仍然必须走接受或拒绝。技能包不再等同于自定义 prompt：写入或删除技能必须通过 manifest 校验，声明 `requiresConfirmation`、`dryRun`、`rollback` 和 `acceptance`；无效技能会被禁用，有效技能可先生成 dry-run-first 操作计划，再记录 `codex.mn.skillRun.v1`。外部脚本、快捷指令或其他本地 Agent 可以 POST 到 `/external/workflow/start` 创建 workflow run；Companion 会记录 requestId、caller、权限、对象引用、callback 和执行结果，仍然沿用同一套权限与确认点。外部系统也可以 POST 到 `/external/callback/success` 或 `/external/callback/error`，把执行结果写回同一个 request ledger。
 - `设置`：通过右上角设置进入，配置 AI 后端、模型、速度、权限、代理、OpenAI Key、文件路径、更新、日志和诊断。
 - `历史`：通过右上角历史进入，查看或恢复当前 notebook/book 的历史对话。
 
@@ -550,7 +550,7 @@ OpenAI Key 写在：
 
 ## 21. 当前预览版限制
 
-截至 2026-06-27，`v0.4.39` 是当前公开预览版发布候选；本轮目标是完成 GitHub Release、双语 README、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.39 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
+截至 2026-06-27，`v0.4.40` 是当前公开预览版发布候选；本轮目标是完成 GitHub Release、双语 README、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.40 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
 
 - MarginNote 原生可见高亮仍缺活跃 PDF 选区下的完整证据。
 - `release_sha256_manifest` 已覆盖 zip、`.mnaddon` 和 `.pkg` 并通过；当前阻塞不再来自 artifact hash manifest。
@@ -558,7 +558,7 @@ OpenAI Key 写在：
 - 还缺第二用户或第二机器的结构化安装验收。
 - 还缺同一文档完整按钮/工作流验收 PASS evidence。
 
-这些限制不影响使用 `v0.4.39` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
+这些限制不影响使用 `v0.4.40` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
 
 ## 22. 给用户的最短使用路径
 

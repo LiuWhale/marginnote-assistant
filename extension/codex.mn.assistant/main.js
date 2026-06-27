@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.39';
+  var PluginVersion = '0.4.40';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -909,6 +909,24 @@ JSB.newAddon = function(mainPath) {
     }
     if (lastFailure) return lastFailure;
     return {ok: false, method: 'database', reason: 'database-delete-unavailable', noteId: noteId};
+  }
+
+  function deleteCardForAiEdit(card, ctx, cardId) {
+    cardId = safeString(cardId || noteIdentifier(card));
+    if (!cardId) return {ok: false, method: 'card-delete', reason: 'missing-card-id'};
+    if (!card) card = resolveAiEditNoteById(ctx, cardId);
+    if (!card && verifyAiEditNoteDeleted(cardId, ctx)) {
+      return {ok: true, method: 'card-already-deleted', cardId: cardId};
+    }
+    if (!card) return {ok: false, method: 'card-delete', reason: 'card-delete-unsupported', cardId: cardId};
+    var result = deleteNoteForAiEdit(card, ctx, cardId);
+    if (result && result.ok) return {ok: true, method: result.method || 'card-note-delete', cardId: cardId};
+    return {
+      ok: false,
+      method: result ? result.method : 'card-delete',
+      reason: result ? result.reason : 'card-delete-unsupported',
+      cardId: cardId
+    };
   }
 
   function pruneAiEditDeleteFailures(failed, ctx) {
@@ -3112,6 +3130,21 @@ JSB.newAddon = function(mainPath) {
     return out;
   }
 
+  function aiEditCreatedCardIdsFromBridgeParams(params) {
+    params = params || {};
+    var createdCardIdsString = safeString(valueOf(params, 'createdCardIds'));
+    var parts = createdCardIdsString.split('|');
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < parts.length; i++) {
+      var cardId = safeString(parts[i]);
+      if (!cardId || seen[cardId]) continue;
+      seen[cardId] = true;
+      out.push(cardId);
+    }
+    return out;
+  }
+
   function mindmapDeleteTargetNoteIdsFromBridgeParams(params) {
     params = params || {};
     var targetNoteIdsString = safeString(valueOf(params, 'targetNoteIds'));
@@ -3131,10 +3164,15 @@ JSB.newAddon = function(mainPath) {
     transactionId = safeString(transactionId);
     fallback = fallback || {};
     var createdNoteIds = aiEditCreatedNoteIdsFromBridgeParams(fallback);
+    var createdCardIds = aiEditCreatedCardIdsFromBridgeParams(fallback);
     if (!transactionId || !createdNoteIds.length) return null;
     var createdNoteIdsMap = {};
     for (var i = 0; i < createdNoteIds.length; i++) {
       createdNoteIdsMap[createdNoteIds[i]] = true;
+    }
+    var createdCardIdsMap = {};
+    for (var c = 0; c < createdCardIds.length; c++) {
+      createdCardIdsMap[createdCardIds[c]] = true;
     }
     return {
       transactionId: transactionId,
@@ -3144,6 +3182,8 @@ JSB.newAddon = function(mainPath) {
       createdNotes: [],
       createdNoteIds: createdNoteIds,
       createdNoteIdsMap: createdNoteIdsMap,
+      createdCardIds: createdCardIds,
+      createdCardIdsMap: createdCardIdsMap,
       startedAt: String(new Date().getTime())
     };
   }
@@ -3169,6 +3209,8 @@ JSB.newAddon = function(mainPath) {
       createdNotes: [],
       createdNoteIds: [],
       createdNoteIdsMap: {},
+      createdCardIds: [],
+      createdCardIdsMap: {},
       startedAt: now
     };
     try {
@@ -3197,6 +3239,15 @@ JSB.newAddon = function(mainPath) {
     transaction.createdNotes.push(note);
   };
 
+  CodexAssistantAddon.prototype.recordAiEditCreatedCard = function(note) {
+    var transaction = this.activeAiEditTransaction;
+    if (!transaction || !note) return;
+    var cardId = noteIdentifier(note);
+    if (!cardId || transaction.createdCardIdsMap[cardId]) return;
+    transaction.createdCardIdsMap[cardId] = true;
+    transaction.createdCardIds.push(cardId);
+  };
+
   CodexAssistantAddon.prototype.finishAiEditTransaction = function(json) {
     var transaction = this.activeAiEditTransaction;
     if (!transaction) return null;
@@ -3211,6 +3262,7 @@ JSB.newAddon = function(mainPath) {
       transactionId: transaction.transactionId,
       createdCount: transaction.createdNoteIds.length,
       createdNoteIds: transaction.createdNoteIds,
+      createdCardIds: transaction.createdCardIds,
       card_count: countOf(valueOf(json, 'cards')),
       has_mindmap: mindmap ? true : false,
       mindmap_title: safeString(valueOf(draftSummary, 'mindmap_title') || valueOf(mindmap, 'title')),
@@ -3258,6 +3310,10 @@ JSB.newAddon = function(mainPath) {
     var ctx = this.resolveNotebookAndDocument() || aiEditFallbackContext(transaction.topicid);
     var deleted = 0;
     var failed = [];
+    var deletedNoteIds = [];
+    var failedNoteIds = [];
+    var deletedCardIds = [];
+    var failedCardIds = [];
     var undoRollback = rollbackAiEditTransactionWithUndo(transaction, ctx);
     this.postEvent('aiEditUndoRollbackAttempted', {
       transactionId: transactionId,
@@ -3275,20 +3331,61 @@ JSB.newAddon = function(mainPath) {
           var noteId = remainingIds[i];
           var note = resolveAiEditNoteById(ctx, noteId);
           var result = deleteNoteForAiEdit(note, ctx, noteId);
-          if (result && result.ok) deleted += 1;
-          else failed.push({
-            noteId: noteId,
-            method: result ? result.method : '',
-            reason: result ? result.reason : 'unknown'
-          });
+          if (result && result.ok) {
+            deleted += 1;
+            deletedNoteIds.push(noteId);
+          } else {
+            failedNoteIds.push(noteId);
+            failed.push({
+              noteId: noteId,
+              method: result ? result.method : '',
+              reason: result ? result.reason : 'unknown'
+            });
+          }
         }
       });
+    }
+    var cardIds = transaction.createdCardIds || [];
+    for (var cardIndex = 0; cardIndex < cardIds.length; cardIndex++) {
+      var cardId = safeString(cardIds[cardIndex]);
+      if (!cardId) continue;
+      var card = resolveAiEditNoteById(ctx, cardId);
+      var cardResult = deleteCardForAiEdit(card, ctx, cardId);
+      if (cardResult && cardResult.ok) {
+        deletedCardIds.push(cardId);
+      } else {
+        failedCardIds.push(cardId);
+        failed.push({
+          cardId: cardId,
+          objectType: 'card',
+          method: cardResult ? cardResult.method : '',
+          reason: cardResult ? cardResult.reason : 'card-delete-unsupported'
+        });
+      }
     }
     markAiEditDatabaseChanged(ctx ? ctx.topicId : transaction.topicid);
     if (ctx && ctx.topicId) Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
     var originalFailed = failed.length;
     if (failed.length && ctx) failed = pruneAiEditDeleteFailures(failed, ctx);
     deleted += originalFailed - failed.length;
+    failedNoteIds = failedNoteIds.filter(function(noteId) {
+      return !verifyAiEditNoteDeleted(noteId, ctx);
+    });
+    failedCardIds = failedCardIds.filter(function(cardId) {
+      return !verifyAiEditNoteDeleted(cardId, ctx);
+    });
+    for (var deletedIndex = 0; deletedIndex < transaction.createdNoteIds.length; deletedIndex++) {
+      var deletedNoteId = transaction.createdNoteIds[deletedIndex];
+      if (deletedNoteId && verifyAiEditNoteDeleted(deletedNoteId, ctx) && deletedNoteIds.indexOf(deletedNoteId) < 0) {
+        deletedNoteIds.push(deletedNoteId);
+      }
+    }
+    for (var deletedCardIndex = 0; deletedCardIndex < cardIds.length; deletedCardIndex++) {
+      var deletedCardId = cardIds[deletedCardIndex];
+      if (deletedCardId && verifyAiEditNoteDeleted(deletedCardId, ctx) && deletedCardIds.indexOf(deletedCardId) < 0) {
+        deletedCardIds.push(deletedCardId);
+      }
+    }
     var ok = failed.length === 0;
     if (ok && this.aiEditTransactions) delete this.aiEditTransactions[transactionId];
     var payload = {
@@ -3297,6 +3394,10 @@ JSB.newAddon = function(mainPath) {
       transactionId: transactionId,
       deleted: deleted,
       failed: failed.length,
+      deletedNoteIds: deletedNoteIds,
+      failedNoteIds: failedNoteIds,
+      deletedCardIds: deletedCardIds,
+      failedCardIds: failedCardIds,
       message: ok ? '已删除本次新增内容。' : '部分新增内容删除失败，请手动撤销。',
       failures: failed,
       undoRollback: {
@@ -3506,14 +3607,15 @@ JSB.newAddon = function(mainPath) {
           continue;
         }
         var note = Note.createWithTitleNotebookDocument(title, ctx.notebook, ctx.document);
-        if (note) {
-          if (parent) parent.addChild(note);
+          if (note) {
+            if (parent) parent.addChild(note);
           if (note.appendMarkdownComment) {
             var marker = metadataComment(codexId);
             note.appendMarkdownComment(marker ? marker + '\n\n' + body : body);
           }
           created.push(note);
           addon.recordAiEditCreatedNote(note);
+          addon.recordAiEditCreatedCard(note);
         }
       }
     });

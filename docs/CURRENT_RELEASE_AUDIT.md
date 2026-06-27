@@ -6,19 +6,69 @@
 
 ## 版本与包
 
-- 当前发布候选：0.4.39 公开预览版
-- MN4 插件 manifest：0.4.39
-- Companion：0.4.39
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.39`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.39-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.39-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.39-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.39-latest.mnaddon`
+- 当前发布候选：0.4.40 公开预览版
+- MN4 插件 manifest：0.4.40
+- Companion：0.4.40
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.40`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.40-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.40-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.40-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.40-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.39-latest.pkg`，已生成但未签名、未公证
-- 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 已覆盖 zip、mnaddon 和 pkg，并已通过。
+- 当前 `.mnaddon` sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.40-latest.pkg`，已生成但未签名、未公证；签名和公证仍需发布维护者证书。
+- 当前 pkg sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
+- 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 覆盖 zip、mnaddon 和 pkg。
 
 ## 当前证据
+
+### 2026-06-27 v0.4.40 发布候选：Knowledge OS kernels and shell
+
+本轮把 0.4.39 之后的开发态推进为 0.4.40 发布候选。重点不是继续增加聊天按钮，而是把插件从聊天面板推进到可验证的 MarginNote Knowledge Agent OS 内核和运行时壳层。
+
+已实现的开发态证据：
+
+- Live MN Object Kernel：`object_kernel.py` 生成 `codex.mn.mnObject.v1` 和 scoped `codex.mn.mnObjectRegistry.v1`。
+- Source Registry action evidence：`source_registry.py` 记录 `codex.mn.sourceRegistry.v1` 和 `codex.mn.sourceRegistryActionRun.v1`。
+- External Automation Gateway v2：`external_gateway.py` 拒绝外部直接写入/删除、去除 secret，并记录 callback lifecycle。
+- Transactional Native Editor：AI 编辑事务证据分离 note/card create/delete/failure/residual，避免拒绝时只删除结构但卡片残留还被误判成功。
+- Workflow Runtime v2：`workflow_engine.py` 持久化 workflow run、步骤状态、next/resume/retry/cancel 和事件证据。
+- Skill Runtime v2：`skill_marketplace.py` 校验 `codex.mn.skillManifest.v1`，写入/删除技能必须声明 `requiresConfirmation`、`dryRun`、`rollback` 和 `acceptance`，并可生成 dry-run-first operation plan、记录 `codex.mn.skillRun.v1`。
+- Verification Agent：`verification_agent.py` 对 transaction、source registry、workflow run 和 skill run 输出 `codex.mn.verificationReport.v1`，状态只能是 `PASS`、`FAIL` 或 `UNKNOWN`。没有 native object probe 时，交易对象存在性必须是 `UNKNOWN`，不能把日志成功冒充真实证明。
+- Knowledge OS shell：WebView 已加入并要求上报 `knowledgeConsolePanel`、`studioCanvasPanel`、`operationLedgerDrawer`、`sourceRegistryPanel`、`verificationReportPanel`、`externalGatewayPanel` 和 `skillCenterPanel`；doctor 和 single-document acceptance 会把缺失这些锚点判为运行态不完整。
+
+本轮本地验证结果：
+
+```text
+python3 -m unittest discover -s tests
+PASS, 535 tests
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 -m py_compile companion.py agent_workbench.py operation_runtime.py workflow_engine.py skill_marketplace.py transaction_manager.py knowledge_index.py doctor.py release_acceptance.py single_document_acceptance.py package_release.py build_pkg.py object_kernel.py source_registry.py external_gateway.py verification_agent.py
+PASS
+
+git diff --check
+PASS
+```
+
+本轮发布包结果：
+
+- `python3 package_release.py 0.4.40` 已生成 `CodexCompanion-0.4.40-latest-dist.zip` 和 `CodexCompanion-0.4.40-latest.mnaddon`，并同步到 OneDrive。
+- `python3 build_pkg.py release/CodexCompanion-0.4.40-latest-dist.zip --json` 已生成 `CodexCompanion-0.4.40-latest.pkg`，并同步到 OneDrive；结果明确为 `signed=false`。
+- `python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --mnaddon release/CodexCompanion-0.4.40-latest.mnaddon` 通过，zip 文件数 135，mnaddon 文件数 8。
+- `python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --mnaddon release/CodexCompanion-0.4.40-latest.mnaddon --install-dry-run` 通过。
+- 从解压后的 `CodexCompanion-0.4.40` 包根执行 `/bin/zsh install.sh` 已完成本机安装；doctor 显示 MN4 extension manifest 为 `Codex Companion / 0.4.40`，Companion service 已运行，LaunchAgent 为 `com.codex.paper-companion`。
+
+仍未完成的发布证据：
+
+- GitHub Release `v0.4.40` 已创建并上传 zip、`.mnaddon`、pkg 和 `SHA256SUMS.txt`。
+- 本机文件已替换到 0.4.40，但 MarginNote 4 仍需重启或重新打开插件面板，才能产生 `pluginVersion 0.4.40` 的 `webControlsReady` 和 `nativeApiCapabilities` 运行态事件。
+- `python3 release_acceptance.py release/CodexCompanion-0.4.40-latest-dist.zip --json` 已运行；当前 `releasable=false`，阻塞项为 `runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install` 和 `single_document_acceptance`。
+- 原生可见高亮、same-topic single-document PASS、跨机器安装、签名和 notarization 仍是最终发布阻塞项。
+- final/v3 claim 需要 `release_acceptance.evaluate_acceptance(final_claim=True, verification_reports=[...])` 并提供当前文档 `PASS` 的 `codex.mn.verificationReport.v1`。
 
 ### 2026-06-27 v0.4.39 发布候选：Actionable Source Registry
 
