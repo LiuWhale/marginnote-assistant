@@ -11,28 +11,51 @@ Codex Companion is a local-first AI assistant plugin for MarginNote 4. It connec
 
 It is not limited to academic papers. Papers, book chapters, course material, project documents, meeting notes, and any document that MarginNote can expose through its APIs can be used as context.
 
-The public 0.4.x line is still a preview and should not be mistaken for the end-state product. Its current chat panel, answer buttons, settings, queue, logs, and first Agent Workspace are migration scaffolding. The long-term target is **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, skills, external automation requests, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
+The public 0.4.x line is still a preview and should not be mistaken for the end-state product. This line now opens in a clean Chat mode by default, matching the built-in MarginNote AI interaction first; the optional Tools mode starts as a simple task center with status, next-step guidance, and four large actions. The old advanced surfaces for mind-map Diff, card review, workflows, evidence, verification, rollback, and diagnostics are still available, but they are hidden behind Expert Mode. The long-term target is still **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, skills, external automation requests, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
 
-The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS: it opens into a Notebook Workspace, not a blank chat box. `Chat Mode` remains useful for quick reading questions and intent capture, but it becomes a command pane next to Object Browser, Mindmap Studio, Card Factory, Knowledge Graph, Workflow Builder, External Automation Gateway, Skill Center, and Operation Ledger Explorer. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. The seven non-negotiable kernels are Live MN Object Kernel, Source Registry, Operation Compiler, Transactional Native Editor, Workflow Runtime, Skill Runtime, and Verification Agent. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
+The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS, where a full Notebook Workspace can become the main surface instead of a plain chat box. Current 0.4.x deliberately does not force the experimental workspace into the first screen: Chat is the default entry, Tools is the simple task center, and the full object, operation, knowledge, and workflow surfaces are optional Expert Mode. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. The seven non-negotiable kernels are Live MN Object Kernel, Source Registry, Operation Compiler, Transactional Native Editor, Workflow Runtime, Skill Runtime, and Verification Agent. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
+
+The visible v3 gap is intentionally larger than today's feature list. A real end-state build should let a user open a notebook and immediately inspect the source inventory, live MarginNote objects, existing mind-map structure, card coverage, review gaps, failed transactions, recommended workflows, and rollback evidence without sending a message first. It should let the user edit an existing mind map as native `noteId` objects, manage cards as a coverage and review system, build cross-document knowledge graphs with source links, run visual workflows with confirmation checkpoints, and install audited skills with declared permissions. Today's 0.4.x workspace is only the migration path toward that IDE.
 
 > This project is not affiliated with MarginNote, OpenAI, or Apple.
+
+## End-State Contract
+
+The v3 target is not "current plugin plus more buttons." It is accepted only if these product contracts are true:
+
+- The first screen is a Notebook Knowledge IDE, not a chat transcript.
+- The primary data model is `MNObject` / `noteId` / source / workflow / ledger, not answer text.
+- Mind-map work edits the existing native tree through Diff and verification, rather than creating another similar tree.
+- Card generation behaves like a coverage and review system, not text splitting.
+- Long work is a visual workflow with checkpoints, not only a pending queue.
+- Every write has plan, dry-run, confirmation, native apply, verification, ledger evidence, and rollback or residual proof.
+- Skills are manifest-backed packages with permissions and acceptance rules, not saved prompts.
+- External automation enters the gateway as a controlled workflow request and cannot bypass dry-run, confirmation, or ledger.
+
+If the main experience is still "ask, read an answer, click card or mind-map buttons, then debug settings," the build is a Study Copilot preview, not the Knowledge Agent OS.
 
 ## What It Can Do
 
 - Chat inside the MarginNote 4 panel with context from the current selection, node, or document.
-- Switch between `Chat Mode` for lightweight reading conversation and `Agent Workspace` for object, operation, knowledge, and workflow work.
-- Use the `Workspace Navigator` in Agent Workspace to jump directly to `Knowledge Console`, `Mindmap Studio`, `Card Factory`, `Operation Ledger`, `Knowledge Graph`, `Workflow Builder`, and `Skill Center`.
-- Open into a first-stage `Notebook Workspace` overview instead of a blank chat page. The overview aggregates the current focus object, object counts, mind-map cache, review queue, workflow runs, and Operation Ledger counts, then exposes direct actions to scan MarginNote objects, read the current mind-map tree, plan the next operation, inspect review cards, workflows, and ledger evidence.
+- Open in `Chat` mode by default, with the conversation, input box, send button, and PDF cache status visible. Normal explanation, follow-up questions, and selection Q&A do not require opening the workspace.
+- Switch to the optional `Tools` mode for a simple task center: current status, next-step guidance, and four large actions for reading, mind-map work, review cards, and write verification/rollback.
+- Tools mode generation buttons stage editable prompts in the input box instead of immediately launching long work; the normal send button still controls execution and queueing.
+- Expand `Expert Mode` when you need the full `Workspace Navigator` dropdown for `Knowledge Console`, `Mindmap Studio`, `Card Factory`, `Operation Ledger`, `Knowledge Graph`, `Workflow Builder`, and `Skill Center`.
+- Use `Notebook Workspace` as an optional Expert Mode overview, not the default first screen. It aggregates the current focus object, object counts, mind-map cache, review queue, workflow runs, and Operation Ledger counts, then exposes direct actions to scan MarginNote objects, read the current mind-map tree, plan the next operation, inspect review cards, workflows, and ledger evidence.
+- See a zero-message `Knowledge Console Matrix` on the Notebook Workspace. It summarizes source inventory, native MN objects, mind-map baseline, card coverage, workflow runtime, Operation Ledger, and verification evidence before any prompt is sent; missing evidence stays `action_required`, `blocked`, or `waiting_evidence` instead of being shown as done. The source axis opens Source Registry when readable material exists, or offers cache/file/path repair actions when it does not. The MN object axis scans first when no native evidence exists, then opens Object Browser after native scan evidence is available. The mind-map baseline axis reads the tree when no baseline exists, then opens Mindmap Studio after the current tree is cached. The card-coverage axis opens Card Factory, and the Workflow axis opens Workflow Builder once a run exists. The verification axis opens Verification Center and refreshes `verification_report_list` directly.
+- Use the first `Object Intake` router in Notebook Workspace. It treats the current document, selection, or node as the workbench input object and routes it to Source Registry, Object Browser, Mindmap Studio, Card Factory, Workflow Builder, Skill Center, or Verification Center. This is the visible break from "ask a prompt, then click answer buttons": the workspace now starts from an object and shows what that object can safely do next.
+- Use the first `Object Task Composer` in Notebook Workspace. It turns the current object routes into task drafts with a target, evidence line, expected output, route action, optional `agent_plan` compile action, and workflow candidate. Starting a candidate uses the existing `workflow_start` runtime, so generated steps can queue while write steps still stop at confirmation points. This is still a draft-first layer, but it moves the product from route buttons toward Operation Compiler and Workflow Builder task composition.
+- Use the first `Workflow Builder Board` in the workflow workspace. The board exposes the `codex.mn.workflowBuilderBoard.v1` contract and splits work into `draft_candidates`, active runs, `waiting_confirmation`, and evidence lanes. It turns Object Task Composer candidates into visible workflow cards, shows which runs are waiting for confirmation, and opens the Run Inspector for existing workflow evidence. It is not the full v3 visual builder yet, but it is the first visible break from queue-only long tasks.
 - Show a first-stage `Source Registry` in the Notebook Workspace. It unifies the current MarginNote document, cached PDFs, explicit PDF paths, uploaded files, and configured file search roots into readable source objects, so the workspace can explain whether full-document work has real material available before any chat prompt runs.
 - Use Source Registry action buttons when material is missing: cache the current PDF through the MN4 plugin, choose a local PDF file, open file-path management, or refresh MarginNote context directly from the Notebook Workspace.
 - Show a first-stage `Study Program` in the Notebook Workspace. It computes a zero-message coverage snapshot and concrete gaps for MN objects, mind-map baseline, review cards, workflow runs, and Operation Ledger evidence, then recommends workflows such as `paper_deep_reading`, `mindmap_reorganize`, and `selection_to_cards` without requiring a chat prompt first.
 - Use the first `Notebook Runbook` in the workspace. It turns the notebook overview into an executable checklist for context, native object scan, mind-map baseline, operation plan, workflow runtime, and ledger evidence, with a status, evidence line, action button for each step, a single `Continue next step` button, and an `Auto prepare` preflight plan that runs safe setup actions without writing to MarginNote. Each AutoPlan run now records a `notebook_runbook_preflight` ledger entry and shows the latest preflight status in the Runbook panel.
-- Use a dedicated `Command Pane` instead of a dialog tab inside the workbench. Workspace mode keeps the prompt/send controls visible but collapses the conversation history by default; Chat Mode expands the full conversation when you want a built-in-AI-style reading chat.
+- Use Chat as the default main surface. Tools mode keeps the prompt/send controls visible, while Expert Mode stays collapsed by default so the panel is not crowded; switch back to Chat for continuous reading conversation.
 - Choose the context scope explicitly: auto, selection/node only, or full document.
-- See the first Operation Compiler surface in Agent Workspace. `agent_plan` now exposes a structured `operationPlan`, `verificationPlan`, compiler checks, and per-operation dry-run evidence so write-capable actions show planned steps, write count, native capability status, note-level blocking reasons, confirmation requirements, and verification obligations before they are treated as real MarginNote edits.
+- See the first Operation Compiler surface in Advanced mode. `agent_plan` now exposes a structured `operationPlan`, `verificationPlan`, compiler checks, and per-operation dry-run evidence so write-capable actions show planned steps, write count, native capability status, note-level blocking reasons, confirmation requirements, and verification obligations before they are treated as real MarginNote edits.
 - Generate short MarginNote cards and structured mind-map branches, with draft or AI-edit confirmation before writing. Card generation now returns a `codex.mn.cardFactory.v1` summary; each card carries `cardType`, source, `learningGoal`, and `reviewPrompt`, and the confirmation panel shows type and quality risks.
 - Preview mind-map changes as a Diff, including create/update/merge/move/delete-suggestion counts, with per-node keep/skip selection and title/body editing before writing.
-- Use the first Mindmap Studio panel in Agent Workspace. It is not a renamed answer button: it exposes the operation sequence `读取现有脑图`, `预览 Diff`, `应用所选`, `验证事务`, and `回滚事务`.
+- Use the first Mindmap Studio panel in Advanced mode. It is not a renamed answer button: it exposes the operation sequence `读取现有脑图`, `预览 Diff`, `应用所选`, `验证事务`, and `回滚事务`.
 - Turn the latest answer into a mind-map tree; accept keeps it, reject attempts to remove the nodes and cards created by that edit.
 - Select the target mind map at the top of the chat before writing, reducing the risk of creating nodes in the wrong notebook or page.
 - Queue actions while another generation is running; pending tasks continue automatically.
@@ -44,7 +67,7 @@ The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Compa
 - Show an object-scoped Object Graph in the object workspace, linking the current `MNObject` to related conversations, workflow runs, AI edit transactions, external automation requests, diagnostic evidence, Knowledge Index entities, cached native MarginNote mind-map nodes with parent-child edges, and user-maintained `manual_relation` edges between `MNObject` IDs. Saving or deleting those manual edges creates auditable `object_graph_manual_relation` ledger events with `manualRelation` evidence.
 - Show an object activity feed in the object workspace, aggregating conversations, workflow runs, AI edit transactions, and diagnostic logs for the current `MNObject`, with direct actions to open or inspect each item.
 - Use first-stage Skill Runtime instead of plain custom prompts. Valid skills must pass `codex.mn.skillManifest.v1` validation; write/delete skills require confirmation, dry-run, rollback, and acceptance rules before they can produce operation plans or skill-run evidence.
-- Inspect first-stage Verification Agent reports in the operation evidence path. `codex.mn.verificationReport.v1` uses strict `PASS`, `FAIL`, and `UNKNOWN`; missing native object probes remain `UNKNOWN` rather than being treated as success.
+- Inspect first-stage Verification Agent reports in the operation workspace. The visible `Verification Center` calls `verification_report_list`, aggregates current-object reports from Operation Ledger entries, Source Registry, and Skill Runtime evidence, renders `PASS`, `FAIL`, and `UNKNOWN` counts, and builds `codex.mn.verificationRepairPlan.v1` with a primary `执行推荐修复` button plus detailed repair actions when a non-PASS report can be acted on. Transaction reports blocked by `native_probe_missing` expose `检查真实对象`, which submits a MarginNote native object-existence probe; when MN4 returns `mnObjectExistenceProbeFinished`, the same report is recomputed as `PASS` or `FAIL`. Missing native object probes remain `UNKNOWN` rather than being treated as success.
 - Show an object-scoped Operation Ledger that aggregates workflow runs, AI edit transactions, external gateway requests, and manual Object Graph relationship events for the current `MNObject`; it can filter audit entries by entry type, status, and keyword, and selecting a ledger item opens an evidence detail panel in the object workspace with operation plan, dry-run/apply path, native command, native event timeline, native apply, rollback/residual, workflow confirmation state, callback evidence, and manual relationship evidence.
 - Verify rollback residuals with a native MarginNote object existence probe: Companion can ask the plugin to check real `noteId` objects after an AI edit reject, and the verification report uses that probe instead of only inferring residuals from deleted/failed counts.
 - Show a first-stage Workflow Run Inspector in the workflow workspace. Recent workflow runs can be opened to inspect each step's status, queue id, confirmation requirement, warning/blocking tone, and next action; recoverable failed or blocked direct/queueable steps expose a retry action, while write/confirmation steps still require accept/reject.
@@ -122,7 +145,7 @@ Select text in a PDF or note node, then ask a question or click an explanation a
 
 1. Choose the target mind map at the top of the chat.
 2. Click `生成脑图树` under the latest answer, or ask for a structured mind map from the full document.
-3. In Agent Workspace, open `Mindmap Studio` to read the existing tree, preview the Diff, apply selected changes, verify the transaction, or roll it back.
+3. Switch to `Advanced` when you need `Mindmap Studio`, then read the existing tree, preview the Diff, apply selected changes, verify the transaction, or roll it back.
 4. The plugin keeps the latest create/update/merge/move/delete-suggestion summary visible in the operation workspace.
 5. Uncheck nodes you do not want to write, or edit a node title/body directly in the Diff panel; the preview marks skipped nodes and saves edited nodes before writing.
 6. Confirm below the answer: `接受` writes or locally applies the change, while `拒绝` discards the draft.
@@ -263,7 +286,7 @@ python3 -m unittest discover -s tests
 Check Python syntax:
 
 ```bash
-python3 -m py_compile companion.py diagnostic_log.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py
+python3 -m py_compile companion.py diagnostic_log.py runtime_config.py update_manager.py doctor.py release_acceptance.py release_smoke_test.py package_release.py prepare_release_handoff.py send_action.py single_document_acceptance.py ui_functional_acceptance.py
 ```
 
 Check WebView JavaScript:
@@ -286,25 +309,35 @@ Check service status:
 curl http://127.0.0.1:48761/status
 ```
 
+Run arbitrary-document UI functional acceptance:
+
+```bash
+python3 ui_functional_acceptance.py --document-title "Arbitrary Document UI Acceptance.pdf"
+python3 ui_functional_acceptance.py --document-title "Arbitrary Document UI Acceptance.pdf" --browser-render --browser-interaction --browser-actions --browser-write-actions
+```
+
+The same full gate is available inside the plugin settings page as `UI 功能验收` (`uiFunctionalAcceptanceButton`), backed by the `ui_functional_acceptance_summary` Companion action.
+The browser action gate records `buttonActionDeltas`, so repeated-action controls such as refresh/filter buttons and history-scope buttons must each trigger their own expected backend action.
+
 ## Package And Release
 
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.40
+python3 package_release.py 0.4.41
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --mnaddon release/CodexCompanion-0.4.40-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --mnaddon release/CodexCompanion-0.4.40-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.41-latest-dist.zip --mnaddon release/CodexCompanion-0.4.41-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.41-latest-dist.zip --mnaddon release/CodexCompanion-0.4.41-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.40-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.41-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

@@ -23,16 +23,19 @@ DB_PATH = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Priva
 ONEDRIVE_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 MN4_APP = Path("/Applications/MarginNote 4.app")
 EVENTS_PATH = ROOT / "events.jsonl"
-CURRENT_PLUGIN_VERSION = "0.4.40"
+CURRENT_PLUGIN_VERSION = "0.4.41"
 REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-arm-next-selection-default",
     "native-highlight-prefer-next-selection-v1",
     "native-highlight-command-prepared",
     "selection-popup-diagnostics-v1",
     "native-highlight-selection-poll-v1",
+    "native-highlight-selection-poll-probe-v1",
     "selection-popup-scene-observer-v1",
     "selection-popup-notebook-rebind-v1",
     "native-highlight-selection-text-resolver-v1",
+    "native-pdf-selection-probe-v1",
+    "native-pdf-selection-image-probe-v1",
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
     "ai-edit-undo-rollback-v2",
@@ -41,7 +44,7 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-mindmap-diff-apply-create-v1",
     "native-mindmap-delete-suggestion-confirm-v1",
 ]
-CURRENT_RC_VERSION = "0.4.40"
+CURRENT_RC_VERSION = "0.4.41"
 PREFERRED_LAUNCH_LABEL = "com.codex.paper-companion"
 LEGACY_LAUNCH_LABEL = "com.liuwhale.codex-marginnote-assistant"
 LATEST_PACKAGE = ROOT / f"release/CodexCompanion-{CURRENT_RC_VERSION}-latest-dist.zip"
@@ -56,6 +59,11 @@ NATIVE_HIGHLIGHT_VALIDATION_BOOK_MD5 = "253dd5804dd4973bcea545ebcc7ee5a760c73581
 COMPANION_URL = "http://127.0.0.1:48761"
 REQUIRED_WEB_CONTROL_IDS = [
     "aiChatShell",
+    "knowledgeOsContractPanel",
+    "knowledgeOsContractTitle",
+    "knowledgeOsObjectLayer",
+    "knowledgeOsOperationLayer",
+    "knowledgeOsEvidenceLayer",
     "modeSwitchBar",
     "chatModeButton",
     "agentWorkspaceModeButton",
@@ -82,6 +90,12 @@ REQUIRED_WEB_CONTROL_IDS = [
     "notebookWorkspaceLedger",
     "notebookWorkspaceSources",
     "notebookWorkspaceActions",
+    "notebookObjectIntake",
+    "notebookObjectIntakeSummary",
+    "notebookObjectIntakeRoutes",
+    "notebookObjectTaskComposer",
+    "notebookObjectTaskComposerSummary",
+    "notebookObjectTaskComposerList",
     "sourceRegistryPanel",
     "notebookWorkspaceSourceRegistry",
     "notebookWorkspaceSourceSummary",
@@ -147,6 +161,23 @@ REQUIRED_WEB_CONTROL_IDS = [
     "operationWorkspaceTitle",
     "operationWorkspaceMeta",
     "verificationReportPanel",
+    "realMnAcceptancePanel",
+    "realMnAcceptanceStatusLine",
+    "realMnAcceptanceChecklist",
+    "realMnAcceptanceRunAllButton",
+    "singleDocumentAcceptanceLine",
+    "singleDocumentAcceptanceDetail",
+    "singleDocumentAcceptanceButton",
+    "mainUiFunctionalAcceptanceLine",
+    "mainUiFunctionalAcceptanceDetail",
+    "mainUiFunctionalAcceptanceButton",
+    "realMnAcceptanceSafeEvidenceButton",
+    "mainNativeHighlightWizardPanel",
+    "mainNativeHighlightWizardLine",
+    "mainNativeHighlightWizardDetail",
+    "mainNativeHighlightWizardActions",
+    "nativeHighlightWizardRetryButton",
+    "nativeHighlightWizardRefreshButton",
     "operationCompilerPanel",
     "operationCompilerSummary",
     "operationPlanStats",
@@ -178,6 +209,9 @@ REQUIRED_WEB_CONTROL_IDS = [
     "workflowWorkspaceTitle",
     "workflowWorkspaceSummary",
     "workflowWorkspaceRuns",
+    "workflowBuilderBoardPanel",
+    "workflowBuilderBoardSummary",
+    "workflowBuilderBoardLanes",
     "externalGatewayPanel",
     "workflowWorkspaceGateway",
     "skillCenterPanel",
@@ -482,6 +516,7 @@ def check_release_package() -> Check:
         "Prepare Release Handoff.command",
         "release_smoke_test.py",
         "single_document_acceptance.py",
+        "ui_functional_acceptance.py",
         "build_pkg.py",
         "notarize_pkg.py",
         "prepare_release_handoff.py",
@@ -1026,6 +1061,41 @@ def native_handler_features_from_event(event: dict[str, Any] | None) -> list[str
     return [str(item) for item in features if item]
 
 
+def web_controls_event_details(event: dict[str, Any]) -> dict[str, Any]:
+    extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+    controls = {item for item in str(extra.get("controls") or "").split(",") if item}
+    reported_missing = [item for item in str(extra.get("missing") or "").split(",") if item]
+    absent = [item for item in REQUIRED_WEB_CONTROL_IDS if item not in controls]
+    min_width = str(extra.get("minWidth") or "")
+    min_height = str(extra.get("minHeight") or "")
+    bad_size = min_width != "390" or min_height != "520"
+    return {
+        "controls": controls,
+        "reported_missing": reported_missing,
+        "absent": absent,
+        "min_width": min_width,
+        "min_height": min_height,
+        "bad_size": bad_size,
+        "complete": not reported_missing and not absent and not bad_size,
+    }
+
+
+def select_best_web_controls_event(matches: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for item in reversed(matches):
+        if web_controls_event_details(item)["complete"]:
+            return item
+    return matches[-1] if matches else None
+
+
+def select_best_native_api_event(matches: list[dict[str, Any]]) -> dict[str, Any] | None:
+    required = installed_required_native_handler_features()
+    for item in reversed(matches):
+        features = native_handler_features_from_event(item)
+        if required and all(feature in features for feature in required):
+            return item
+    return matches[-1] if matches else None
+
+
 def check_runtime_webview() -> Check:
     events = read_events()
     if not events:
@@ -1065,14 +1135,15 @@ def check_runtime_web_controls() -> Check:
             f"no webControlsReady event for pluginVersion {CURRENT_PLUGIN_VERSION}; restart MN4 and open the panel",
             {"events": str(EVENTS_PATH), "required": REQUIRED_WEB_CONTROL_IDS},
         )
-    latest = matches[-1]
-    extra = latest.get("extra") if isinstance(latest.get("extra"), dict) else {}
-    controls = {item for item in str(extra.get("controls") or "").split(",") if item}
-    reported_missing = [item for item in str(extra.get("missing") or "").split(",") if item]
-    absent = [item for item in REQUIRED_WEB_CONTROL_IDS if item not in controls]
-    min_width = str(extra.get("minWidth") or "")
-    min_height = str(extra.get("minHeight") or "")
-    bad_size = min_width != "390" or min_height != "520"
+    latest = select_best_web_controls_event(matches)
+    assert latest is not None
+    details = web_controls_event_details(latest)
+    controls = details["controls"]
+    reported_missing = details["reported_missing"]
+    absent = details["absent"]
+    min_width = details["min_width"]
+    min_height = details["min_height"]
+    bad_size = details["bad_size"]
     stale = runtime_staleness_evidence(latest)
     handler_stale = runtime_handler_stale_evidence(events, latest_web=latest)
     evidence = {"event": latest, **stale, **handler_stale}
@@ -1118,14 +1189,15 @@ def check_runtime_native_api_capabilities() -> Check:
             f"no nativeApiCapabilities event for pluginVersion {CURRENT_PLUGIN_VERSION}; open the panel to probe selectors",
             {"events": str(EVENTS_PATH)},
         )
-    latest = matches[-1]
+    latest = select_best_native_api_event(matches)
+    assert latest is not None
     web_matches = [
         item
         for item in events
         if str(item.get("pluginVersion") or "") == CURRENT_PLUGIN_VERSION
         and str(item.get("event") or "") == "webControlsReady"
     ]
-    latest_web = web_matches[-1] if web_matches else None
+    latest_web = select_best_web_controls_event(web_matches) if web_matches else None
     extra = latest.get("extra") if isinstance(latest.get("extra"), dict) else {}
     methods = extra.get("candidateMethods") if isinstance(extra.get("candidateMethods"), list) else []
     matrix = extra.get("capabilityMatrix") if isinstance(extra.get("capabilityMatrix"), dict) else {}

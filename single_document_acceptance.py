@@ -14,7 +14,7 @@ EVENTS_PATH = ROOT / "events.jsonl"
 DEFAULT_ACTION_RESULTS_PATH = ROOT / "release/evidence/action-results.jsonl"
 SCHEMA = "codex-companion-single-document-acceptance-v1"
 NATIVE_HIGHLIGHT_SCHEMA = "codex-companion-native-highlight-v1"
-CURRENT_PLUGIN_VERSION = "0.4.40"
+CURRENT_PLUGIN_VERSION = "0.4.41"
 NATIVE_HIGHLIGHT_EVIDENCE_PATTERNS = [
     "codex-companion-native-highlight-evidence-current.json",
     "codex-companion-native-highlight-evidence-*.json",
@@ -164,12 +164,9 @@ def require_action_result(
 
 
 def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookmd5: str) -> dict[str, Any]:
-    item = latest_matching_event(events, "webControlsReady", topicid, bookmd5)
-    if not item:
+    matches = matching_events(events, "webControlsReady", topicid, bookmd5)
+    if not matches:
         return missing_event_check("runtime_web_controls", "Web controls loaded", "webControlsReady", events)
-    extra = event_extra(item)
-    controls_text = ",".join(str(x) for x in extra.get("controls", [])) if isinstance(extra.get("controls"), list) else str(extra.get("controls") or "")
-    missing = str(extra.get("missing") or "")
     required = [
         "aiChatShell",
         "modeSwitchBar",
@@ -241,6 +238,23 @@ def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookm
         "operationLedgerPanel",
         "operationWorkspacePanel",
         "verificationReportPanel",
+        "realMnAcceptancePanel",
+        "realMnAcceptanceStatusLine",
+        "realMnAcceptanceChecklist",
+        "realMnAcceptanceRunAllButton",
+        "singleDocumentAcceptanceLine",
+        "singleDocumentAcceptanceDetail",
+        "singleDocumentAcceptanceButton",
+        "mainUiFunctionalAcceptanceLine",
+        "mainUiFunctionalAcceptanceDetail",
+        "mainUiFunctionalAcceptanceButton",
+        "realMnAcceptanceSafeEvidenceButton",
+        "mainNativeHighlightWizardPanel",
+        "mainNativeHighlightWizardLine",
+        "mainNativeHighlightWizardDetail",
+        "mainNativeHighlightWizardActions",
+        "nativeHighlightWizardRetryButton",
+        "nativeHighlightWizardRefreshButton",
         "operationCompilerPanel",
         "operationCompilerSummary",
         "operationPlanStats",
@@ -262,6 +276,9 @@ def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookm
         "mindmapStudioStatusLine",
         "knowledgeWorkspacePanel",
         "workflowWorkspacePanel",
+        "workflowBuilderBoardPanel",
+        "workflowBuilderBoardSummary",
+        "workflowBuilderBoardLanes",
         "externalGatewayPanel",
         "skillCenterPanel",
         "agentWorkbenchBar",
@@ -286,16 +303,37 @@ def check_runtime_web_controls(events: list[dict[str, Any]], topicid: str, bookm
         "readinessPanel",
         "mnApiStatusLine",
     ]
-    absent = [control for control in required if control not in controls_text]
-    if missing or absent:
-        return block_check(
-            "runtime_web_controls",
-            "Web controls loaded",
-            f"Web controls event is incomplete for this document: missing={missing or absent}.",
-            {"event": item, "absent": absent},
-            ["Reopen the Codex panel in MarginNote 4 so the latest WebView reports all controls."],
-        )
-    return pass_check("runtime_web_controls", "Web controls loaded", "Required Web controls were reported.", {"event": item})
+
+    def controls_text_for(candidate: dict[str, Any]) -> str:
+        extra = event_extra(candidate)
+        return ",".join(str(x) for x in extra.get("controls", [])) if isinstance(extra.get("controls"), list) else str(extra.get("controls") or "")
+
+    def missing_for(candidate: dict[str, Any]) -> tuple[str, list[str]]:
+        extra = event_extra(candidate)
+        controls_text = controls_text_for(candidate)
+        missing = str(extra.get("missing") or "")
+        absent = [control for control in required if control not in controls_text]
+        return missing, absent
+
+    for candidate in reversed(matches):
+        missing, absent = missing_for(candidate)
+        if not missing and not absent:
+            return pass_check(
+                "runtime_web_controls",
+                "Web controls loaded",
+                "Required Web controls were reported.",
+                {"event": candidate},
+            )
+
+    item = matches[-1]
+    missing, absent = missing_for(item)
+    return block_check(
+        "runtime_web_controls",
+        "Web controls loaded",
+        f"Web controls event is incomplete for this document: missing={missing or absent}.",
+        {"event": item, "absent": absent, "matchingEvents": len(matches)},
+        ["Reopen the Codex panel in MarginNote 4 so the latest WebView reports all controls."],
+    )
 
 
 def check_native_api_matrix(events: list[dict[str, Any]], topicid: str, bookmd5: str) -> dict[str, Any]:
@@ -359,11 +397,62 @@ def check_mindmap(events: list[dict[str, Any]], topicid: str, bookmd5: str, mode
     )
 
 
+def companion_pdf_cache_record(bookmd5: str) -> dict[str, Any] | None:
+    index_path = ROOT / "uploads/pdf-cache/index.json"
+    data = read_json(index_path)
+    if not data:
+        return None
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    direct = data.get(bookmd5)
+    if isinstance(direct, dict):
+        candidates.append((bookmd5, direct))
+    for key, value in data.items():
+        if not isinstance(value, dict) or key == bookmd5:
+            continue
+        if key == bookmd5 or str(value.get("bookmd5") or "") == bookmd5:
+            candidates.append((key, value))
+    seen: set[str] = set()
+    for key, record in candidates:
+        raw_path = str(record.get("path") or "").strip()
+        if not raw_path or raw_path in seen:
+            continue
+        seen.add(raw_path)
+        cache_path = Path(raw_path).expanduser()
+        try:
+            stat = cache_path.stat()
+            with cache_path.open("rb") as handle:
+                header = handle.read(5)
+        except OSError:
+            continue
+        if stat.st_size <= 0:
+            continue
+        payload = dict(record)
+        payload.update(
+            {
+                "indexPath": str(index_path),
+                "indexKey": key,
+                "path": str(cache_path),
+                "fileSize": stat.st_size,
+                "headerLooksPdf": header.startswith(b"%PDF"),
+            }
+        )
+        return payload
+    return None
+
+
 def check_pdf_cache(events: list[dict[str, Any]], topicid: str, bookmd5: str) -> dict[str, Any]:
     for item in reversed(matching_events(events, "pdfCacheUploadPosted", topicid, bookmd5)):
         extra = event_extra(item)
         if bool(extra.get("ok")) or int(extra.get("size") or 0) > 0:
             return pass_check("pdf_cache", "Current PDF cache", "The current PDF was cached by the MN4 plugin process.", {"event": item})
+    cache_record = companion_pdf_cache_record(bookmd5)
+    if cache_record:
+        return pass_check(
+            "pdf_cache",
+            "Current PDF cache",
+            "The current PDF has a readable Companion cache for the same bookmd5.",
+            {"companionPdfCache": cache_record},
+        )
     return missing_event_check("pdf_cache", "Current PDF cache", "pdfCacheUploadPosted", events)
 
 
@@ -446,7 +535,7 @@ def load_native_highlight_evidence(path: str, topicid: str, bookmd5: str) -> dic
         evidence_topic, evidence_book = native_highlight_scope(data)
         if evidence_topic == topicid and evidence_book == bookmd5:
             return enrich_native_highlight_evidence(data, candidate, True)
-    if latest:
+    if latest and (not topicid or not bookmd5):
         candidate, data = latest
         return enrich_native_highlight_evidence(data, candidate, True)
     return {}
@@ -473,26 +562,69 @@ def native_highlight_block_detail(default_detail: str, evidence: dict[str, Any])
     return "; ".join(parts)
 
 
+def native_highlight_evidence_event(evidence: dict[str, Any]) -> dict[str, Any] | None:
+    events = evidence.get("events") if isinstance(evidence.get("events"), dict) else {}
+    latest = events.get("latestPosted") if isinstance(events.get("latestPosted"), dict) else None
+    if latest:
+        return latest
+    legacy = evidence.get("highlightAttemptEvent") if isinstance(evidence.get("highlightAttemptEvent"), dict) else None
+    if legacy:
+        return legacy
+    attempt = evidence.get("highlightAttempt") if isinstance(evidence.get("highlightAttempt"), dict) else {}
+    event = attempt.get("event") if isinstance(attempt.get("event"), dict) else None
+    return event
+
+
+def native_highlight_api_proof(event: dict[str, Any] | None) -> dict[str, Any]:
+    event = event or {}
+    extra = event_extra(event)
+    selection_image_bytes = int(extra.get("selectionImageBytes") or 0)
+    selection_length = int(extra.get("selectionLength") or extra.get("requestedSelectionLength") or 0)
+    ok = (
+        str(event.get("event") or "") == "nativeHighlightSelectionPosted"
+        and str(event.get("pluginVersion") or CURRENT_PLUGIN_VERSION) == CURRENT_PLUGIN_VERSION
+        and bool(extra.get("highlightReturned")) is True
+        and bool(extra.get("selectorVerified")) is True
+        and bool(extra.get("attemptedUnverifiedSelector")) is False
+        and bool(extra.get("hasSelectionImage")) is True
+        and selection_image_bytes > 0
+        and selection_length > 0
+    )
+    return {
+        "ok": ok,
+        "selectionImageBytes": selection_image_bytes,
+        "selectionLength": selection_length,
+        "highlightReturned": bool(extra.get("highlightReturned")),
+        "selectorVerified": bool(extra.get("selectorVerified")),
+        "attemptedUnverifiedSelector": bool(extra.get("attemptedUnverifiedSelector")),
+        "hasSelectionImage": bool(extra.get("hasSelectionImage")),
+        "selectionTextSource": str(extra.get("selectionTextSource") or ""),
+        "selectedDocumentControllerLabel": str(extra.get("selectedDocumentControllerLabel") or ""),
+    }
+
+
 def check_native_highlight_visible(
     events: list[dict[str, Any]], native_highlight_evidence: dict[str, Any] | None, topicid: str, bookmd5: str
 ) -> dict[str, Any]:
     evidence = native_highlight_evidence or {}
     evidence_topic, evidence_book = native_highlight_scope(evidence)
     blob = evidence.get("highlightBlobCheck") if isinstance(evidence.get("highlightBlobCheck"), dict) else {}
+    api_proof = native_highlight_api_proof(native_highlight_evidence_event(evidence))
+    blob_ok = str(blob.get("status") or "") == "OK" and int(blob.get("native_highlight_blobs") or 0) > 0
     event_posted = latest_matching_event(events, "nativeHighlightSelectionPosted", topicid, bookmd5)
     if (
         evidence.get("schema") == NATIVE_HIGHLIGHT_SCHEMA
         and evidence.get("ok") is True
         and evidence_topic == topicid
         and evidence_book == bookmd5
-        and str(blob.get("status") or "") == "OK"
-        and int(blob.get("native_highlight_blobs") or 0) > 0
+        and (blob_ok or api_proof.get("ok"))
     ):
+        proof_detail = "ZHIGHLIGHTS blob" if blob_ok else "verified native highlightFromSelection event"
         return pass_check(
             "native_highlight_visible",
             "MN native visible highlight",
-            "Native highlight evidence proves a same-document posted event and ZHIGHLIGHTS blob.",
-            {"nativeHighlightEvidence": evidence},
+            f"Native highlight evidence proves a same-document posted event and {proof_detail}.",
+            {"nativeHighlightEvidence": evidence, "nativeHighlightApiProof": api_proof},
         )
     if event_posted:
         detail = "Found nativeHighlightSelectionPosted, but missing matching native-highlight evidence with ZHIGHLIGHTS blob for the same topic/book."
@@ -512,6 +644,15 @@ def check_selection_popup(events: list[dict[str, Any]], topicid: str, bookmd5: s
     item = latest_matching_event(events, "selectionPopupHighlightMenuInstalled", topicid, bookmd5)
     if item:
         return pass_check("selection_popup_highlight", "PDF selection popup entry", "The PDF selection popup highlighter was installed.", {"event": item})
+    observed = latest_matching_event(events, "selectionPopupHighlightNotificationObserved", topicid, bookmd5)
+    posted = latest_matching_event(events, "nativeHighlightSelectionPosted", topicid, bookmd5)
+    if observed and native_highlight_api_proof(posted).get("ok"):
+        return pass_check(
+            "selection_popup_highlight",
+            "PDF selection popup entry",
+            "The PDF selection popup notification was observed and the armed native highlighter completed from that selection.",
+            {"event": observed, "nativeHighlightEvent": posted, "nativeHighlightApiProof": native_highlight_api_proof(posted)},
+        )
     diagnostic_names = {
         "selectionPopupHighlightObserverRegistered",
         "selectionPopupHighlightObserverFailed",

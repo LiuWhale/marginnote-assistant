@@ -151,9 +151,13 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertNotIn("removeChild", delete_body)
         self.assertIn("Application.sharedInstance().refreshAfterDBChanged", reject_body)
 
-    def test_visible_ui_is_margin_note_style_ai_chat_only(self) -> None:
+    def test_visible_ui_is_margin_note_style_knowledge_workspace(self) -> None:
         for required in [
             'id="aiChatShell"',
+            'id="knowledgeOsContractPanel"',
+            'id="workspaceNavigator"',
+            'id="verificationReportPanel"',
+            'id="realMnAcceptancePanel"',
             'id="sendButton"',
             'id="promptInput"',
             'id="liveHistory"',
@@ -188,12 +192,13 @@ class ResizablePanelContractTest(unittest.TestCase):
             'mainPinnedButtonsPanel',
             'draftPanel',
             '制卡',
-            '高亮',
             '导出',
             '按钮中心',
             '一次性目标',
         ]:
             self.assertNotIn(removed, main_html)
+        self.assertNotIn('id="nativeHighlightWizardButton"', main_html)
+        self.assertNotIn('data-action="request_native_highlight_selection"', main_html)
 
         send_body = self.app.split("function sendAction", 1)[1].split("\n  function renderControls", 1)[0]
         self.assertNotIn("routeNaturalLanguageAction", send_body)
@@ -282,6 +287,12 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("nativeCapabilityMatrix", self.main)
         self.assertIn("capabilityMatrix", self.main)
         self.assertIn("activeSelectionLength", self.main)
+        self.assertIn("activeSelectionImageBytes", self.main)
+        scene_body = self.main.split("sceneWillConnect: function()", 1)[1].split(
+            "\n    sceneDidDisconnect", 1
+        )[0]
+        self.assertIn("self.probeNativeApiCapabilities()", scene_body)
+        self.assertIn("nativeApiCapabilitySceneProbeFailed", scene_body)
         self.assertIn("canCreateNote", self.main)
         self.assertIn("Note.createWithTitleNotebookDocument", self.main)
         self.assertIn("UndoManager.sharedInstance().undoGrouping", self.main)
@@ -351,7 +362,8 @@ class ResizablePanelContractTest(unittest.TestCase):
     def test_highlight_next_selection_button_does_not_require_existing_selection(self) -> None:
         main_html = self.index.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
         self.assertNotIn('data-action="request_native_highlight_selection"', main_html)
-        self.assertNotIn("高亮", main_html)
+        self.assertNotIn('id="nativeHighlightWizardButton"', main_html)
+        self.assertIn("安全采证", main_html)
 
     def test_native_poll_can_refresh_native_api_capability_probe(self) -> None:
         self.assertIn("probe_native_api_capabilities", self.main)
@@ -432,7 +444,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("documentControllerCandidates: docResolution.labels", probe_body)
         self.assertIn("selectedDocumentControllerLabel: docResolution.label", probe_body)
 
-        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection", 1)[1].split(
+        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.startCommandPolling", 1
         )[0]
         self.assertIn("resolveDocumentController(this, controller, nc)", highlight_body)
@@ -514,18 +526,20 @@ class ResizablePanelContractTest(unittest.TestCase):
         )[0]
 
         self.assertIn("selectionPopupHighlightMenuSkipped", menu_body)
-        self.assertIn("reason: 'missing-selection-text'", menu_body)
+        self.assertIn("reason: 'missing-selection-payload'", menu_body)
         self.assertIn("hasDocumentController", menu_body)
         self.assertIn("hasLastSelectionText", menu_body)
+        self.assertIn("selectionImageBytes", menu_body)
+        self.assertIn("hasSelectionImage", menu_body)
 
     def test_selection_popup_highlight_uses_cached_selection_without_early_reject(self) -> None:
         menu_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelectionFromMenu", 1)[1].split(
-            "\n  CodexAssistantAddon.prototype.highlightCurrentSelection", 1
+            "\n  CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1
         )[0]
         self.assertIn("source: 'selection-popup-menu'", menu_body)
         self.assertIn("allowCachedSelectionText: true", menu_body)
 
-        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection", 1)[1].split(
+        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.startCommandPolling", 1
         )[0]
         self.assertIn("allowCachedSelectionText", highlight_body)
@@ -537,7 +551,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         resolver_body = self.main.split("function selectionTextFromDocumentController", 1)[1].split(
             "\n  function firstStringValue", 1
         )[0]
-        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection", 1)[1].split(
+        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.startCommandPolling", 1
         )[0]
 
@@ -550,13 +564,16 @@ class ResizablePanelContractTest(unittest.TestCase):
             "currentSelectionText",
         ]:
             self.assertIn(key, resolver_body)
-        self.assertIn("selectionTextFromDocumentController(docController)", highlight_body)
+        self.assertIn("selectionPayloadFromDocumentController(docController)", highlight_body)
+        self.assertIn("imageFromSelection", resolver_body)
+        self.assertIn("hasSelectionPayload", resolver_body)
         direct_selection_block = highlight_body.split("var selectionText = '';", 1)[1].split(
             "var allowCachedSelectionText", 1
         )[0]
         self.assertNotIn("valueOf(docController, 'selectionText')", direct_selection_block)
         self.assertIn("native-highlight-selection-text-resolver-v1", self.main)
         self.assertIn("context-refresh-clears-stale-selection-v1", self.main)
+        self.assertIn("native-pdf-selection-image-probe-v1", self.main)
 
     def test_context_refresh_clears_stale_cached_selection_when_no_active_selection(self) -> None:
         self.assertIn("CodexAssistantAddon.prototype.currentSelectionText", self.main)
@@ -576,7 +593,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("selectorVerified", self.main)
         self.assertIn("unverified-highlightFromSelection-call", self.main)
 
-        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection", 1)[1].split(
+        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.startCommandPolling", 1
         )[0]
         self.assertIn("invokeHighlightFromSelection(docController)", highlight_body)
@@ -614,7 +631,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         selection_body = self.main.split("onPopupMenuOnSelection: function(sender)", 1)[1].split(
             "\n    togglePanel:", 1
         )[0]
-        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection", 1)[1].split(
+        highlight_body = self.main.split("CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.startCommandPolling", 1
         )[0]
         handler_body = self.main.split("CodexAssistantAddon.prototype.handleNativeQueueCommand", 1)[1].split(
@@ -622,7 +639,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         )[0]
 
         self.assertIn("self.nativeHighlightNextSelectionArmed = false", scene_body)
-        self.assertIn("self.consumeArmedNativeHighlightSelection(documentController, text)", selection_body)
+        self.assertIn("self.consumeArmedNativeHighlightSelection(documentController, text, selectionPayload)", selection_body)
         self.assertIn("armIfMissingSelection", highlight_body)
         self.assertIn("shouldArmNextSelection", highlight_body)
         self.assertIn("this.armNativeHighlightNextSelection('missing-selection', requestedText)", highlight_body)
@@ -635,7 +652,9 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("nativeHighlightNextSelectionPollStarted", self.main)
         self.assertIn("nativeHighlightNextSelectionPollObserved", self.main)
         self.assertIn("nativeHighlightNextSelectionPollExpired", self.main)
+        self.assertIn("nativeHighlightSelectionProbe", self.main)
         self.assertIn("native-highlight-selection-poll-v1", self.main)
+        self.assertIn("native-highlight-selection-poll-probe-v1", self.main)
         self.assertIn("native-highlight-prefer-next-selection-v1", self.main)
 
         scene_body = self.main.split("sceneWillConnect: function()", 1)[1].split(
@@ -648,16 +667,23 @@ class ResizablePanelContractTest(unittest.TestCase):
             "\n  CodexAssistantAddon.prototype.stopNativeHighlightSelectionPoll", 1
         )[0]
         consume_body = self.main.split("CodexAssistantAddon.prototype.consumeArmedNativeHighlightSelection", 1)[1].split(
-            "\n  CodexAssistantAddon.prototype.highlightCurrentSelection", 1
+            "\n  CodexAssistantAddon.prototype.highlightCurrentSelection = function", 1
         )[0]
 
         self.assertIn("self.nativeHighlightNextSelectionPollTimer = null", scene_body)
         self.assertIn("this.startNativeHighlightSelectionPoll()", arm_body)
         self.assertIn("NSTimer.scheduledTimerWithTimeInterval", poll_body)
         self.assertIn("resolveDocumentController(addon, controller, nc)", poll_body)
-        self.assertIn("selectionTextFromDocumentController(docController)", poll_body)
-        self.assertIn("addon.consumeArmedNativeHighlightSelection(docController, text)", poll_body)
+        self.assertIn("selectionPayloadFromDocumentController(docController)", poll_body)
+        self.assertIn("nativeHighlightNextSelectionLastProbeAt", poll_body)
+        self.assertIn("addon.postEvent('nativeHighlightSelectionProbe'", poll_body)
+        self.assertIn("source: 'next-selection-poll'", poll_body)
+        self.assertIn("pollArmed: true", poll_body)
+        self.assertIn("hasSelectionPayload: !!payload.hasSelectionPayload", poll_body)
+        self.assertIn("payload.hasSelectionPayload", poll_body)
+        self.assertIn("addon.consumeArmedNativeHighlightSelection(docController, payload.text, payload)", poll_body)
         self.assertIn("this.stopNativeHighlightSelectionPoll()", consume_body)
+        self.assertIn("selectionImageBytes", consume_body)
 
     def test_context_payload_includes_best_effort_pdf_path(self) -> None:
         self.assertIn("pdfPathFromNotebookController", self.main)

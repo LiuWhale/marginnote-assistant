@@ -85,6 +85,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "release_smoke_test.py",
                 "release_acceptance.py",
                 "single_document_acceptance.py",
+                "ui_functional_acceptance.py",
                 "build_pkg.py",
                 "notarize_pkg.py",
                 "prepare_release_handoff.py",
@@ -115,6 +116,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "release_smoke_test.py",
                 "release_acceptance.py",
                 "single_document_acceptance.py",
+                "ui_functional_acceptance.py",
                 "build_pkg.py",
                 "notarize_pkg.py",
                 "prepare_release_handoff.py",
@@ -181,6 +183,7 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("LICENSE", module.REQUIRED_SUFFIXES)
         self.assertIn("assets/cover.png", module.REQUIRED_SUFFIXES)
         self.assertIn("single_document_acceptance.py", module.REQUIRED_SUFFIXES)
+        self.assertIn("ui_functional_acceptance.py", module.REQUIRED_SUFFIXES)
         self.assertIn("notarize_pkg.py", module.REQUIRED_SUFFIXES)
         self.assertIn("prepare_release_handoff.py", module.REQUIRED_SUFFIXES)
         self.assertIn("mnaddon.json", module.MNADDON_REQUIRED_SUFFIXES)
@@ -206,6 +209,10 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(
             module.MARKERS["single_document_acceptance.py"],
             "codex-companion-single-document-acceptance-v1",
+        )
+        self.assertEqual(
+            module.MARKERS["ui_functional_acceptance.py"],
+            "codex-companion-ui-functional-acceptance-v1",
         )
         self.assertEqual(module.MARKERS["notarize_pkg.py"], "notarytool submit")
         self.assertEqual(
@@ -588,7 +595,7 @@ class ReleasePackagingTests(unittest.TestCase):
             entries = {
                 "CodexCompanion-test/README.md": "Codex Companion for MarginNote 4\n",
                 "CodexCompanion-test/README.zh-CN.md": "语言: [English](README.md) | **简体中文**\n",
-                "CodexCompanion-test/CHANGELOG.md": "## 0.4.40 - 2026-06-27\n",
+                "CodexCompanion-test/CHANGELOG.md": "## 0.4.41 - 2026-07-02\n",
                 "CodexCompanion-test/LICENSE": "MIT License\n",
                 "CodexCompanion-test/assets/cover.png": b"\x89PNG\r\n\x1a\n",
                 "CodexCompanion-test/README-FIRST.txt": "Double-click: Install Codex Companion.command\n",
@@ -607,6 +614,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexCompanion-test/release_smoke_test.py": "print('smoke')\n",
                 "CodexCompanion-test/release_acceptance.py": "Run final release acceptance gates\n",
                 "CodexCompanion-test/single_document_acceptance.py": "codex-companion-single-document-acceptance-v1\n",
+                "CodexCompanion-test/ui_functional_acceptance.py": "codex-companion-ui-functional-acceptance-v1\n",
                 "CodexCompanion-test/build_pkg.py": "PACKAGE_IDENTIFIER = \"com.codex.marginnote-companion\"\n",
                 "CodexCompanion-test/notarize_pkg.py": "notarytool submit\n",
                 "CodexCompanion-test/prepare_release_handoff.py": "Prepare a Codex Companion release handoff bundle\n",
@@ -658,6 +666,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexCompanion-test/release_smoke_test.py": "print('smoke')\n",
                 "CodexCompanion-test/release_acceptance.py": "Run final release acceptance gates\n",
                 "CodexCompanion-test/single_document_acceptance.py": "codex-companion-single-document-acceptance-v1\n",
+                "CodexCompanion-test/ui_functional_acceptance.py": "codex-companion-ui-functional-acceptance-v1\n",
                 "CodexCompanion-test/build_pkg.py": "PACKAGE_IDENTIFIER = \"com.codex.marginnote-companion\"\n",
                 "CodexCompanion-test/notarize_pkg.py": "notarytool submit\n",
                 "CodexCompanion-test/prepare_release_handoff.py": "Prepare a Codex Companion release handoff bundle\n",

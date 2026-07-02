@@ -948,9 +948,12 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-highlight-command-prepared",
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
+                            "native-highlight-selection-poll-probe-v1",
                             "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -1019,9 +1022,12 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-highlight-command-prepared",
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
+                            "native-highlight-selection-poll-probe-v1",
                             "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -1088,9 +1094,12 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-highlight-command-prepared",
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
+                            "native-highlight-selection-poll-probe-v1",
                             "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -1123,7 +1132,7 @@ class CompanionControlsTests(unittest.TestCase):
             (extension / "web").mkdir(parents=True)
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
                 encoding="utf-8",
             )
             for relative in ("CodexWebPanelController.js", "web/app.js", "web/index.html", "web/app.css"):
@@ -1165,9 +1174,12 @@ class CompanionControlsTests(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -1220,9 +1232,12 @@ class CompanionControlsTests(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -1240,9 +1255,12 @@ class CompanionControlsTests(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -1373,6 +1391,178 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["singleDocumentAcceptance"]["bookmd5"], "B1")
             self.assertIn("Web controls loaded", result["reply"])
             self.assertIn("MN native API matrix", result["reply"])
+
+    def test_ui_functional_acceptance_summary_runs_full_arbitrary_document_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            calls: list[dict[str, Any]] = []
+
+            class FakeUiFunctionalAcceptance:
+                @staticmethod
+                def evaluate_ui_functional_acceptance(**kwargs: Any) -> dict[str, Any]:
+                    calls.append(kwargs)
+                    return {
+                        "schema": "codex-companion-ui-functional-acceptance-v1",
+                        "ok": False,
+                        "documentTitle": kwargs["document_payload"]["documentTitle"],
+                        "topicid": kwargs["document_payload"]["topicid"],
+                        "bookmd5": kwargs["document_payload"]["bookmd5"],
+                        "checks": [
+                            {
+                                "id": "webview_static_controls",
+                                "label": "WebView static controls",
+                                "status": "PASS",
+                                "problems": [],
+                            },
+                            {
+                                "id": "webview_browser_write_actions",
+                                "label": "WebView browser write actions",
+                                "status": "FAIL",
+                                "problems": ["missing native bridge action: write_draft"],
+                            },
+                        ],
+                        "problems": ["missing native bridge action: write_draft"],
+                    }
+
+            old_loader = getattr(companion, "load_ui_functional_acceptance_module", None)
+            companion.load_ui_functional_acceptance_module = lambda: FakeUiFunctionalAcceptance
+            try:
+                result = companion.handle_action(
+                    {
+                        "action": "ui_functional_acceptance_summary",
+                        "topicid": "T-UI",
+                        "bookmd5": "B-UI",
+                        "documentTitle": "任意资料 UI 验收.md",
+                        "fullBrowser": True,
+                        "browserTimeout": 15,
+                    }
+                )
+            finally:
+                if old_loader is None:
+                    delattr(companion, "load_ui_functional_acceptance_module")
+                else:
+                    companion.load_ui_functional_acceptance_module = old_loader
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["uiFunctionalReady"])
+            self.assertEqual(result["uiFunctionalBlockerCount"], 1)
+            self.assertEqual(result["uiFunctionalPassedCount"], 1)
+            self.assertEqual(result["uiFunctionalTotalCount"], 2)
+            self.assertIn("任意文档 UI 功能验收", result["reply"])
+            self.assertIn("webview_browser_write_actions", result["reply"])
+            self.assertIn("write_draft", result["reply"])
+            self.assertEqual(result["uiFunctionalAcceptance"]["schema"], "codex-companion-ui-functional-acceptance-v1")
+            self.assertEqual(calls[0]["document_payload"]["documentTitle"], "任意资料 UI 验收.md")
+            self.assertEqual(calls[0]["document_payload"]["topicid"], "T-UI")
+            self.assertEqual(calls[0]["document_payload"]["bookmd5"], "B-UI")
+            self.assertTrue(calls[0]["browser_render"])
+            self.assertTrue(calls[0]["browser_interaction"])
+            self.assertTrue(calls[0]["browser_actions"])
+            self.assertTrue(calls[0]["browser_write_actions"])
+            self.assertEqual(calls[0]["browser_timeout"], 15.0)
+            self.assertIn("ui_functional_acceptance_summary", companion.READ_ONLY_ACTIONS)
+
+    def test_ui_functional_acceptance_summary_includes_real_mn_runtime_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+
+            class FakeUiFunctionalAcceptance:
+                @staticmethod
+                def evaluate_ui_functional_acceptance(**kwargs: Any) -> dict[str, Any]:
+                    return {
+                        "schema": "codex-companion-ui-functional-acceptance-v1",
+                        "ok": True,
+                        "documentTitle": kwargs["document_payload"]["documentTitle"],
+                        "topicid": kwargs["document_payload"]["topicid"],
+                        "bookmd5": kwargs["document_payload"]["bookmd5"],
+                        "checks": [
+                            {
+                                "id": "webview_browser_actions",
+                                "label": "WebView browser actions",
+                                "status": "PASS",
+                                "problems": [],
+                            },
+                        ],
+                        "problems": [],
+                    }
+
+            def fake_single_document_summary(payload: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    "ok": True,
+                    "message": "本文档验收：BLOCK，阻塞项 2。",
+                    "singleDocumentReady": False,
+                    "singleDocumentBlockerCount": 2,
+                    "singleDocumentPassedCount": 6,
+                    "singleDocumentTotalCount": 8,
+                    "singleDocumentNextActions": ["刷新 MN 能力。"],
+                    "singleDocumentAcceptance": {
+                        "schema": "codex-companion-single-document-acceptance-v1",
+                        "topicid": payload.get("topicid"),
+                        "bookmd5": payload.get("bookmd5"),
+                        "summary": {"passed": 6, "total": 8, "blocked": 2},
+                        "checks": [
+                            {
+                                "id": "native_api_matrix",
+                                "label": "MN native API matrix",
+                                "status": "BLOCK",
+                                "detail": "Missing nativeApiCapabilities event for the requested same topic/book document.",
+                                "nextActions": ["刷新 MN 能力。"],
+                            },
+                            {
+                                "id": "native_highlight_visible",
+                                "label": "MN native visible highlight",
+                                "status": "BLOCK",
+                                "detail": "Missing native visible highlight proof for the requested same topic/book document.",
+                                "nextActions": ["运行高亮采证。"],
+                            },
+                        ],
+                        "nextActions": ["刷新 MN 能力。", "运行高亮采证。"],
+                    },
+                }
+
+            old_loader = getattr(companion, "load_ui_functional_acceptance_module", None)
+            old_single = getattr(companion, "single_document_acceptance_summary", None)
+            companion.load_ui_functional_acceptance_module = lambda: FakeUiFunctionalAcceptance
+            companion.single_document_acceptance_summary = fake_single_document_summary
+            try:
+                result = companion.handle_action(
+                    {
+                        "action": "ui_functional_acceptance_summary",
+                        "topicid": "T-REAL",
+                        "bookmd5": "B-REAL",
+                        "documentTitle": "真实运行态边界.pdf",
+                        "fullBrowser": False,
+                    }
+                )
+            finally:
+                if old_loader is None:
+                    delattr(companion, "load_ui_functional_acceptance_module")
+                else:
+                    companion.load_ui_functional_acceptance_module = old_loader
+                if old_single is None:
+                    delattr(companion, "single_document_acceptance_summary")
+                else:
+                    companion.single_document_acceptance_summary = old_single
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["uiFunctionalReady"])
+            self.assertIn("realMnRuntimeAcceptance", result)
+            self.assertFalse(result["realMnRuntimeReady"])
+            self.assertEqual(result["realMnRuntimeAcceptance"]["status"], "BLOCK")
+            self.assertEqual(result["realMnRuntimeAcceptance"]["blockerCount"], 2)
+            self.assertEqual(result["realMnRuntimeAcceptance"]["topicid"], "T-REAL")
+            self.assertEqual(result["realMnRuntimeAcceptance"]["bookmd5"], "B-REAL")
+            self.assertEqual(result["realMnRuntimeAcceptance"]["nextActions"][0], "刷新 MN 能力。")
+            self.assertEqual(result["realMnRuntimeAcceptance"]["recommendedActions"][0]["id"], "refresh_native_capabilities")
+            self.assertEqual(result["realMnRuntimeAcceptance"]["recommendedActions"][0]["handler"], "refreshNativeCapabilities")
+            self.assertFalse(result["realMnRuntimeAcceptance"]["recommendedActions"][0]["writeRisk"])
+            self.assertIn("真实 MN4 运行态验收：BLOCK", result["reply"])
+            self.assertIn("UI 功能验收只证明 WebView/桥接", result["reply"])
+            self.assertIn("MN native API matrix", result["reply"])
+            self.assertIn("下一步：刷新 MN 能力。", result["reply"])
+            self.assertIn("推荐修复：刷新 MN 能力", result["reply"])
 
     def test_release_acceptance_summary_groups_blockers_by_user_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1789,6 +1979,43 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(matrix["nativeHighlightSelection"]["nativeAction"], "highlight_current_selection")
             self.assertEqual(matrix["nativeHighlightSelection"]["entryAction"], "request_native_highlight_selection")
             self.assertIn("selectionDocumentController.highlightFromSelection", matrix["nativeHighlightSelection"]["evidence"])
+
+    def test_native_api_capability_matrix_marks_image_selection_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "pluginVersion": "0.4.11",
+                    "extra": {
+                        "activeSelectionLength": 0,
+                        "activeSelectionImageBytes": 4096,
+                        "hasSelectionPayload": True,
+                        "canInstallSelectionPopupMenu": True,
+                        "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
+                        "targets": [
+                            {
+                                "label": "selectionDocumentController",
+                                "exists": True,
+                                "highlightMethods": ["selectionDocumentController.highlightFromSelection"],
+                                "exportMethods": [],
+                            }
+                        ],
+                    },
+                }
+            )
+
+            caps = companion.latest_native_api_capabilities("T1", "B1")
+
+            self.assertEqual(caps["activeSelectionLength"], 0)
+            self.assertEqual(caps["activeSelectionImageBytes"], 4096)
+            self.assertTrue(caps["hasSelectionPayload"])
+            matrix = caps["capabilityMatrix"]
+            self.assertTrue(matrix["nativeHighlightSelection"]["available"])
+            self.assertTrue(matrix["nativeHighlightSelection"]["ready"])
+            self.assertTrue(matrix["selectionPopupHighlight"]["ready"])
 
     def test_native_api_capability_matrix_explains_missing_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3824,39 +4051,270 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(summary["workflows"]["latestStatus"], workflow["summary"]["status"])
             self.assertGreaterEqual(summary["objects"]["total"], 1)
             self.assertGreaterEqual(summary["ledger"]["total"], 1)
+            matrix = summary["knowledgeMatrix"]
+            self.assertEqual(matrix["schema"], "codex.mn.knowledgeConsoleMatrix.v1")
+            self.assertEqual(matrix["mode"], "zero_message")
+            self.assertFalse(matrix["requiresPrompt"])
+            self.assertEqual(matrix["axisCount"], 7)
+            axis_by_id = {item["id"]: item for item in matrix["axes"]}
+            self.assertEqual(
+                list(axis_by_id),
+                [
+                    "source_inventory",
+                    "mn_objects",
+                    "mindmap_baseline",
+                    "card_coverage",
+                    "workflow_runtime",
+                    "operation_ledger",
+                    "verification_evidence",
+                ],
+            )
+            self.assertEqual(axis_by_id["source_inventory"]["schema"], "codex.mn.knowledgeConsoleAxis.v1")
+            self.assertEqual(axis_by_id["mn_objects"]["action"]["id"], "scan_mn_objects")
+            self.assertEqual(axis_by_id["mn_objects"]["action"]["action"], "request_mn_object_registry_scan")
+            self.assertEqual(axis_by_id["mindmap_baseline"]["status"], "ready")
+            self.assertEqual(axis_by_id["mindmap_baseline"]["action"]["id"], "open_mindmap_studio")
+            self.assertEqual(axis_by_id["mindmap_baseline"]["action"]["action"], "open_mindmap_studio")
+            self.assertEqual(axis_by_id["mindmap_baseline"]["action"]["surface"], "mindmap_studio")
+            self.assertEqual(axis_by_id["card_coverage"]["status"], "ready")
+            self.assertEqual(axis_by_id["card_coverage"]["action"]["id"], "open_card_factory")
+            self.assertEqual(axis_by_id["card_coverage"]["action"]["action"], "open_card_factory")
+            self.assertEqual(axis_by_id["card_coverage"]["action"]["surface"], "card_factory")
+            self.assertEqual(axis_by_id["workflow_runtime"]["status"], "ready")
+            self.assertEqual(axis_by_id["workflow_runtime"]["action"]["id"], "open_workflow_builder")
+            self.assertEqual(axis_by_id["workflow_runtime"]["action"]["action"], "open_workflow_builder")
+            self.assertEqual(axis_by_id["workflow_runtime"]["action"]["surface"], "workflow_builder")
+            self.assertEqual(axis_by_id["operation_ledger"]["status"], "ready")
+            self.assertEqual(axis_by_id["verification_evidence"]["status"], "ready")
+            self.assertIn("Verification Center", axis_by_id["verification_evidence"]["detail"])
+            self.assertEqual(axis_by_id["verification_evidence"]["action"]["id"], "open_verification_center")
+            self.assertEqual(axis_by_id["verification_evidence"]["action"]["action"], "verification_report_list")
+            self.assertEqual(axis_by_id["verification_evidence"]["action"]["surface"], "verification_center")
+            self.assertIn("verification_evidence", matrix["recommendedAxisIds"])
+            intake = summary["objectIntake"]
+            self.assertEqual(intake["schema"], "codex.mn.objectIntake.v1")
+            self.assertEqual(intake["mode"], "object_first")
+            self.assertFalse(intake["requiresPrompt"])
+            self.assertEqual(intake["objectKind"], "selection")
+            self.assertEqual(intake["routeCount"], 7)
+            route_by_id = {item["id"]: item for item in intake["routes"]}
+            self.assertEqual(
+                list(route_by_id),
+                [
+                    "route_source_registry",
+                    "route_object_browser",
+                    "route_mindmap_studio",
+                    "route_card_factory",
+                    "route_workflow_builder",
+                    "route_skill_center",
+                    "route_verification_center",
+                ],
+            )
+            self.assertEqual(route_by_id["route_source_registry"]["schema"], "codex.mn.objectIntakeRoute.v1")
+            self.assertEqual(route_by_id["route_object_browser"]["action"]["id"], "scan_mn_objects")
+            self.assertEqual(route_by_id["route_mindmap_studio"]["action"]["id"], "open_mindmap_studio")
+            self.assertEqual(route_by_id["route_card_factory"]["action"]["id"], "open_card_factory")
+            self.assertEqual(route_by_id["route_workflow_builder"]["action"]["id"], "open_workflow_builder")
+            self.assertEqual(route_by_id["route_skill_center"]["action"]["id"], "open_skill_center")
+            self.assertEqual(route_by_id["route_skill_center"]["action"]["action"], "open_skill_center")
+            self.assertEqual(route_by_id["route_skill_center"]["action"]["surface"], "skill_center")
+            self.assertEqual(route_by_id["route_verification_center"]["action"]["id"], "open_verification_center")
+            self.assertIn("route_source_registry", intake["recommendedRouteIds"])
+            composer = summary["objectTaskComposer"]
+            self.assertEqual(composer["schema"], "codex.mn.objectTaskComposer.v1")
+            self.assertEqual(composer["mode"], "draft_first")
+            self.assertFalse(composer["requiresPrompt"])
+            self.assertEqual(composer["writePolicy"], "no_write_task_draft")
+            self.assertEqual(composer["taskCount"], 7)
+            task_by_id = {item["id"]: item for item in composer["tasks"]}
+            self.assertEqual(
+                list(task_by_id),
+                [
+                    "task_source_preflight",
+                    "task_object_inventory",
+                    "task_mindmap_operation_plan",
+                    "task_card_operation_plan",
+                    "task_workflow_operation_plan",
+                    "task_skill_selection",
+                    "task_verification_review",
+                ],
+            )
+            self.assertEqual(task_by_id["task_source_preflight"]["schema"], "codex.mn.objectTaskDraft.v1")
+            self.assertEqual(task_by_id["task_source_preflight"]["routeAction"]["action"], "request_pdf_cache")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["compileAction"]["action"], "agent_plan")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["compileAction"]["payload"]["source"], "object-task-composer")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["compileAction"]["payload"]["writePolicy"], "no_write_task_draft")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["workflowCandidate"]["schema"], "codex.mn.objectTaskWorkflowCandidate.v1")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["workflowCandidate"]["workflowId"], "mindmap_reorganize")
+            self.assertGreaterEqual(task_by_id["task_mindmap_operation_plan"]["workflowCandidate"]["stepCount"], 4)
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["startAction"]["action"], "workflow_start")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["startAction"]["payload"]["workflowId"], "mindmap_reorganize")
+            self.assertEqual(task_by_id["task_mindmap_operation_plan"]["startAction"]["payload"]["taskId"], "task_mindmap_operation_plan")
+            self.assertEqual(task_by_id["task_card_operation_plan"]["compileAction"]["action"], "agent_plan")
+            self.assertEqual(task_by_id["task_card_operation_plan"]["workflowCandidate"]["workflowId"], "selection_to_cards")
+            self.assertEqual(task_by_id["task_card_operation_plan"]["startAction"]["payload"]["workflowId"], "selection_to_cards")
+            self.assertEqual(task_by_id["task_workflow_operation_plan"]["compileAction"]["action"], "agent_plan")
+            self.assertEqual(task_by_id["task_workflow_operation_plan"]["workflowCandidate"]["workflowId"], "paper_deep_reading")
+            self.assertEqual(task_by_id["task_workflow_operation_plan"]["startAction"]["payload"]["workflowId"], "paper_deep_reading")
+            self.assertEqual(task_by_id["task_workflow_operation_plan"]["writePolicy"], "confirmation_required_workflow")
+            self.assertEqual(task_by_id["task_skill_selection"]["routeAction"]["action"], "open_skill_center")
+            self.assertEqual(task_by_id["task_verification_review"]["routeAction"]["action"], "verification_report_list")
+            self.assertIn("task_source_preflight", composer["recommendedTaskIds"])
+            builder_board = workspace["workflowWorkspace"]["workflowBuilderBoard"]
+            self.assertEqual(builder_board["schema"], "codex.mn.workflowBuilderBoard.v1")
+            self.assertEqual(builder_board["laneCount"], 4)
+            lanes_by_id = {item["id"]: item for item in builder_board["lanes"]}
+            self.assertEqual(
+                list(lanes_by_id),
+                ["draft_candidates", "active_runs", "waiting_confirmation", "evidence"],
+            )
+            self.assertEqual(lanes_by_id["draft_candidates"]["schema"], "codex.mn.workflowBuilderLane.v1")
+            self.assertEqual(lanes_by_id["draft_candidates"]["cardCount"], 3)
+            draft_cards = {item["id"]: item for item in lanes_by_id["draft_candidates"]["cards"]}
+            self.assertEqual(
+                list(draft_cards),
+                [
+                    "task_mindmap_operation_plan",
+                    "task_card_operation_plan",
+                    "task_workflow_operation_plan",
+                ],
+            )
+            self.assertEqual(draft_cards["task_card_operation_plan"]["schema"], "codex.mn.workflowBuilderCard.v1")
+            self.assertEqual(draft_cards["task_card_operation_plan"]["type"], "task_candidate")
+            self.assertEqual(draft_cards["task_card_operation_plan"]["startAction"]["action"], "workflow_start")
+            self.assertEqual(draft_cards["task_card_operation_plan"]["meta"]["workflowId"], "selection_to_cards")
+            self.assertGreaterEqual(builder_board["cardCount"], 4)
+            self.assertGreaterEqual(
+                lanes_by_id["waiting_confirmation"]["cardCount"] + lanes_by_id["active_runs"]["cardCount"],
+                1,
+            )
+            started_from_task = companion.handle_action(
+                {
+                    "action": task_by_id["task_card_operation_plan"]["startAction"]["action"],
+                    **task_by_id["task_card_operation_plan"]["startAction"]["payload"],
+                }
+            )
+            self.assertTrue(started_from_task["ok"], started_from_task)
+            self.assertEqual(started_from_task["workflowRun"]["workflowId"], "selection_to_cards")
+            self.assertEqual(started_from_task["workflowRun"]["objectRef"]["objectId"], composer["objectRef"]["objectId"])
+            self.assertEqual(started_from_task["workflowRun"]["preview"]["id"], "selection_to_cards")
+            self.assertGreaterEqual(started_from_task["summary"]["queuedCount"], 1)
+            self.assertGreaterEqual(started_from_task["summary"]["waitingConfirmationCount"], 1)
+            listed = companion.handle_action({"action": "workflow_list", "topicid": "T1", "bookmd5": "B1"})
+            listed_board = listed["workflowBuilderBoard"]
+            self.assertEqual(listed_board["schema"], "codex.mn.workflowBuilderBoard.v1")
+            listed_lanes = {item["id"]: item for item in listed_board["lanes"]}
+            self.assertGreaterEqual(listed_lanes["waiting_confirmation"]["cardCount"], 1)
+            self.assertEqual(listed_lanes["waiting_confirmation"]["cards"][0]["action"]["action"], "workflow_status")
             runbook = summary["runbook"]
             self.assertEqual(runbook["schema"], "codex.mn.notebookRunbook.v1")
-            self.assertEqual(runbook["summary"]["total"], 6)
+            self.assertEqual(runbook["summary"]["total"], 8)
             self.assertGreaterEqual(runbook["summary"]["ready"], 2)
             self.assertGreaterEqual(runbook["summary"]["actionRequired"], 1)
             runbook_steps = {item["id"]: item for item in runbook["steps"]}
             self.assertEqual(runbook_steps["context_scope"]["status"], "ready")
+            self.assertIn("source_inventory", runbook_steps)
+            self.assertIn(runbook_steps["source_inventory"]["status"], {"action_required", "ready"})
+            self.assertIn("readable=", runbook_steps["source_inventory"]["evidence"])
             self.assertEqual(runbook_steps["mindmap_baseline"]["status"], "ready")
+            self.assertEqual(runbook_steps["mindmap_baseline"]["action"]["id"], "open_mindmap_studio")
+            self.assertEqual(runbook_steps["card_coverage"]["status"], "ready")
+            self.assertEqual(runbook_steps["card_coverage"]["action"]["id"], "open_card_factory")
             self.assertEqual(runbook_steps["scan_objects"]["action"]["action"], "request_mn_object_registry_scan")
             self.assertEqual(runbook_steps["operation_plan"]["action"]["action"], "agent_plan")
+            self.assertEqual(runbook_steps["workflow_runtime"]["action"]["id"], "open_workflow_builder")
             self.assertEqual(runbook_steps["operation_evidence"]["action"]["action"], "operation_ledger_list")
-            self.assertEqual(runbook["nextStep"]["id"], "scan_objects")
+            self.assertEqual(runbook["nextStep"]["id"], "source_inventory")
             self.assertEqual(runbook["continueAction"]["schema"], "codex.mn.notebookRunbookContinue.v1")
-            self.assertEqual(runbook["continueAction"]["stepId"], "scan_objects")
-            self.assertEqual(runbook["continueAction"]["action"], "request_mn_object_registry_scan")
+            self.assertEqual(runbook["continueAction"]["stepId"], "source_inventory")
+            self.assertEqual(runbook["continueAction"]["action"], "request_pdf_cache")
             self.assertEqual(runbook["continueAction"]["surface"], "console")
             self.assertEqual(runbook["autoPlan"]["schema"], "codex.mn.notebookRunbookAutoPlan.v1")
             self.assertTrue(runbook["autoPlan"]["canRun"])
             self.assertEqual(runbook["autoPlan"]["mode"], "safe_preflight")
             self.assertEqual(
                 [item["action"] for item in runbook["autoPlan"]["actions"]],
-                ["request_mn_object_registry_scan", "agent_plan"],
+                ["request_pdf_cache", "request_mn_object_registry_scan", "agent_plan"],
             )
             self.assertEqual(
                 [item["stepId"] for item in runbook["autoPlan"]["actions"]],
-                ["scan_objects", "operation_plan"],
+                ["source_inventory", "scan_objects", "operation_plan"],
             )
             action_ids = [item["id"] for item in summary["primaryActions"]]
-            self.assertEqual(action_ids[:3], ["scan_mn_objects", "read_mindmap_tree", "plan_next_operation"])
+            self.assertEqual(action_ids[:6], ["scan_mn_objects", "open_object_browser", "open_source_registry", "read_mindmap_tree", "open_mindmap_studio", "plan_next_operation"])
             self.assertEqual(workspace["objectBrowser"]["schema"], "codex.mn.objectBrowser.v1")
             self.assertEqual(workspace["reviewQueue"]["schema"], "codex.mn.reviewQueue.v1")
             self.assertEqual(workspace["workflowWorkspace"]["schema"], "codex.mn.workflowWorkspace.v1")
             self.assertEqual(workspace["mindmapTreeCache"]["schema"], "codex.mn.mindmapTreeCache.v1")
+
+    def test_notebook_workspace_matrix_opens_object_browser_after_native_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            companion.append_event(
+                {
+                    "event": "mnObjectRegistryScanFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "scanId": "scan-001",
+                        "objectCount": 1,
+                        "objects": [
+                            {
+                                "objectId": "mnobj:note:scan-root",
+                                "kind": "mindmap_node",
+                                "title": "Scanned Root",
+                                "sourceRef": {"noteId": "scan-root", "documentTitle": "Scanned Paper"},
+                            }
+                        ],
+                    },
+                }
+            )
+
+            workspace = companion.handle_action(
+                {
+                    "action": "notebook_workspace",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Scanned Paper",
+                    "selectionText": "The current notebook has native objects.",
+                }
+            )
+
+            self.assertTrue(workspace["ok"], workspace)
+            summary = workspace["notebookWorkspace"]
+            self.assertEqual(summary["objects"]["nativeScan"], 1)
+            axis_by_id = {item["id"]: item for item in summary["knowledgeMatrix"]["axes"]}
+            self.assertEqual(axis_by_id["mn_objects"]["status"], "ready")
+            self.assertEqual(axis_by_id["mn_objects"]["action"]["id"], "open_object_browser")
+            self.assertEqual(axis_by_id["mn_objects"]["action"]["action"], "object_browser")
+            self.assertEqual(axis_by_id["mn_objects"]["action"]["surface"], "object_browser")
+            runbook_steps = {item["id"]: item for item in summary["runbook"]["steps"]}
+            self.assertEqual(runbook_steps["scan_objects"]["status"], "ready")
+            self.assertEqual(runbook_steps["scan_objects"]["action"]["id"], "open_object_browser")
+
+    def test_notebook_workspace_disables_native_actions_without_notebook_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "full"}})
+            companion.read_defaults = lambda key: ""
+
+            workspace = companion.handle_action({"action": "notebook_workspace"})
+
+            self.assertTrue(workspace["ok"], workspace)
+            self.assertEqual(workspace["message"], "已读取当前上下文。")
+            self.assertNotIn("Notebook Workspace", workspace["message"])
+            summary = workspace["notebookWorkspace"]
+            actions = {item["id"]: item for item in summary["primaryActions"]}
+            self.assertTrue(actions["scan_mn_objects"]["disabled"])
+            self.assertIn("topicid", actions["scan_mn_objects"]["disabledReason"])
+            self.assertTrue(actions["read_mindmap_tree"]["disabled"])
+            axis_by_id = {item["id"]: item for item in summary["knowledgeMatrix"]["axes"]}
+            self.assertEqual(axis_by_id["mn_objects"]["status"], "blocked")
+            self.assertEqual(axis_by_id["mn_objects"]["action"], {})
+            runbook_steps = {item["id"]: item for item in summary["runbook"]["steps"]}
+            self.assertEqual(runbook_steps["scan_objects"]["status"], "blocked")
+            self.assertEqual(summary["runbook"]["autoPlan"]["actions"], [])
 
     def test_notebook_workspace_returns_zero_message_study_program_recommendations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3873,7 +4331,18 @@ class CompanionControlsTests(unittest.TestCase):
             )
 
             self.assertTrue(workspace["ok"], workspace)
-            program = workspace["notebookWorkspace"]["studyProgram"]
+            summary = workspace["notebookWorkspace"]
+            axis_by_id = {item["id"]: item for item in summary["knowledgeMatrix"]["axes"]}
+            self.assertEqual(axis_by_id["mindmap_baseline"]["status"], "action_required")
+            self.assertEqual(axis_by_id["mindmap_baseline"]["action"]["id"], "read_mindmap_tree")
+            self.assertEqual(axis_by_id["mindmap_baseline"]["action"]["action"], "mn_read_tree")
+            self.assertEqual(axis_by_id["card_coverage"]["status"], "action_required")
+            self.assertEqual(axis_by_id["card_coverage"]["action"]["id"], "open_card_factory")
+            self.assertEqual(axis_by_id["card_coverage"]["action"]["action"], "open_card_factory")
+            self.assertEqual(axis_by_id["workflow_runtime"]["status"], "pending")
+            self.assertEqual(axis_by_id["workflow_runtime"]["action"]["id"], "open_workflows")
+            self.assertEqual(axis_by_id["workflow_runtime"]["action"]["action"], "workflow_list")
+            program = summary["studyProgram"]
             self.assertEqual(program["schema"], "codex.mn.studyProgram.v1")
             self.assertEqual(program["mode"], "zero_message")
             self.assertFalse(program["requiresPrompt"])
@@ -3957,6 +4426,12 @@ class CompanionControlsTests(unittest.TestCase):
             program = workspace["notebookWorkspace"]["studyProgram"]
             self.assertEqual(program["coverage"]["sourceRegistry"], 100)
             self.assertNotIn("source_registry", [item["id"] for item in program["gaps"]])
+            matrix = workspace["notebookWorkspace"]["knowledgeMatrix"]
+            axis_by_id = {item["id"]: item for item in matrix["axes"]}
+            self.assertEqual(axis_by_id["source_inventory"]["status"], "ready")
+            self.assertEqual(axis_by_id["source_inventory"]["action"]["id"], "open_source_registry")
+            self.assertEqual(axis_by_id["source_inventory"]["action"]["action"], "open_source_registry")
+            self.assertEqual(axis_by_id["source_inventory"]["action"]["surface"], "source_registry")
 
     def test_notebook_study_program_does_not_treat_missing_upload_as_readable_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4018,6 +4493,11 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(cache_action["payload"]["bookmd5"], "B1")
             self.assertEqual(cache_action["payload"]["source"], "source-registry")
             self.assertEqual(registry["primaryAction"]["id"], "cache_current_pdf")
+            matrix = workspace["notebookWorkspace"]["knowledgeMatrix"]
+            axis_by_id = {item["id"]: item for item in matrix["axes"]}
+            self.assertEqual(axis_by_id["source_inventory"]["status"], "action_required")
+            self.assertEqual(axis_by_id["source_inventory"]["action"]["id"], "cache_current_pdf")
+            self.assertEqual(axis_by_id["source_inventory"]["action"]["action"], "request_pdf_cache")
             program = workspace["notebookWorkspace"]["studyProgram"]
             source_gap = [item for item in program["gaps"] if item["id"] == "source_registry"][0]
             self.assertEqual(source_gap["action"]["id"], "cache_current_pdf")
@@ -4101,7 +4581,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(run["status"], "running")
             self.assertEqual(run["writePolicy"], "no_write_preflight")
             self.assertEqual(run["actionCount"], len(auto_plan["actions"]))
-            self.assertEqual(run["actions"][0]["stepId"], "scan_objects")
+            self.assertEqual([item["stepId"] for item in run["actions"][:3]], ["source_inventory", "scan_objects", "mindmap_baseline"])
             self.assertTrue(run["runId"])
 
             completed = companion.handle_action(
@@ -4702,6 +5182,192 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(chain["residual"]["residualProof"]["schema"], "codex.mn.residualProof.v1")
             self.assertEqual(chain["residual"]["residualProof"]["objects"][0]["noteId"], "N-LEDGER")
             self.assertEqual(chain["residual"]["residualProof"]["objects"][0]["actualState"], "created_pending_user_decision")
+
+    def test_verification_center_lists_current_object_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            source_pdf = root / "paper.pdf"
+            source_pdf.write_bytes(b"%PDF-1.4\n%test\n")
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:selection:verify1",
+                "kind": "selection",
+                "title": "验证选区",
+                "sourceRef": {"page": 2, "quote": "verify source"},
+            }
+
+            queued_apply = companion.handle_action(
+                {
+                    **base,
+                    "mnObject": mn_object,
+                    "action": "request_mindmap_diff_apply",
+                    "transactionId": "verify-tx",
+                    "draftId": "verify-draft",
+                    "mindmapDiffOperationPlan": {
+                        "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+                        "operationCount": 1,
+                        "operations": [{"opId": "verify-create", "op": "create_mindmap_node", "title": "Verify Node"}],
+                    },
+                }
+            )
+            self.assertTrue(queued_apply["ok"], queued_apply)
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "verify-tx",
+                        "draftId": "verify-draft",
+                        "createdNoteIds": ["N-VERIFY"],
+                        "createdCount": 1,
+                        "appliedCount": 1,
+                        "failedCount": 0,
+                        "mnObjectId": "mnobj:selection:verify1",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "验证选区",
+                        "mnObjectSourceRef": {"page": 2, "quote": "verify source"},
+                    },
+                }
+            )
+            companion.handle_action(
+                {
+                    "action": "skill_run_record",
+                    "skillId": "workflow.deep_reading_writer",
+                    "objectRef": mn_object,
+                    "status": "completed",
+                    "acceptance": {"status": "accepted", "createdCards": 3},
+                }
+            )
+
+            result = companion.handle_action(
+                {
+                    **base,
+                    "action": "verification_report_list",
+                    "mnObject": mn_object,
+                    "mnObjectId": "mnobj:selection:verify1",
+                    "pdfPath": str(source_pdf),
+                    "documentTitle": "Verification Paper",
+                    "limit": 10,
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["schema"], "codex.mn.verificationCenter.v1")
+            self.assertEqual(result["objectRef"]["objectId"], "mnobj:selection:verify1")
+            self.assertGreaterEqual(result["counts"]["total"], 3)
+            self.assertGreaterEqual(result["counts"]["PASS"], 2)
+            self.assertGreaterEqual(result["counts"]["UNKNOWN"], 1)
+            self.assertEqual(result["summary"]["worstStatus"], "UNKNOWN")
+            self.assertEqual(result["repairPlan"]["schema"], "codex.mn.verificationRepairPlan.v1")
+            self.assertEqual(result["repairPlan"]["status"], "action_required")
+            self.assertEqual(result["repairPlan"]["recommendedActionId"], "request_object_existence_probe")
+            self.assertGreaterEqual(result["repairPlan"]["actionCount"], 1)
+            self.assertEqual(result["repairPlan"]["recommendedAction"]["action"], "request_mn_object_existence_probe")
+            subjects = {item["report"]["subjectType"] for item in result["reports"]}
+            self.assertIn("transaction", subjects)
+            self.assertIn("source_registry", subjects)
+            self.assertIn("skill_run", subjects)
+            transaction_report = next(item for item in result["reports"] if item["report"]["subjectType"] == "transaction")
+            self.assertEqual(transaction_report["report"]["status"], "UNKNOWN")
+            self.assertEqual(transaction_report["ledgerAction"]["action"], "operation_ledger_get")
+            self.assertIn("native_probe_missing", transaction_report["report"]["problems"])
+            self.assertEqual(transaction_report["action"]["action"], "request_mn_object_existence_probe")
+            self.assertEqual(transaction_report["action"]["label"], "检查真实对象")
+            self.assertEqual(transaction_report["action"]["payload"]["transactionId"], "verify-tx")
+            self.assertEqual(transaction_report["action"]["payload"]["noteIds"], ["N-VERIFY"])
+            self.assertEqual(transaction_report["action"]["payload"]["source"], "verification_center")
+
+            companion.append_event(
+                {
+                    "event": "mnObjectExistenceProbeFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "nativeAction": "probe_mn_object_existence",
+                        "transactionId": "verify-tx",
+                        "probeId": "probe-verify",
+                        "results": [
+                            {"noteId": "N-VERIFY", "exists": True, "objectId": "mnobj:note:N-VERIFY"}
+                        ],
+                    },
+                }
+            )
+            verified = companion.handle_action(
+                {
+                    **base,
+                    "action": "verification_report_list",
+                    "mnObject": mn_object,
+                    "mnObjectId": "mnobj:selection:verify1",
+                    "pdfPath": str(source_pdf),
+                    "documentTitle": "Verification Paper",
+                    "limit": 10,
+                }
+            )
+
+            self.assertTrue(verified["ok"], verified)
+            self.assertEqual(verified["repairPlan"]["status"], "ready")
+            verified_transaction = next(
+                item for item in verified["reports"] if item["report"]["subjectType"] == "transaction"
+            )
+            self.assertEqual(verified_transaction["report"]["status"], "PASS")
+            self.assertEqual(verified_transaction["report"]["presentNoteIds"], ["N-VERIFY"])
+            self.assertEqual(verified_transaction["action"], {})
+
+            companion.append_event(
+                {
+                    "event": "mindmapDiffApplyFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "verify-missing-tx",
+                        "draftId": "verify-missing-draft",
+                        "createdNoteIds": ["N-MISSING"],
+                        "createdCount": 1,
+                        "appliedCount": 1,
+                        "failedCount": 0,
+                        "mnObjectId": "mnobj:selection:verify1",
+                        "mnObjectKind": "selection",
+                        "mnObjectTitle": "验证选区",
+                        "mnObjectSourceRef": {"page": 2, "quote": "verify source"},
+                    },
+                }
+            )
+            companion.append_event(
+                {
+                    "event": "mnObjectExistenceProbeFinished",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "nativeAction": "probe_mn_object_existence",
+                        "transactionId": "verify-missing-tx",
+                        "probeId": "probe-missing",
+                        "results": [
+                            {"noteId": "N-MISSING", "exists": False, "objectId": "mnobj:note:N-MISSING"}
+                        ],
+                    },
+                }
+            )
+            failed = companion.handle_action(
+                {
+                    **base,
+                    "action": "verification_report_list",
+                    "mnObject": mn_object,
+                    "mnObjectId": "mnobj:selection:verify1",
+                    "pdfPath": str(source_pdf),
+                    "documentTitle": "Verification Paper",
+                    "limit": 10,
+                }
+            )
+            failed_transaction = next(
+                item for item in failed["reports"] if item["sourceId"] == "transaction:verify-missing-tx"
+            )
+            self.assertEqual(failed["repairPlan"]["status"], "blocked")
+            self.assertEqual(failed_transaction["report"]["status"], "FAIL")
+            self.assertEqual(failed_transaction["report"]["missingNoteIds"], ["N-MISSING"])
+            self.assertEqual(failed_transaction["action"], {})
 
     def test_object_graph_links_current_object_to_operations_and_activity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6661,9 +7327,37 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(wizard["bookmd5"], "BOOK1")
             self.assertEqual(wizard["timeoutSeconds"], 90)
             self.assertIn("回到 PDF", wizard["instruction"])
+            self.assertTrue(wizard["manualSelectionRequired"])
+            self.assertTrue(any("PDF 页面正文" in item for item in wizard["selectionChecklist"]))
             self.assertEqual(result["queued"]["command"]["nativeAction"], "highlight_current_selection")
             self.assertTrue(result["queued"]["command"]["armIfMissingSelection"])
             self.assertEqual(result["queue"]["pending"], 1)
+
+    def test_request_pdf_selection_probe_queues_read_only_native_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+
+            result = companion.handle_action(
+                {
+                    "action": "request_pdf_selection_probe",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "source": "unit-test",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["queued"]["command"]["nativeAction"], "probe_pdf_selection")
+            self.assertEqual(result["queued"]["command"]["source"], "unit-test")
+            self.assertEqual(result["queue"]["pending"], 1)
+            self.assertEqual(result["selectionProbe"]["schema"], "codex.mn.pdfSelectionProbe.v1")
+            self.assertFalse(result["selectionProbe"]["ready"])
+
+            polled = companion.poll_commands("TOPIC1", "BOOK1")
+
+            self.assertEqual(polled["pending"], 1)
+            self.assertEqual(polled["commands"][0]["nativeAction"], "probe_pdf_selection")
 
     def test_native_highlight_wizard_status_summarizes_single_document_blockers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6698,6 +7392,152 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(wizard["selectionPopupReady"])
             self.assertIn("native_highlight_visible", wizard["blockedChecks"])
             self.assertIn("selection_popup_highlight", wizard["blockedChecks"])
+
+    def test_native_highlight_wizard_status_surfaces_pdf_selection_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.EVENTS_PATH.write_text(
+                json.dumps(
+                    {
+                        "event": "nativeHighlightSelectionProbe",
+                        "pluginVersion": companion.CURRENT_PLUGIN_VERSION,
+                        "topicid": "TOPIC1",
+                        "bookmd5": "BOOK1",
+                        "extra": {
+                            "source": "unit-test",
+                            "hasDocumentController": True,
+                            "selectedDocumentControllerLabel": "studyController.readerController",
+                            "candidateLabels": ["studyController.readerController"],
+                            "candidateCount": 1,
+                            "selectionLength": 0,
+                            "hasSelectionText": False,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = companion.handle_action(
+                {
+                    "action": "native_highlight_wizard_status",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "source": "unit-test",
+                }
+            )
+
+            wizard = result["nativeHighlightWizard"]
+            probe = wizard["selectionProbe"]
+            self.assertEqual(wizard["stage"], "waiting_selection")
+            self.assertEqual(wizard["latestEventName"], "nativeHighlightSelectionProbe")
+            self.assertEqual(probe["schema"], "codex.mn.pdfSelectionProbe.v1")
+            self.assertTrue(probe["hasDocumentController"])
+            self.assertFalse(probe["hasSelectionText"])
+            self.assertEqual(probe["selectedDocumentControllerLabel"], "studyController.readerController")
+            self.assertIn("selectionText=0", wizard["instruction"])
+            self.assertTrue(wizard["manualSelectionRequired"])
+            self.assertTrue(any("脑图" in item for item in wizard["selectionChecklist"]))
+
+    def test_native_highlight_wizard_status_keeps_poll_probe_as_active_waiting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.EVENTS_PATH.write_text(
+                json.dumps(
+                    {
+                        "event": "nativeHighlightSelectionProbe",
+                        "pluginVersion": companion.CURRENT_PLUGIN_VERSION,
+                        "topicid": "TOPIC1",
+                        "bookmd5": "BOOK1",
+                        "extra": {
+                            "source": "next-selection-poll",
+                            "pollArmed": True,
+                            "elapsedSeconds": 12,
+                            "hasDocumentController": True,
+                            "selectedDocumentControllerLabel": "studyController.readerController",
+                            "candidateLabels": ["studyController.readerController"],
+                            "candidateCount": 1,
+                            "selectionLength": 0,
+                            "hasSelectionText": False,
+                            "selectionImageBytes": 0,
+                            "hasSelectionImage": False,
+                            "hasSelectionPayload": False,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = companion.handle_action(
+                {
+                    "action": "native_highlight_wizard_status",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "source": "unit-test",
+                }
+            )
+
+            wizard = result["nativeHighlightWizard"]
+            probe = wizard["selectionProbe"]
+            self.assertEqual(wizard["stage"], "waiting_selection")
+            self.assertEqual(wizard["secondsRemaining"], 78)
+            self.assertEqual(probe["source"], "next-selection-poll")
+            self.assertFalse(probe["hasSelectionPayload"])
+            self.assertIn("主动轮询正在运行", wizard["instruction"])
+            self.assertTrue(wizard["manualSelectionRequired"])
+            self.assertIn("右侧脑图", wizard["instruction"])
+
+    def test_native_highlight_wizard_status_treats_image_selection_probe_as_observed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.EVENTS_PATH.write_text(
+                json.dumps(
+                    {
+                        "event": "nativeHighlightSelectionProbe",
+                        "pluginVersion": companion.CURRENT_PLUGIN_VERSION,
+                        "topicid": "TOPIC1",
+                        "bookmd5": "BOOK1",
+                        "extra": {
+                            "source": "unit-test",
+                            "hasDocumentController": True,
+                            "selectedDocumentControllerLabel": "studyController.readerController",
+                            "candidateLabels": ["studyController.readerController"],
+                            "candidateCount": 1,
+                            "selectionLength": 0,
+                            "hasSelectionText": False,
+                            "selectionImageBytes": 4096,
+                            "hasSelectionImage": True,
+                            "hasSelectionPayload": True,
+                            "imageAvailable": True,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = companion.handle_action(
+                {
+                    "action": "native_highlight_wizard_status",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "source": "unit-test",
+                }
+            )
+
+            wizard = result["nativeHighlightWizard"]
+            probe = wizard["selectionProbe"]
+            self.assertEqual(wizard["stage"], "selection_observed")
+            self.assertTrue(probe["ready"])
+            self.assertFalse(probe["hasSelectionText"])
+            self.assertTrue(probe["hasSelectionImage"])
+            self.assertTrue(probe["hasSelectionPayload"])
+            self.assertEqual(probe["selectionImageBytes"], 4096)
+            self.assertIn("区域/图片选区", wizard["instruction"])
 
     def test_native_highlight_wizard_status_expires_stale_waiting_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

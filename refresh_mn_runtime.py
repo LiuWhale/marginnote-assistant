@@ -17,7 +17,7 @@ DEFAULT_URL = "http://127.0.0.1:48761"
 ROOT = Path(__file__).resolve().parent
 DEFAULT_NEXT_STEP_EN = "reopen the Codex panel or restart MarginNote 4, then click Refresh MN capability."
 DEFAULT_ADDON_ID = "codex.mn.assistant"
-CURRENT_PLUGIN_VERSION = "0.4.40"
+CURRENT_PLUGIN_VERSION = "0.4.41"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
 
 
@@ -191,6 +191,7 @@ def wait_for_runtime_refresh(
 ) -> dict[str, Any]:
     deadline = time.time() + timeout
     last_status: dict[str, Any] = {}
+    observed_refreshed_status: dict[str, Any] = {}
     while time.time() < deadline:
         last_status = status_or_error(base_url)
         runtime = last_status.get("mnRuntime") if isinstance(last_status.get("mnRuntime"), dict) else {}
@@ -199,11 +200,11 @@ def wait_for_runtime_refresh(
         current_native_ts = latest_native_event_ts(last_status)
         current_web_ts = latest_web_event_ts(last_status)
         if current_native_ts and current_native_ts != previous_native_ts:
-            return last_status
+            observed_refreshed_status = last_status
         if current_web_ts and current_web_ts != previous_web_ts:
-            return last_status
+            observed_refreshed_status = last_status
         time.sleep(interval)
-    return last_status or status_or_error(base_url)
+    return last_status or observed_refreshed_status or status_or_error(base_url)
 
 
 def collect_queued_command_ids(results: list[dict[str, Any]]) -> list[str]:

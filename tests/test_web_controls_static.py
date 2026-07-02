@@ -20,12 +20,19 @@ class WebControlsStaticTests(unittest.TestCase):
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
         for marker in [
             'id="aiChatShell"',
+            'id="knowledgeOsContractPanel"',
+            'id="knowledgeOsContractTitle"',
+            'id="knowledgeOsObjectLayer"',
+            'id="knowledgeOsOperationLayer"',
+            'id="knowledgeOsEvidenceLayer"',
             'id="modeSwitchBar"',
             'id="chatModeButton"',
             'id="agentWorkspaceModeButton"',
             'id="modeIntentLine"',
             'id="workspaceNavigator"',
             'id="workspaceNavigatorSummary"',
+            'id="workspaceSurfaceSelect"',
+            'id="workspaceNavigatorToggleButton"',
             'id="workspaceNavConsoleButton"',
             'id="workspaceNavMindmapStudioButton"',
             'id="workspaceNavCardFactoryButton"',
@@ -38,6 +45,7 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="notebookWorkspaceTitle"',
             'id="notebookWorkspaceSummary"',
             'id="notebookWorkspaceRefreshButton"',
+            'id="notebookWorkspaceDetails"',
             'id="notebookWorkspaceFocus"',
             'id="notebookWorkspaceObjectCount"',
             'id="notebookWorkspaceMindmap"',
@@ -45,6 +53,15 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="notebookWorkspaceWorkflow"',
             'id="notebookWorkspaceLedger"',
             'id="notebookWorkspaceActions"',
+            'id="notebookKnowledgeMatrix"',
+            'id="notebookKnowledgeMatrixSummary"',
+            'id="notebookKnowledgeMatrixList"',
+            'id="notebookObjectIntake"',
+            'id="notebookObjectIntakeSummary"',
+            'id="notebookObjectIntakeRoutes"',
+            'id="notebookObjectTaskComposer"',
+            'id="notebookObjectTaskComposerSummary"',
+            'id="notebookObjectTaskComposerList"',
             'id="sourceRegistryPanel"',
             'id="notebookWorkspaceRunbook"',
             'id="notebookWorkspaceRunbookSummary"',
@@ -111,6 +128,10 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="operationWorkspaceTitle"',
             'id="operationWorkspaceMeta"',
             'id="verificationReportPanel"',
+            'id="verificationReportRefreshButton"',
+            'id="verificationReportSummary"',
+            'id="verificationReportCounts"',
+            'id="verificationReportList"',
             'id="operationCompilerPanel"',
             'id="operationCompilerSummary"',
             'id="operationPlanStats"',
@@ -138,6 +159,9 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="workflowWorkspaceTitle"',
             'id="workflowWorkspaceSummary"',
             'id="workflowWorkspaceRuns"',
+            'id="workflowBuilderBoardPanel"',
+            'id="workflowBuilderBoardSummary"',
+            'id="workflowBuilderBoardLanes"',
             'id="externalGatewayPanel"',
             'id="workflowWorkspaceGateway"',
             'id="skillCenterPanel"',
@@ -167,13 +191,13 @@ class WebControlsStaticTests(unittest.TestCase):
             "知识",
             "工作流",
             "Knowledge Console",
-            "Chat Mode",
-            "Agent Workspace",
+            "对话",
+            "高级",
         ]:
             self.assertIn(marker, self.html)
 
-        self.assertIn("activeProductMode: 'workspace'", self.js)
-        self.assertIn("commandPaneExpanded: false", self.js)
+        self.assertIn("activeProductMode: 'chat'", self.js)
+        self.assertIn("commandPaneExpanded: true", self.js)
         self.assertIn("lastWorkspacePane: 'object'", self.js)
         self.assertIn("activeWorkspaceSurface: 'console'", self.js)
         self.assertIn("function switchProductMode", self.js)
@@ -184,6 +208,73 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("function renderWorkspaceNavigator", self.js)
         self.assertIn("function refreshNotebookWorkspace", self.js)
         self.assertIn("function renderNotebookWorkspace", self.js)
+        self.assertIn("function renderNotebookKnowledgeMatrix", self.js)
+        self.assertIn("codex.mn.knowledgeConsoleMatrix.v1", self.js)
+        self.assertIn("data-notebook-knowledge-axis", self.js)
+        for runtime_marker in [
+            "'notebookWorkspaceRunbook'",
+            "'notebookWorkspaceRunbookSummary'",
+            "'notebookWorkspaceRunbookAutoButton'",
+            "'notebookWorkspaceRunbookAutoStatus'",
+            "'notebookWorkspaceRunbookContinueButton'",
+            "'notebookWorkspaceRunbookList'",
+        ]:
+            self.assertIn(runtime_marker, self.js)
+        self.assertIn("knowledgeMatrix", self.js)
+        self.assertIn("function renderNotebookObjectIntake", self.js)
+        self.assertIn("codex.mn.objectIntake.v1", self.js)
+        self.assertIn("data-object-intake-route", self.js)
+        self.assertIn("data.objectIntake", self.js)
+        self.assertIn("notebookObjectIntake", self.html)
+        self.assertIn("notebookObjectIntakeSummary", self.html)
+        self.assertIn("notebookObjectIntakeRoutes", self.html)
+        self.assertIn("function renderNotebookObjectTaskComposer", self.js)
+        self.assertIn("codex.mn.objectTaskComposer.v1", self.js)
+        self.assertIn("data-object-task-id", self.js)
+        self.assertIn("data.objectTaskComposer", self.js)
+        self.assertIn("codex.mn.objectTaskWorkflowCandidate.v1", self.js)
+        self.assertIn("notebook-object-task-workflow", self.js)
+        self.assertIn("startAction = task.startAction", self.js)
+        self.assertIn("action === 'workflow_start'", self.js)
+        self.assertIn("postCompanion('workflow_start'", self.js)
+        self.assertIn("function renderWorkflowBuilderBoard", self.js)
+        self.assertIn("codex.mn.workflowBuilderBoard.v1", self.js)
+        self.assertIn("data-workflow-builder-lane", self.js)
+        self.assertIn("data-workflow-builder-card", self.js)
+        self.assertIn("renderWorkflowBuilderBoard(data.workflowBuilderBoard || {})", self.js)
+        self.assertIn("workflowBuilderBoard", self.js)
+        self.assertIn("workflowBuilderBoardPanel", self.html)
+        self.assertIn("workflowBuilderBoardSummary", self.html)
+        self.assertIn("workflowBuilderBoardLanes", self.html)
+        self.assertIn("notebookObjectTaskComposer", self.html)
+        self.assertIn("notebookObjectTaskComposerSummary", self.html)
+        self.assertIn("notebookObjectTaskComposerList", self.html)
+        self.assertIn("refreshAgentPlan(true, payload)", self.js)
+        self.assertIn("Object.assign({}, overridePayload, {prompt: prompt})", self.js)
+        self.assertIn("object_browser: 'object'", self.js)
+        self.assertIn("object_browser: 'objectBrowserPanel'", self.js)
+        self.assertIn("object_browser: true", self.js)
+        self.assertIn("action === 'object_browser'", self.js)
+        self.assertIn("refreshObjectBrowser(true, payload)", self.js)
+        self.assertIn("source_registry: 'object'", self.js)
+        self.assertIn("source_registry: 'sourceRegistryPanel'", self.js)
+        self.assertIn("source_registry: true", self.js)
+        self.assertIn("action === 'open_source_registry'", self.js)
+        self.assertIn("refreshNotebookWorkspace(false)", self.js)
+        self.assertIn("mindmap_studio: 'mindmapStudioPanel'", self.js)
+        self.assertIn("action === 'open_mindmap_studio'", self.js)
+        self.assertIn("renderMindmapStudioPanel()", self.js)
+        self.assertIn("action === 'open_card_factory'", self.js)
+        self.assertIn("refreshKnowledgeWorkspace(true, payload)", self.js)
+        self.assertIn("action === 'open_workflow_builder'", self.js)
+        self.assertIn("refreshWorkflowWorkspace(true, payload)", self.js)
+        self.assertIn("skill_center: 'workflow'", self.js)
+        self.assertIn("skill_center: 'skillCenterPanel'", self.js)
+        self.assertIn("action === 'open_skill_center'", self.js)
+        self.assertIn("verification_center: 'operation'", self.js)
+        self.assertIn("verification_center: 'verificationReportPanel'", self.js)
+        self.assertIn("action === 'verification_report_list'", self.js)
+        self.assertIn("refreshVerificationCenter(true, payload)", self.js)
         self.assertIn("function runNotebookWorkspaceAction", self.js)
         self.assertIn("state.notebookWorkspace", self.js)
         self.assertIn("postCompanion('notebook_workspace'", self.js)
@@ -256,6 +347,11 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".notebook-study-recommendation", self.css)
         self.assertIn(".notebook-runbook", self.css)
         self.assertIn(".notebook-runbook-step", self.css)
+        self.assertIn(".notebook-knowledge-matrix", self.css)
+        self.assertIn(".notebook-knowledge-axis", self.css)
+        self.assertIn(".workflow-builder-board-panel", self.css)
+        self.assertIn(".workflow-builder-lane", self.css)
+        self.assertIn(".workflow-builder-card", self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workbenchTabs', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] .workbench-panel', self.css)
         self.assertIn('.ai-chat-shell[data-product-mode="chat"] #workspaceNavigator', self.css)
@@ -437,8 +533,25 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn(".mindmap-tree-cache-status", self.css)
         self.assertIn(".mindmap-tree-preview-list", self.css)
         self.assertIn(".mindmap-tree-preview-node", self.css)
+        topbar_html = main_html.split('<section class="topbar">', 1)[1].split('<section id="workspaceNavigator"', 1)[0]
+        topbar_rail = topbar_html.split('<div class="topbar-workspace-rail">', 1)[1].split('<div class="topbar-actions">', 1)[0]
+        self.assertIn('id="knowledgeOsContractPanel"', topbar_rail)
+        self.assertIn('id="modeSwitchBar"', topbar_rail)
+        self.assertLess(topbar_html.index('class="topbar-identity"'), topbar_html.index('class="topbar-workspace-rail"'))
+        self.assertLess(topbar_html.index('class="topbar-workspace-rail"'), topbar_html.index('class="topbar-actions"'))
         self.assertLess(main_html.index('id="workbenchTabs"'), main_html.index('id="commandPanePanel"'))
         self.assertLess(main_html.index('id="commandPanePanel"'), main_html.index('id="workbenchLayout"'))
+        self.assertLess(main_html.index('id="knowledgeOsContractPanel"'), main_html.index('id="modeSwitchBar"'))
+        self.assertLess(main_html.index('id="knowledgeOsContractPanel"'), main_html.index('id="commandPanePanel"'))
+        self.assertIn(".topbar .knowledge-os-contract-panel {\n  display: none;", self.css)
+        for marker in [
+            "MarginNote Knowledge OS",
+            "对象层",
+            "操作层",
+            "证据层",
+            "高级模式用于对象、操作、证据和 workflow 诊断",
+        ]:
+            self.assertIn(marker, main_html)
         self.assertLess(main_html.index('id="objectWorkspacePanel"'), main_html.index('id="operationWorkspacePanel"'))
         self.assertLess(main_html.index('id="operationWorkspacePanel"'), main_html.index('id="knowledgeWorkspacePanel"'))
         self.assertLess(main_html.index('id="knowledgeWorkspacePanel"'), main_html.index('id="workflowWorkspacePanel"'))
@@ -459,12 +572,13 @@ class WebControlsStaticTests(unittest.TestCase):
             "queueBadge",
             "fileInput",
             "制卡",
-            "高亮",
             "导出",
             "一次性目标",
             "按钮中心",
         ]:
             self.assertNotIn(removed, main_html)
+        self.assertNotIn('id="nativeHighlightWizardButton"', main_html)
+        self.assertNotIn('data-action="request_native_highlight_selection"', main_html)
 
     def test_mindmap_studio_is_a_first_class_operation_workspace(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
@@ -516,8 +630,15 @@ class WebControlsStaticTests(unittest.TestCase):
     def test_agent_workspace_navigator_routes_to_first_class_surfaces(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
         self.assertIn('id="workspaceNavigator"', main_html)
+        self.assertIn('data-workspace-surface="console"', main_html)
+        self.assertIn('data-workspace-navigator-expanded="false"', main_html)
         navigator_html = main_html.split('id="workspaceNavigator"', 1)[1].split('id="workbenchTabs"', 1)[0]
         for marker in [
+            'id="workspaceSurfaceSelect"',
+            '<option value="object_browser">Object Browser</option>',
+            '<option value="source_registry">Source Registry</option>',
+            '<option value="verification_center">Verification Center</option>',
+            'id="workspaceNavigatorToggleButton"',
             "Knowledge Console",
             "Mindmap Studio",
             "Card Factory",
@@ -542,10 +663,26 @@ class WebControlsStaticTests(unittest.TestCase):
             "function focusWorkspaceSurfaceAnchor",
             "function switchWorkspaceSurface",
             "function renderWorkspaceNavigator",
+            "function releaseSelectFocusBeforeNativeMenu",
+            "workspaceNavigatorExpanded",
+            "workspaceSurfaceSelect",
+            "workspaceNavigatorToggleButton",
+            "function renderNotebookWorkspaceShell",
+            "notebookWorkspaceDetailsVisible",
+            "state.notebookWorkspaceExpanded",
+            "notebookWorkspaceExpanded: false",
+            "notebookWorkspaceDetailsToggleButton",
+            "notebookWorkspaceDetails",
             "state.activeWorkspaceSurface",
+            "notebookKnowledgeMatrixToggleButton",
+            "state.knowledgeMatrixExpanded",
+            "notebookKnowledgeAxisPriority",
             "switchWorkbenchPane(workspaceSurfacePane(surface)",
+            "if (state.workspaceNavigatorExpanded) state.workspaceNavigatorExpanded = false;",
             "workspaceSurfaceAnchor(surface)",
             "focusWorkspaceSurfaceAnchor(anchorId)",
+            "releaseSelectFocusBeforeNativeMenu(workspaceSurfaceSelect)",
+            "releaseTextInputFocus('workspaceSurfaceSelect')",
             "workspaceNavMindmapStudioButton",
             "workspaceNavCardFactoryButton",
             "workspaceNavLedgerExplorerButton",
@@ -558,6 +695,110 @@ class WebControlsStaticTests(unittest.TestCase):
             "workflowWorkspaceSkills",
         ]:
             self.assertIn(marker, self.js + self.css)
+
+    def test_workspace_surface_layout_is_page_level_not_crowded_grid(self) -> None:
+        for marker in [
+            'shell.setAttribute(\'data-workspace-surface\', surface)',
+            '.ai-chat-shell[data-product-mode="workspace"][data-workspace-surface="console"] #knowledgeConsolePanel',
+            '.ai-chat-shell[data-product-mode="workspace"][data-workspace-surface="source_registry"] #knowledgeConsolePanel',
+            '.ai-chat-shell[data-product-mode="workspace"][data-workspace-surface="console"] .notebook-workspace-details',
+            '.ai-chat-shell[data-product-mode="workspace"][data-workspace-surface="source_registry"] .notebook-workspace-details',
+            '.ai-chat-shell[data-workspace-surface="console"] #objectBrowserPanel',
+            '.ai-chat-shell[data-workspace-surface="console"] #objectGraphPanel',
+            '.ai-chat-shell[data-workspace-surface="console"] #objectActivityPanel',
+            '.ai-chat-shell[data-workspace-surface="console"] #operationLedgerDrawer',
+            '.ai-chat-shell[data-workspace-surface="console"] #workbenchTabs',
+            '.ai-chat-shell[data-workspace-surface="console"] #workbenchLayout',
+            '.ai-chat-shell[data-workspace-surface="source_registry"] #workbenchTabs',
+            '.ai-chat-shell[data-workspace-surface="source_registry"] #workbenchLayout',
+            ".notebook-workspace-panel.compact #notebookWorkspaceDetails",
+            ".notebook-workspace-panel.compact #notebookWorkspaceGrid",
+            ".notebook-workspace-panel.compact #notebookObjectIntake",
+            ".notebook-workspace-panel.compact #notebookObjectTaskComposer",
+            ".notebook-workspace-panel.compact #sourceRegistryPanel",
+            ".notebook-workspace-panel.compact #notebookWorkspaceRunbook",
+            '.ai-chat-shell[data-workspace-surface="source_registry"] #notebookKnowledgeMatrix',
+            '.ai-chat-shell[data-workspace-surface="mindmap_studio"] #verificationReportPanel',
+            '.ai-chat-shell[data-workspace-surface="verification_center"] #mindmapStudioPanel',
+            '.ai-chat-shell[data-workspace-surface="ledger_explorer"] #objectBrowserPanel',
+            '.ai-chat-shell[data-workspace-surface="card_factory"] #knowledgeWorkspaceResults',
+            '.ai-chat-shell[data-workspace-surface="knowledge_graph"] #knowledgeWorkspaceReviewQueue',
+            '.ai-chat-shell[data-workspace-surface="workflow_builder"] #skillCenterPanel',
+            '.ai-chat-shell[data-workspace-surface="skill_center"] #workflowBuilderBoardPanel',
+            '.workbench-panel.active',
+            '.ai-chat-shell[data-product-mode="workspace"][data-command-pane-expanded="true"] #workspaceNavigator',
+            '.ai-chat-shell[data-product-mode="workspace"][data-command-pane-expanded="true"] #commandPanePanel',
+            '.ai-chat-shell[data-product-mode="workspace"][data-command-pane-expanded="true"] .command-pane-body .ai-chat-history',
+            "overflow-x: hidden;",
+            "overflow-y: auto;",
+            "padding-bottom: 96px;",
+            "scroll-padding-bottom: 104px;",
+            ".workbench-panel-header {\n  position: sticky;",
+        ]:
+            self.assertIn(marker, self.js + self.css)
+
+        self.assertIn("grid-template-columns: minmax(0, 1fr)", self.css)
+        self.assertIn("margin-bottom: 206px;", self.css)
+        self.assertIn("scroll-padding-bottom: 18px;", self.css)
+        self.assertIn("max-height: none;", self.css)
+        self.assertIn(".notebook-knowledge-matrix.collapsed .notebook-knowledge-axis.secondary", self.css)
+        self.assertIn(".workspace-nav-grid {\n  display: none;", self.css)
+        self.assertIn(".workspace-navigator-toggle {\n  display: none;", self.css)
+        self.assertIn('.ai-chat-shell[data-workspace-navigator-expanded="true"] .workspace-nav-grid', self.css)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", self.css)
+        self.assertIn(".workspace-nav-card {\n  min-width: 0;", self.css)
+        self.assertIn("border-radius: 8px;", self.css)
+
+    def test_advanced_mode_defaults_to_simple_tool_center(self) -> None:
+        for marker in [
+            'id="advancedToolCenterPanel"',
+            'id="advancedStatusPdf"',
+            'id="advancedStatusMindmap"',
+            'id="advancedStatusWrite"',
+            'id="advancedNextStepText"',
+            'id="advancedNextStepButton"',
+            'id="advancedReadButton"',
+            'id="advancedMindmapButton"',
+            'id="advancedCardsButton"',
+            'id="advancedVerifyButton"',
+            'id="expertModePanel"',
+            'id="expertModeToggleButton"',
+            'id="expertModeBackButton"',
+            'id="expertModeHint"',
+            "工具",
+            "当前状态",
+            "你想做什么",
+            "下一步建议",
+            "专家模式",
+        ]:
+            self.assertIn(marker, self.html)
+
+        for marker in [
+            "expertModeExpanded: false",
+            "function renderAdvancedToolCenter",
+            "function renderExpertMode",
+            "function runAdvancedPrimaryAction",
+            "function toggleExpertMode",
+            "function exitExpertMode",
+            "shell.setAttribute('data-expert-mode'",
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="false"] #workspaceNavigator',
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="false"] #knowledgeConsolePanel',
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="false"] #workbenchTabs',
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="false"] #commandPanePanel',
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="false"] #commandPaneHeader',
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="true"] #workspaceNavigator',
+            '.ai-chat-shell[data-product-mode="workspace"][data-expert-mode="true"] #expertModeBackButton',
+            '.advanced-tool-center-panel',
+            '.advanced-task-grid',
+            '.expert-mode-back-button',
+            '.expert-mode-panel',
+        ]:
+            self.assertIn(marker, self.js + self.css)
+        self.assertNotIn("grid-template-columns:\n    minmax(150px, 0.82fr)", self.css)
+        self.assertNotIn("grid-template-columns: repeat(7, minmax(116px, 1fr))", self.css)
+        self.assertNotIn("max-height: min(310px, 38vh)", self.css)
+        self.assertNotIn("scroll-padding-bottom: 226px", self.css)
+        self.assertNotIn("@media (min-width: 761px) {\n  .workbench-panel {\n    display: flex;", self.css)
 
     def test_staged_prompt_actions_stay_in_command_pane(self) -> None:
         stage_body = self.js.split("function stagePromptAction", 1)[1].split(
@@ -796,6 +1037,93 @@ class WebControlsStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, main_html + self.js + self.css)
 
+    def test_operation_workspace_exposes_verification_center(self) -> None:
+        main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
+        operation_html = main_html.split('id="operationWorkspacePanel"', 1)[1].split("</aside>", 1)[0]
+        for marker in [
+            'id="verificationReportPanel"',
+            'id="realMnAcceptancePanel"',
+            'id="realMnAcceptanceStatusLine"',
+            'id="realMnAcceptanceChecklist"',
+            'id="realMnAcceptanceRunAllButton"',
+            'id="singleDocumentAcceptanceLine"',
+            'id="singleDocumentAcceptanceDetail"',
+            'id="singleDocumentAcceptanceButton"',
+            'id="mainUiFunctionalAcceptanceLine"',
+            'id="mainUiFunctionalAcceptanceDetail"',
+            'id="mainUiFunctionalAcceptanceButton"',
+            'id="realMnAcceptanceSafeEvidenceButton"',
+            'id="mainNativeHighlightWizardPanel"',
+            'id="mainNativeHighlightWizardLine"',
+            'id="mainNativeHighlightWizardDetail"',
+            'id="mainNativeHighlightWizardActions"',
+            'id="nativeHighlightWizardRetryButton"',
+            'id="nativeHighlightWizardRefreshButton"',
+            'id="verificationReportRefreshButton"',
+            'id="verificationReportSummary"',
+            'id="verificationReportCounts"',
+            'id="verificationReportList"',
+            'id="verificationReportActionStatus"',
+            'id="verificationRepairPlanPanel"',
+            'id="verificationRepairPlanSummary"',
+            'id="verificationRepairPlanRecommendedButton"',
+            'id="verificationRepairPlanActions"',
+            "Verification Center",
+            "真实 MN4 验收",
+            "运行验收流程",
+            "当前文档验收",
+            "任意文档 UI 验收",
+            "安全采证",
+            "原生高亮恢复",
+            "启动采证",
+            "function renderNativeHighlightWizard",
+            "nativeHighlightWizardRetryButton",
+            "nativeHighlightWizardRefreshButton",
+            "secondsRemaining",
+            "latestEventReason",
+            "recoverable",
+            "function refreshVerificationCenter",
+            "function renderVerificationCenter",
+            "function renderRealMnAcceptancePanel",
+            "function renderRealMnAcceptanceOverview",
+            "function runRealMnAcceptanceSequence",
+            "function setVerificationCenterActionStatus",
+            "function renderVerificationRepairPlan",
+            "function runVerificationRepairRecommended",
+            "postCompanion('verification_report_list'",
+            "postCompanion('single_document_acceptance_summary'",
+            "postCompanion('ui_functional_acceptance_summary'",
+            "function runVerificationCenterAction",
+            "data-verification-center-action",
+            "data-verification-repair-action",
+            "data-verification-recommended-action",
+            "postCompanion(action.action",
+            "state.verificationCenter",
+            "state.verificationCenterActionStatus",
+            "state.verificationCenter.repairPlan",
+            "verification-center-row",
+            "verification-center-action",
+            "verification-center-action-status",
+            "verification-repair-plan",
+            "verification-repair-recommended",
+            "verification-center-counts",
+            "real-mn-acceptance-panel",
+            "real-mn-acceptance-actions",
+        ]:
+            self.assertIn(marker, operation_html + self.js + self.css)
+
+    def test_ui_functional_acceptance_webview_entry_avoids_self_recursive_gate(self) -> None:
+        marker = "postCompanion('ui_functional_acceptance_summary', {"
+        self.assertIn(marker, self.js)
+        call_start = self.js.index(marker)
+        call_body = self.js[call_start:self.js.index("}, function(result)", call_start)]
+        self.assertIn("browserRender: true", call_body)
+        self.assertIn("browserInteraction: true", call_body)
+        self.assertIn("browserActions: false", call_body)
+        self.assertIn("browserWriteActions: false", call_body)
+        self.assertIn("invocationSurface: 'marginnote-webview'", call_body)
+        self.assertNotIn("fullBrowser: true", call_body)
+
     def test_operation_workspace_exposes_ai_edit_transaction_center(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
         operation_html = main_html.split('id="operationWorkspacePanel"', 1)[1].split("</aside>", 1)[0]
@@ -814,6 +1142,7 @@ class WebControlsStaticTests(unittest.TestCase):
         for marker in [
             "state.aiEditTransactionStatus",
             "result.aiEditTransactionStatus",
+            "'aiEditTransactionResidualProof'",
             "function renderAiEditTransactionCenter",
             "codex.mn.aiEditTransactionStatus.v1",
             "remainingNoteIds",
@@ -952,8 +1281,14 @@ class WebControlsStaticTests(unittest.TestCase):
             "checkForUpdates",
             "installUpdate",
             "renderUpdateStatus",
+            ".config-page",
+            "position: fixed;",
+            "display: flex;",
+            "flex-direction: column;",
+            ".config-body",
+            "overflow: auto;",
         ]:
-            self.assertIn(marker, self.html + self.js)
+            self.assertIn(marker, self.html + self.js + self.css)
 
         config_html = self.html.split('<section id="configPage"', 1)[1]
         for marker in [
@@ -1001,7 +1336,6 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="runtimeEvidenceButton"',
             'id="settingsHighlightStatusButton"',
             'id="nativeHighlightWizardButton"',
-            'id="singleDocumentAcceptanceButton"',
             'id="releaseAcceptanceButton"',
             '<option value="local">',
             "队列与生成",
@@ -1010,15 +1344,30 @@ class WebControlsStaticTests(unittest.TestCase):
             "诊断与验收",
             "发布验收",
             "高亮采证",
-            "本文档验收",
         ]:
             self.assertNotIn(marker, self.html)
+        config_html = self.html.split('<section id="configPage"', 1)[1]
+        self.assertNotIn('id="singleDocumentAcceptanceButton"', config_html)
+        self.assertNotIn("本文档验收", config_html)
         for marker in [
             'id="defaultContextScopeSelect"',
             'id="permissionDiagnoseButton"',
             'id="cacheCurrentPdfButton"',
             'id="nativeCapabilitiesRefreshButton"',
+            'id="uiFunctionalAcceptanceLine"',
+            'id="uiFunctionalAcceptanceDetail"',
+            'id="uiFunctionalAcceptanceButton"',
             "defaultContextScope",
+            "UI 功能验收",
+            "真实 MN4 运行态",
+            "不等于真实 MN4 当前文档验收通过",
+            "realMnRuntimeSafeEvidenceButton",
+            "一键安全采证",
+            "function renderUiFunctionalAcceptance",
+            "function runRealMnRuntimeSafeEvidence",
+            "function checkUiFunctionalAcceptance",
+            "ui_functional_acceptance_summary",
+            "bindButton('uiFunctionalAcceptanceButton', checkUiFunctionalAcceptance)",
         ]:
             self.assertIn(marker, self.html + self.js)
         self.assertEqual(self.html.count('id="permissionDiagnoseButton"'), 1)
@@ -1145,6 +1494,15 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("正在检查 GitHub Release", check_body)
         self.assertIn("button.disabled = true", check_body)
         self.assertIn("button.disabled = false", check_body)
+
+    def test_main_update_notice_only_shows_successful_available_release(self) -> None:
+        update_body = self.js.split("function renderUpdateStatus", 1)[1].split("\n  function openUpdateSettings", 1)[0]
+
+        self.assertIn("showNotice", update_body)
+        self.assertIn("update.available", update_body)
+        self.assertIn("update.ok !== false", update_body)
+        self.assertIn("status !== 'error'", update_body)
+        self.assertIn("showNotice ? 'update-notice' : 'update-notice hidden'", update_body)
 
     def test_config_page_exposes_context_scope_like_builtin_ai(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
@@ -1287,6 +1645,15 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('id="sendButton"', composer)
         self.assertIn('data-action="chat"', composer)
         self.assertLess(composer.index('id="promptInput"'), composer.index('id="sendButton"'))
+        for marker in [
+            '.ai-chat-shell[data-product-mode="workspace"] #commandPanePanel',
+            "position: fixed;",
+            "bottom: 0;",
+            "z-index: 20;",
+            ".ai-chat-shell[data-product-mode=\"workspace\"] .workbench-layout",
+            "padding-bottom: 132px;",
+        ]:
+            self.assertIn(marker, self.css)
 
     def test_send_button_label_is_two_centered_lines(self) -> None:
         composer = self.html.split('<section class="composer ai-chat-composer">', 1)[1].split("</section>", 1)[0]
@@ -1678,6 +2045,10 @@ class WebControlsStaticTests(unittest.TestCase):
     def test_ai_chat_css_keeps_history_flexible_and_composer_sticky(self) -> None:
         self.assertIn(".ai-chat-history", self.css)
         self.assertIn("min-height: 0;", self.css)
+        self.assertIn('.ai-chat-shell[data-product-mode="chat"] #studioCanvasPanel', self.css)
+        self.assertIn('.ai-chat-shell[data-product-mode="chat"] #commandPaneBody', self.css)
+        self.assertIn('.ai-chat-shell[data-product-mode="chat"] .command-pane-body .ai-chat-history', self.css)
+        self.assertIn("max-height: none;", self.css)
         self.assertIn(".ai-chat-composer", self.css)
         self.assertIn("margin-top: auto;", self.css)
         self.assertIn(".ai-chat-status-row", self.css)
@@ -1722,6 +2093,10 @@ class WebControlsStaticTests(unittest.TestCase):
             "payload.sessionId",
             ".conversation-list-item",
             ".conversation-history-scope",
+            ".conversation-history-list",
+            ".config-page",
+            ".config-body",
+            "overflow: auto;",
         ]:
             self.assertIn(marker, self.html + self.js + self.css)
 

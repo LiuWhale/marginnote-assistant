@@ -38,6 +38,7 @@ ROOT_FILES = [
     "release_smoke_test.py",
     "release_acceptance.py",
     "single_document_acceptance.py",
+    "ui_functional_acceptance.py",
     "build_pkg.py",
     "notarize_pkg.py",
     "prepare_release_handoff.py",
@@ -62,6 +63,8 @@ COMPANION_EXCLUDES = {
     "companion.pid",
     "companion_settings.json",
     "goal.json",
+    "mn-object-registry.json",
+    "mn-object-registry",
     "mn4_screenshot.png",
     "install.sh",
     "uninstall.sh",
@@ -143,7 +146,7 @@ def copy_public_assets(package_root: Path) -> None:
 
 
 def main() -> int:
-    version = sys.argv[1] if len(sys.argv) > 1 else "0.4.40"
+    version = sys.argv[1] if len(sys.argv) > 1 else "0.4.41"
     stamp = time.strftime("%Y%m%d-%H%M%S")
     package_name = f"CodexCompanion-{version}-{stamp}-dist.zip"
     latest_name = f"CodexCompanion-{version}-latest-dist.zip"

@@ -29,6 +29,8 @@ control/
 updates/
 drafts/
 backups/
+mn-object-registry.json
+mn-object-registry/
 
 # Generated release artifacts and evidence
 release/

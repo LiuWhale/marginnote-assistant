@@ -60,6 +60,46 @@ class RefreshRuntimeTests(unittest.TestCase):
 
         self.assertEqual(ts, "2026-06-11T12:34:56+0800")
 
+    def test_wait_for_runtime_refresh_does_not_stop_at_first_non_ready_event(self) -> None:
+        module = load_refresh_module()
+        calls = 0
+        statuses = [
+            {
+                "mnRuntime": {
+                    "ready": False,
+                    "latestNativeEventTs": "2026-06-11T12:31:00+0800",
+                    "latestWebEventTs": "2026-06-11T12:30:00+0800",
+                }
+            },
+            {
+                "mnRuntime": {
+                    "ready": True,
+                    "latestNativeEventTs": "2026-06-11T12:31:01+0800",
+                    "latestWebEventTs": "2026-06-11T12:30:01+0800",
+                }
+            },
+        ]
+
+        def fake_status(_base_url: str) -> dict[str, Any]:
+            nonlocal calls
+            item = statuses[min(calls, len(statuses) - 1)]
+            calls += 1
+            return item
+
+        module.status_or_error = fake_status
+        module.time.sleep = lambda _seconds: None
+
+        result = module.wait_for_runtime_refresh(
+            "http://127.0.0.1:48761",
+            "2026-06-11T12:30:00+0800",
+            timeout=2,
+            interval=0.01,
+            previous_web_ts="2026-06-11T12:29:00+0800",
+        )
+
+        self.assertTrue(result["mnRuntime"]["ready"])
+        self.assertGreaterEqual(calls, 2)
+
     def test_cleanup_unprocessed_native_commands_acks_only_ids_created_by_refresh(self) -> None:
         module = load_refresh_module()
         calls: list[tuple[str, str, dict[str, Any]]] = []

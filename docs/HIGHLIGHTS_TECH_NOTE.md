@@ -81,6 +81,7 @@
 - 2026-06-11 继续增强：如果运行态能拿到 PDF/reader document controller，但 JSB 无法枚举 `highlightFromSelection` selector，插件不再提前判定不可用，而是尝试调用官方 `highlightFromSelection()`。成功或失败都会记录 `selectorVerified` 和 `attemptedUnverifiedSelector`；失败仍然不会伪造高亮。
 - 不写 SQLite，不修改原始 PDF。
 - 当前实测在没有活跃选区时得到 `nativeHighlightSelectionFailed reason=missing-document-controller`，但该事件来自共享 resolver 之前的旧 MN4 运行态。重新打开面板或重启 MN4 后，需要确认新的 `nativeApiCapabilities.documentControllerCandidates` 和真实 `nativeHighlightSelectionPosted`。
+- 2026-06-28 继续增强：新增只读 `probe_pdf_selection` 原生命令和 `nativeHighlightSelectionProbe` 事件。高亮采证卡片点击刷新时会先让 MN4 原生侧读取当前 `documentController.selectionText` 和 `documentController.imageFromSelection()`，并返回 `selectedDocumentControllerLabel`、`candidateLabels`、`candidateCount`、`selectionLength`、`hasSelectionText`、`selectionImageBytes`、`hasSelectionImage` 和 `hasSelectionPayload`。这条路线只用于诊断，不写高亮、不写卡片、不写脑图，也不把“探测到 controller”当成可见高亮通过。当前本机实测在新版 handler 加载后能找到 `studyController.readerController.currentDocumentController`，但没有活跃 PDF 选区时 `selectionText=0 / imageFromSelection=0`，单文档验收仍正确阻塞在可见高亮和选区菜单证据。后续增强 `native-pdf-selection-image-probe-v1` 让曲线/区域/图片选区不再被误判成无选区；只要 `selectionText` 或 `imageFromSelection()` 任一路径有内容，就会尝试官方 `highlightFromSelection()`。
 
 2026-06-11 11:38 CST 继续增强 `documentControllerCandidates()`：候选路径现在对 `studyController` 和
 `notebookController` 都显式保留稳定诊断 label，并继续做去重，覆盖：

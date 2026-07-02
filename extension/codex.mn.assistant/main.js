@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.40';
+  var PluginVersion = '0.4.41';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -13,9 +13,12 @@ JSB.newAddon = function(mainPath) {
     'native-highlight-command-prepared',
     'selection-popup-diagnostics-v1',
     'native-highlight-selection-poll-v1',
+    'native-highlight-selection-poll-probe-v1',
     'selection-popup-scene-observer-v1',
     'selection-popup-notebook-rebind-v1',
     'native-highlight-selection-text-resolver-v1',
+    'native-pdf-selection-probe-v1',
+    'native-pdf-selection-image-probe-v1',
     'context-refresh-clears-stale-selection-v1',
     'ai-edit-transaction-rollback-v1',
     'ai-edit-undo-rollback-v2',
@@ -230,6 +233,89 @@ JSB.newAddon = function(mainPath) {
       } catch (err2) {}
     }
     return '';
+  }
+
+  function byteLengthOfData(data) {
+    if (!data) return 0;
+    try {
+      if (typeof data.length === 'function') return parseInt(data.length(), 10) || 0;
+    } catch (err) {}
+    try {
+      if (data.length !== undefined) return parseInt(data.length, 10) || 0;
+    } catch (err2) {}
+    try {
+      if (typeof data.count === 'function') return parseInt(data.count(), 10) || 0;
+    } catch (err3) {}
+    try {
+      if (data.count !== undefined) return parseInt(data.count, 10) || 0;
+    } catch (err4) {}
+    return 0;
+  }
+
+  function integerValueOf(obj, key) {
+    var value = valueOf(obj, key);
+    var parsed = parseInt(value, 10);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function intValue(value) {
+    var parsed = parseInt(value, 10);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function selectionPayloadFromDocumentController(documentController) {
+    var text = '';
+    var imageBytes = 0;
+    var imageError = '';
+    var imageAvailable = false;
+    if (!documentController) {
+      return {
+        text: '',
+        textLength: 0,
+        hasSelectionText: false,
+        imageBytes: 0,
+        hasSelectionImage: false,
+        hasSelectionPayload: false,
+        imageAvailable: false,
+        imageError: '',
+        currPageNo: 0,
+        currPageIndex: 0,
+        focusNoteId: '',
+        lastFocusNoteId: '',
+        visibleFocusNoteId: ''
+      };
+    }
+    try {
+      text = selectionTextFromDocumentController(documentController);
+    } catch (textErr) {
+      text = '';
+    }
+    try {
+      if (typeof documentController.imageFromSelection === 'function') {
+        imageAvailable = true;
+        imageBytes = byteLengthOfData(documentController.imageFromSelection());
+      }
+    } catch (imgErr) {
+      imageError = safeString(imgErr);
+    }
+    var focusNote = valueOf(documentController, 'focusNote');
+    var lastFocusNote = valueOf(documentController, 'lastFocusNote');
+    var visibleFocusNote = valueOf(documentController, 'visibleFocusNote');
+    return {
+      text: safeString(text),
+      textLength: safeString(text).length,
+      hasSelectionText: !!text,
+      imageBytes: imageBytes,
+      hasSelectionImage: imageBytes > 0,
+      hasSelectionPayload: !!text || imageBytes > 0,
+      imageAvailable: imageAvailable,
+      imageError: imageError,
+      currPageNo: integerValueOf(documentController, 'currPageNo'),
+      currPageIndex: integerValueOf(documentController, 'currPageIndex'),
+      focusNoteId: noteIdentifier(focusNote),
+      lastFocusNoteId: noteIdentifier(lastFocusNote),
+      visibleFocusNoteId: noteIdentifier(visibleFocusNote)
+    };
   }
 
   function firstStringValue(obj, keys) {
@@ -1429,6 +1515,13 @@ JSB.newAddon = function(mainPath) {
       NSTimer.scheduledTimerWithTimeInterval(0.3, false, function() {
         if (self.postEvent) self.postEvent('sceneWillConnect', {});
       });
+      NSTimer.scheduledTimerWithTimeInterval(0.7, false, function() {
+        try {
+          self.probeNativeApiCapabilities();
+        } catch (err) {
+          if (self.postEvent) self.postEvent('nativeApiCapabilitySceneProbeFailed', {message: safeString(err)});
+        }
+      });
     },
 
     sceneDidDisconnect: function() {
@@ -1482,12 +1575,16 @@ JSB.newAddon = function(mainPath) {
     onPopupMenuOnSelection: function(sender) {
       var popupUserInfo = notificationUserInfo(sender);
       var documentController = notificationDocumentController(sender, popupUserInfo);
-      var text = selectionTextFromDocumentController(documentController);
+      var selectionPayload = selectionPayloadFromDocumentController(documentController);
+      var text = safeString(selectionPayload.text);
       self.postEvent('selectionPopupHighlightNotificationObserved', {
         hasSender: !!sender,
         hasUserInfo: !!popupUserInfo,
         hasDocumentController: !!documentController,
-        selectionLength: text.length,
+        selectionLength: selectionPayload.textLength || 0,
+        selectionImageBytes: selectionPayload.imageBytes || 0,
+        hasSelectionImage: !!selectionPayload.hasSelectionImage,
+        hasSelectionPayload: !!selectionPayload.hasSelectionPayload,
         armed: !!self.nativeHighlightNextSelectionArmed
       });
       var senderInWindow = false;
@@ -1503,7 +1600,10 @@ JSB.newAddon = function(mainPath) {
           hasSender: !!sender,
           hasUserInfo: !!popupUserInfo,
           hasDocumentController: !!documentController,
-          selectionLength: text.length,
+          selectionLength: selectionPayload.textLength || 0,
+          selectionImageBytes: selectionPayload.imageBytes || 0,
+          hasSelectionImage: !!selectionPayload.hasSelectionImage,
+          hasSelectionPayload: !!selectionPayload.hasSelectionPayload,
           armed: !!self.nativeHighlightNextSelectionArmed,
           error: windowFilterError
         });
@@ -1516,7 +1616,7 @@ JSB.newAddon = function(mainPath) {
         if (self.panel && self.panel.sendContextToWeb) self.panel.sendContextToWeb();
       }
       self.appendSelectionPopupMenuActions(sender, documentController);
-      if (self.consumeArmedNativeHighlightSelection(documentController, text)) return;
+      if (self.consumeArmedNativeHighlightSelection(documentController, text, selectionPayload)) return;
     },
 
     togglePanel: function(sender) {
@@ -1733,13 +1833,16 @@ JSB.newAddon = function(mainPath) {
       probeTargetObject('Database', database, NativeHighlightMethodCandidates, NativeExportMethodCandidates, foundHighlight, foundExport),
       probeTargetObject('Application', app, NativeHighlightMethodCandidates, NativeExportMethodCandidates, foundHighlight, foundExport)
     ]);
-    var activeSelectionText = '';
+    var activeSelectionPayload = {};
     try {
-      activeSelectionText = safeString(valueOf(selectionDocumentController, 'selectionText'));
+      activeSelectionPayload = selectionPayloadFromDocumentController(selectionDocumentController);
     } catch (selectionProbeErr) {
-      activeSelectionText = '';
+      activeSelectionPayload = {};
     }
-    if (!activeSelectionText) activeSelectionText = this.lastSelectionText || '';
+    var activeSelectionLength = intValue(activeSelectionPayload.textLength || 0);
+    var activeSelectionImageBytes = intValue(activeSelectionPayload.imageBytes || 0);
+    if (!activeSelectionLength && this.lastSelectionText) activeSelectionLength = this.lastSelectionText.length;
+    var activeSelectionMetric = activeSelectionLength || activeSelectionImageBytes;
     var context = {};
     try {
       context = this.resolveContext('native_api_probe', '');
@@ -1747,7 +1850,7 @@ JSB.newAddon = function(mainPath) {
       context = {};
     }
     var candidateMethods = foundHighlight.concat(foundExport);
-    var capabilityMatrix = nativeCapabilityMatrix(targets, foundHighlight, foundExport, activeSelectionText.length, context);
+    var capabilityMatrix = nativeCapabilityMatrix(targets, foundHighlight, foundExport, activeSelectionMetric, context);
     this.postEvent('nativeApiCapabilities', {
       targetCount: targets.length,
       targets: targets,
@@ -1756,7 +1859,9 @@ JSB.newAddon = function(mainPath) {
       selectedDocumentControllerLabel: docResolution.label,
       hasNativeHighlightCandidate: !!(foundHighlight.length > 0 || capabilityMatrix.nativeHighlightSelection.available),
       hasAnnotatedExportCandidate: foundExport.length > 0,
-      activeSelectionLength: activeSelectionText.length,
+      activeSelectionLength: activeSelectionLength,
+      activeSelectionImageBytes: activeSelectionImageBytes,
+      hasSelectionPayload: !!(activeSelectionPayload.hasSelectionPayload || activeSelectionMetric),
       canCreateNote: capabilityMatrix.nativeCards.available,
       canGroupUndo: capabilityMatrix.undoGroupedWrites.available,
       canRefreshAfterDBChanged: capabilityMatrix.refreshAfterWrite.available,
@@ -1771,6 +1876,46 @@ JSB.newAddon = function(mainPath) {
       message: candidateMethods.length ? 'found candidate selectors' : (
         capabilityMatrix.nativeHighlightSelection.available ? 'found unverified documentController highlight attempt path' : 'no candidate selectors found'
       )
+    });
+  };
+
+  CodexAssistantAddon.prototype.probePdfSelection = function(source) {
+    var controller = this.getStudyController();
+    var nc = controller ? controller.notebookController : null;
+    var docResolution = resolveDocumentController(this, controller, nc);
+    var payload = {};
+    var error = '';
+    try {
+      payload = selectionPayloadFromDocumentController(docResolution.controller);
+    } catch (err) {
+      payload = {};
+      error = safeString(err);
+    }
+    if (payload && payload.hasSelectionText && docResolution.controller) {
+      this.lastDocumentController = docResolution.controller;
+      this.lastSelectionText = safeString(payload.text);
+    } else if (payload && payload.hasSelectionPayload && docResolution.controller) {
+      this.lastDocumentController = docResolution.controller;
+    }
+    this.postEvent('nativeHighlightSelectionProbe', {
+      source: safeString(source || 'probe_pdf_selection'),
+      hasDocumentController: !!docResolution.controller,
+      selectedDocumentControllerLabel: docResolution.label,
+      candidateLabels: docResolution.labels,
+      candidateCount: docResolution.labels.length,
+      selectionLength: intValue(payload.textLength || 0),
+      hasSelectionText: !!(payload && payload.hasSelectionText),
+      selectionImageBytes: intValue(payload.imageBytes || 0),
+      hasSelectionImage: !!(payload && payload.hasSelectionImage),
+      hasSelectionPayload: !!(payload && payload.hasSelectionPayload),
+      imageAvailable: !!(payload && payload.imageAvailable),
+      imageError: safeString((payload && payload.imageError) || error),
+      currPageNo: intValue((payload && payload.currPageNo) || 0),
+      currPageIndex: intValue((payload && payload.currPageIndex) || 0),
+      focusNoteId: safeString((payload && payload.focusNoteId) || ''),
+      lastFocusNoteId: safeString((payload && payload.lastFocusNoteId) || ''),
+      visibleFocusNoteId: safeString((payload && payload.visibleFocusNoteId) || ''),
+      error: error
     });
   };
 
@@ -2020,38 +2165,68 @@ JSB.newAddon = function(mainPath) {
   };
 
   CodexAssistantAddon.prototype.appendSelectionPopupMenuActions = function(sender, documentController) {
+    var selectionPayload = {};
     var selectionText = '';
     try {
-      selectionText = selectionTextFromDocumentController(documentController);
+      selectionPayload = selectionPayloadFromDocumentController(documentController);
+      selectionText = safeString(selectionPayload.text);
     } catch (selectionErr) {
       selectionText = this.lastSelectionText || '';
+      selectionPayload = {
+        text: selectionText,
+        textLength: selectionText.length,
+        hasSelectionText: !!selectionText,
+        imageBytes: 0,
+        hasSelectionImage: false,
+        hasSelectionPayload: !!selectionText
+      };
     }
-    if (!selectionText) {
+    if (!selectionPayload.hasSelectionPayload) {
       this.postEvent('selectionPopupHighlightMenuSkipped', {
-        reason: 'missing-selection-text',
+        reason: 'missing-selection-payload',
         hasSender: !!sender,
         hasDocumentController: !!documentController,
-        hasLastSelectionText: !!this.lastSelectionText
+        hasLastSelectionText: !!this.lastSelectionText,
+        selectionLength: selectionPayload.textLength || 0,
+        selectionImageBytes: selectionPayload.imageBytes || 0,
+        imageAvailable: !!selectionPayload.imageAvailable,
+        imageError: safeString(selectionPayload.imageError || '')
       });
       return;
     }
     try {
       if (documentController) this.lastDocumentController = documentController;
+      if (selectionText) this.lastSelectionText = selectionText;
       var currentMenu = PopupMenu.currentMenu();
       if (!currentMenu) {
-        this.postEvent('selectionPopupHighlightMenuSkipped', {reason: 'missing-popup-menu', selectionLength: selectionText.length});
+        this.postEvent('selectionPopupHighlightMenuSkipped', {
+          reason: 'missing-popup-menu',
+          selectionLength: selectionText.length,
+          selectionImageBytes: selectionPayload.imageBytes || 0,
+          hasSelectionImage: !!selectionPayload.hasSelectionImage
+        });
         return;
       }
       var items = toArray(valueOf(currentMenu, 'items'));
       for (var i = 0; i < items.length; i++) {
         if (safeString(valueOf(items[i], 'title')) === 'Codex 高亮选区') {
-          this.postEvent('selectionPopupHighlightMenuInstalled', {alreadyInstalled: true, selectionLength: selectionText.length});
+          this.postEvent('selectionPopupHighlightMenuInstalled', {
+            alreadyInstalled: true,
+            selectionLength: selectionText.length,
+            selectionImageBytes: selectionPayload.imageBytes || 0,
+            hasSelectionImage: !!selectionPayload.hasSelectionImage
+          });
           return;
         }
       }
       var item = this.createSelectionPopupHighlightItem();
       if (!item) {
-        this.postEvent('selectionPopupHighlightMenuFailed', {reason: 'item-create-failed', selectionLength: selectionText.length});
+        this.postEvent('selectionPopupHighlightMenuFailed', {
+          reason: 'item-create-failed',
+          selectionLength: selectionText.length,
+          selectionImageBytes: selectionPayload.imageBytes || 0,
+          hasSelectionImage: !!selectionPayload.hasSelectionImage
+        });
         return;
       }
       items.push(item);
@@ -2061,9 +2236,20 @@ JSB.newAddon = function(mainPath) {
           currentMenu.updateWithTargetRect(currentMenu.targetWinRect);
         } catch (updateErr) {}
       }
-      this.postEvent('selectionPopupHighlightMenuInstalled', {alreadyInstalled: false, selectionLength: selectionText.length});
+      this.postEvent('selectionPopupHighlightMenuInstalled', {
+        alreadyInstalled: false,
+        selectionLength: selectionText.length,
+        selectionImageBytes: selectionPayload.imageBytes || 0,
+        hasSelectionImage: !!selectionPayload.hasSelectionImage
+      });
     } catch (err) {
-      this.postEvent('selectionPopupHighlightMenuFailed', {reason: 'exception', error: safeString(err), selectionLength: selectionText.length});
+      this.postEvent('selectionPopupHighlightMenuFailed', {
+        reason: 'exception',
+        error: safeString(err),
+        selectionLength: selectionText.length,
+        selectionImageBytes: selectionPayload.imageBytes || 0,
+        hasSelectionImage: !!selectionPayload.hasSelectionImage
+      });
     }
   };
 
@@ -2112,6 +2298,7 @@ JSB.newAddon = function(mainPath) {
     this.stopNativeHighlightSelectionPoll();
     var addon = this;
     this.nativeHighlightNextSelectionPollStartedAt = new Date().getTime();
+    this.nativeHighlightNextSelectionLastProbeAt = 0;
     this.postEvent('nativeHighlightNextSelectionPollStarted', {
       reason: this.nativeHighlightNextSelectionReason || '',
       timeoutSeconds: 90,
@@ -2138,14 +2325,44 @@ JSB.newAddon = function(mainPath) {
       var nc = controller ? controller.notebookController : null;
       var docResolution = resolveDocumentController(addon, controller, nc);
       var docController = docResolution.controller;
-      var text = selectionTextFromDocumentController(docController);
-      if (!text) return;
+      var payload = selectionPayloadFromDocumentController(docController);
+      var nowMs = new Date().getTime();
+      var shouldPostProbe = !!payload.hasSelectionPayload ||
+        !addon.nativeHighlightNextSelectionLastProbeAt ||
+        nowMs - addon.nativeHighlightNextSelectionLastProbeAt >= 5000;
+      if (shouldPostProbe) {
+        addon.nativeHighlightNextSelectionLastProbeAt = nowMs;
+        addon.postEvent('nativeHighlightSelectionProbe', {
+          source: 'next-selection-poll',
+          pollArmed: true,
+          elapsedSeconds: Math.round(elapsedMs / 1000),
+          hasDocumentController: !!docController,
+          selectedDocumentControllerLabel: docResolution.label,
+          candidateLabels: docResolution.labels,
+          candidateCount: docResolution.labels.length,
+          selectionLength: intValue(payload.textLength || 0),
+          hasSelectionText: !!payload.hasSelectionText,
+          selectionImageBytes: intValue(payload.imageBytes || 0),
+          hasSelectionImage: !!payload.hasSelectionImage,
+          hasSelectionPayload: !!payload.hasSelectionPayload,
+          imageAvailable: !!payload.imageAvailable,
+          imageError: safeString(payload.imageError || ''),
+          currPageNo: intValue(payload.currPageNo || 0),
+          currPageIndex: intValue(payload.currPageIndex || 0),
+          focusNoteId: safeString(payload.focusNoteId || ''),
+          lastFocusNoteId: safeString(payload.lastFocusNoteId || ''),
+          visibleFocusNoteId: safeString(payload.visibleFocusNoteId || '')
+        });
+      }
+      if (!payload.hasSelectionPayload) return;
       addon.postEvent('nativeHighlightNextSelectionPollObserved', {
-        selectionLength: text.length,
+        selectionLength: payload.textLength || 0,
+        selectionImageBytes: payload.imageBytes || 0,
+        hasSelectionImage: !!payload.hasSelectionImage,
         selectedDocumentControllerLabel: docResolution.label,
         elapsedSeconds: Math.round(elapsedMs / 1000)
       });
-      addon.consumeArmedNativeHighlightSelection(docController, text);
+      addon.consumeArmedNativeHighlightSelection(docController, payload.text, payload);
     });
   };
 
@@ -2161,7 +2378,7 @@ JSB.newAddon = function(mainPath) {
   CodexAssistantAddon.prototype.armNativeHighlightNextSelection = function(reason, requestedText) {
     var controller = this.getStudyController();
     var view = controller ? controller.view : this.window;
-    var message = '已开启下一次 PDF 选区自动高亮。请回到原文中重新选中一小段文字。';
+    var message = '已开启下一次 PDF 选区自动高亮。请在左侧 PDF 原文文字上拖选一小段；不要点右侧脑图“选择”按钮。';
     this.nativeHighlightNextSelectionArmed = true;
     this.nativeHighlightNextSelectionReason = safeString(reason);
     this.nativeHighlightNextSelectionText = safeString(requestedText);
@@ -2174,15 +2391,19 @@ JSB.newAddon = function(mainPath) {
     this.startNativeHighlightSelectionPoll();
   };
 
-  CodexAssistantAddon.prototype.consumeArmedNativeHighlightSelection = function(documentController, selectionText) {
+  CodexAssistantAddon.prototype.consumeArmedNativeHighlightSelection = function(documentController, selectionText, selectionPayload) {
     if (!this.nativeHighlightNextSelectionArmed) return false;
-    var text = safeString(selectionText || this.lastSelectionText || this.nativeHighlightNextSelectionText || '');
+    var payload = selectionPayload || {};
+    var text = safeString(selectionText || payload.text || this.lastSelectionText || this.nativeHighlightNextSelectionText || '');
     this.stopNativeHighlightSelectionPoll();
     this.nativeHighlightNextSelectionArmed = false;
     if (documentController) this.lastDocumentController = documentController;
+    if (text) this.lastSelectionText = text;
     this.postEvent('nativeHighlightNextSelectionConsumed', {
       reason: this.nativeHighlightNextSelectionReason || '',
-      selectionLength: text.length
+      selectionLength: text.length,
+      selectionImageBytes: payload.imageBytes || 0,
+      hasSelectionImage: !!payload.hasSelectionImage
     });
     this.highlightCurrentSelection({
       nativeAction: 'highlight_current_selection',
@@ -2202,10 +2423,13 @@ JSB.newAddon = function(mainPath) {
     var docResolution = resolveDocumentController(this, controller, nc);
     var docController = docResolution.controller;
     var requestedText = safeString(valueOf(command, 'selectionText'));
+    var selectionPayload = {};
     var selectionText = '';
     try {
-      selectionText = selectionTextFromDocumentController(docController);
+      selectionPayload = selectionPayloadFromDocumentController(docController);
+      selectionText = safeString(selectionPayload.text);
     } catch (selectionErr) {
+      selectionPayload = {};
       selectionText = '';
     }
     var allowCachedSelectionText = !!valueOf(command, 'allowCachedSelectionText');
@@ -2220,7 +2444,9 @@ JSB.newAddon = function(mainPath) {
       usedCachedSelectionText = true;
       selectionTextSource = 'cached-selection';
     }
-      if (preferNextSelection && shouldArmNextSelection && !selectionText) {
+    var selectionImageBytes = intValue(selectionPayload.imageBytes || 0);
+    var hasSelectionPayload = !!(selectionText || selectionImageBytes > 0);
+      if (preferNextSelection && shouldArmNextSelection && !hasSelectionPayload) {
         this.armNativeHighlightNextSelection('prefer-next-selection', requestedText);
         return;
       }
@@ -2241,7 +2467,7 @@ JSB.newAddon = function(mainPath) {
       });
       return;
     }
-    if (!selectionText) {
+    if (!hasSelectionPayload) {
       if (shouldArmNextSelection) {
         this.armNativeHighlightNextSelection('missing-selection', requestedText);
         return;
@@ -2254,6 +2480,8 @@ JSB.newAddon = function(mainPath) {
         requestedSelectionLength: requestedText.length,
         usedCachedSelectionText: usedCachedSelectionText,
         selectionTextSource: selectionTextSource,
+        selectionImageBytes: selectionImageBytes,
+        hasSelectionImage: !!selectionPayload.hasSelectionImage,
         candidateLabels: docResolution.labels,
         candidateCount: docResolution.labels.length,
         selectedDocumentControllerLabel: docResolution.label
@@ -2272,6 +2500,8 @@ JSB.newAddon = function(mainPath) {
       } catch (refreshErr) {}
       this.postEvent('nativeHighlightSelectionPosted', {
         selectionLength: selectionText.length,
+        selectionImageBytes: selectionImageBytes,
+        hasSelectionImage: !!selectionPayload.hasSelectionImage,
         requestedSelectionLength: requestedText.length,
         highlightReturned: !!highlight,
         usedCachedSelectionText: usedCachedSelectionText,
@@ -2287,6 +2517,8 @@ JSB.newAddon = function(mainPath) {
       this.postEvent('nativeHighlightSelectionFailed', {
         reason: 'exception',
         selectionLength: selectionText.length,
+        selectionImageBytes: selectionImageBytes,
+        hasSelectionImage: !!selectionPayload.hasSelectionImage,
         requestedSelectionLength: requestedText.length,
         usedCachedSelectionText: usedCachedSelectionText,
         selectionTextSource: selectionTextSource,
@@ -3033,6 +3265,14 @@ JSB.newAddon = function(mainPath) {
         requestedAt: safeString(valueOf(command, 'requested_at'))
       });
       this.probeNativeApiCapabilities();
+      return true;
+    }
+    if (nativeAction === 'probe_pdf_selection') {
+      this.postEvent('nativeHighlightSelectionProbeRequested', {
+        nativeAction: nativeAction,
+        requestedAt: safeString(valueOf(command, 'requested_at'))
+      });
+      this.probePdfSelection(safeString(valueOf(command, 'source') || 'native-queue'));
       return true;
     }
     if (nativeAction === 'reload_web_panel') {

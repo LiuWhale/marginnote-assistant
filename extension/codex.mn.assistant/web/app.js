@@ -72,6 +72,13 @@
     operationLedgerDetail: null,
     operationLedgerInFlight: false,
     operationLedgerLastId: '',
+    verificationCenter: {schema: 'codex.mn.verificationCenter.v1', available: false},
+    verificationCenterInFlight: false,
+    verificationCenterLastId: '',
+    verificationCenterActionStatus: {text: '动作：等待验证修复操作。', tone: 'idle'},
+    latestSingleDocumentAcceptance: {},
+    latestUiFunctionalAcceptance: {},
+    realMnAcceptanceSequenceRunning: false,
     diagnosticLogs: [],
     agentOperation: null,
     agentPlanInFlight: false,
@@ -80,8 +87,12 @@
     knowledgeWorkspace: {schema: 'codex.mn.knowledgeWorkspace.v1', available: false},
     workflowWorkspace: {schema: 'codex.mn.workflowWorkspace.v1', available: false},
     workflowRunInspector: null,
-    activeProductMode: 'workspace',
-    commandPaneExpanded: false,
+    activeProductMode: 'chat',
+    commandPaneExpanded: true,
+    workspaceNavigatorExpanded: false,
+    notebookWorkspaceExpanded: false,
+    knowledgeMatrixExpanded: false,
+    expertModeExpanded: false,
     lastWorkspacePane: 'object',
     activeWorkspaceSurface: 'console',
     activeWorkbenchPane: 'object'
@@ -89,12 +100,19 @@
   var MAIN_PINNED_BUTTON_LIMIT = 4;
   var requiredControlIds = [
     'aiChatShell',
+    'knowledgeOsContractPanel',
+    'knowledgeOsContractTitle',
+    'knowledgeOsObjectLayer',
+    'knowledgeOsOperationLayer',
+    'knowledgeOsEvidenceLayer',
     'modeSwitchBar',
     'chatModeButton',
     'agentWorkspaceModeButton',
     'modeIntentLine',
     'workspaceNavigator',
     'workspaceNavigatorSummary',
+    'workspaceSurfaceSelect',
+    'workspaceNavigatorToggleButton',
     'workspaceNavConsoleButton',
     'workspaceNavMindmapStudioButton',
     'workspaceNavCardFactoryButton',
@@ -102,11 +120,28 @@
     'workspaceNavKnowledgeGraphButton',
     'workspaceNavWorkflowBuilderButton',
     'workspaceNavSkillCenterButton',
+    'advancedToolCenterPanel',
+    'advancedStatusPdf',
+    'advancedStatusMindmap',
+    'advancedStatusWrite',
+    'advancedNextStepText',
+    'advancedNextStepButton',
+    'advancedReadButton',
+    'advancedMindmapButton',
+    'advancedCardsButton',
+    'advancedVerifyButton',
+    'expertModePanel',
+    'expertModeToggleButton',
+    'expertModeBackButton',
+    'expertModeHint',
     'knowledgeConsolePanel',
     'notebookWorkspacePanel',
     'notebookWorkspaceTitle',
     'notebookWorkspaceSummary',
+    'notebookWorkspaceDetailsToggleButton',
     'notebookWorkspaceRefreshButton',
+    'notebookWorkspaceDetails',
+    'notebookWorkspaceGrid',
     'notebookWorkspaceFocus',
     'notebookWorkspaceObjectCount',
     'notebookWorkspaceMindmap',
@@ -114,6 +149,16 @@
     'notebookWorkspaceWorkflow',
     'notebookWorkspaceLedger',
     'notebookWorkspaceSources',
+    'notebookKnowledgeMatrix',
+    'notebookKnowledgeMatrixSummary',
+    'notebookKnowledgeMatrixToggleButton',
+    'notebookKnowledgeMatrixList',
+    'notebookObjectIntake',
+    'notebookObjectIntakeSummary',
+    'notebookObjectIntakeRoutes',
+    'notebookObjectTaskComposer',
+    'notebookObjectTaskComposerSummary',
+    'notebookObjectTaskComposerList',
     'notebookWorkspaceActions',
     'sourceRegistryPanel',
     'notebookWorkspaceSourceRegistry',
@@ -125,6 +170,12 @@
     'notebookWorkspaceStudyCoverage',
     'notebookWorkspaceStudyGaps',
     'notebookWorkspaceStudyRecommendations',
+    'notebookWorkspaceRunbook',
+    'notebookWorkspaceRunbookSummary',
+    'notebookWorkspaceRunbookAutoButton',
+    'notebookWorkspaceRunbookAutoStatus',
+    'notebookWorkspaceRunbookContinueButton',
+    'notebookWorkspaceRunbookList',
     'commandPanePanel',
     'commandPaneHeader',
     'commandPaneStatus',
@@ -190,6 +241,32 @@
     'operationWorkspaceTitle',
     'operationWorkspaceMeta',
     'verificationReportPanel',
+    'realMnAcceptancePanel',
+    'realMnAcceptanceStatusLine',
+    'realMnAcceptanceChecklist',
+    'realMnAcceptanceRunAllButton',
+    'singleDocumentAcceptanceLine',
+    'singleDocumentAcceptanceDetail',
+    'singleDocumentAcceptanceButton',
+    'mainUiFunctionalAcceptanceLine',
+    'mainUiFunctionalAcceptanceDetail',
+    'mainUiFunctionalAcceptanceButton',
+    'realMnAcceptanceSafeEvidenceButton',
+    'mainNativeHighlightWizardPanel',
+    'mainNativeHighlightWizardLine',
+    'mainNativeHighlightWizardDetail',
+    'mainNativeHighlightWizardActions',
+    'nativeHighlightWizardRetryButton',
+    'nativeHighlightWizardRefreshButton',
+    'verificationReportRefreshButton',
+    'verificationReportSummary',
+    'verificationReportCounts',
+    'verificationReportList',
+    'verificationReportActionStatus',
+    'verificationRepairPlanPanel',
+    'verificationRepairPlanSummary',
+    'verificationRepairPlanRecommendedButton',
+    'verificationRepairPlanActions',
     'operationCompilerPanel',
     'operationCompilerSummary',
     'operationPlanStats',
@@ -223,6 +300,9 @@
     'workflowWorkspaceTitle',
     'workflowWorkspaceSummary',
     'workflowWorkspaceRuns',
+    'workflowBuilderBoardPanel',
+    'workflowBuilderBoardSummary',
+    'workflowBuilderBoardLanes',
     'externalGatewayPanel',
     'workflowWorkspaceGateway',
     'skillCenterPanel',
@@ -289,6 +369,7 @@
     'aiEditTransactionTitle',
     'aiEditTransactionSummary',
     'aiEditTransactionNotes',
+    'aiEditTransactionResidualProof',
     'contextLine',
     'readinessPanel',
     'mnApiStatusLine',
@@ -443,6 +524,15 @@
     return state.contextScope;
   }
 
+  function currentNotebookScopePayload() {
+    var ctx = state.context || {};
+    var workspace = state.notebookWorkspace || {};
+    return {
+      topicid: ctx.topicid || ctx.notebookid || workspace.topicid || '',
+      bookmd5: ctx.bookmd5 || ctx.docmd5 || workspace.bookmd5 || ''
+    };
+  }
+
   function setContextScope(scope) {
     state.contextScope = normalizeContextScope(scope);
     renderContextScopeButtons();
@@ -532,6 +622,14 @@
     window.setTimeout(function() {
       if (document.activeElement === el) el.blur();
     }, 0);
+  }
+
+  function releaseSelectFocusBeforeNativeMenu(el) {
+    if (!el || !el.addEventListener) return;
+    el.addEventListener('mousedown', function(ev) {
+      var target = ev.currentTarget;
+      if (document.activeElement === target && target.blur) target.blur();
+    });
   }
 
   function bindButton(id, handler) {
@@ -1381,6 +1479,7 @@
       if (body) body.className = 'message-body empty';
       article.appendChild(buildMindmapDiffOperationPanel(result));
     });
+    renderMindmapStudioPanel();
   }
 
   function operationPlanSummaryLine(result) {
@@ -1925,6 +2024,15 @@
         query.push(encodeURIComponent(key) + '=' + encodeURIComponent(params[key] || ''));
       }
     }
+    if (Array.isArray(window.__codexBridgeCalls)) {
+      var capturedParams = {};
+      for (var captureKey in params) {
+        if (Object.prototype.hasOwnProperty.call(params, captureKey)) {
+          capturedParams[captureKey] = params[captureKey];
+        }
+      }
+      window.__codexBridgeCalls.push({path: path, params: capturedParams});
+    }
     if (isBrowserPreview()) return;
     window.location.href = 'codexpaper://' + path + (query.length ? '?' + query.join('&') : '');
   }
@@ -2115,7 +2223,10 @@
   function workspaceSurfacePane(surface) {
     var map = {
       console: 'object',
+      object_browser: 'object',
+      source_registry: 'object',
       mindmap_studio: 'operation',
+      verification_center: 'operation',
       card_factory: 'knowledge',
       ledger_explorer: 'object',
       knowledge_graph: 'knowledge',
@@ -2128,7 +2239,10 @@
   function workspaceSurfaceAnchor(surface) {
     var map = {
       console: 'knowledgeConsolePanel',
-      mindmap_studio: 'mindmapDiffWorkbench',
+      object_browser: 'objectBrowserPanel',
+      source_registry: 'sourceRegistryPanel',
+      mindmap_studio: 'mindmapStudioPanel',
+      verification_center: 'verificationReportPanel',
       card_factory: 'knowledgeWorkspaceReviewQueue',
       ledger_explorer: 'operationLedgerDrawer',
       knowledge_graph: 'knowledgeWorkspacePanel',
@@ -2151,7 +2265,10 @@
   function workspaceSurfaceSummary(surface) {
     var map = {
       console: 'Knowledge Console：当前对象、风险、关系和账本入口。',
+      object_browser: 'Object Browser：浏览真实 MN 对象、Registry、图谱、活动和账本入口。',
+      source_registry: 'Source Registry：查看当前文档、PDF 缓存、上传文件和路径来源。',
       mindmap_studio: 'Mindmap Studio：围绕目标脑图、Diff、局部执行和验证工作。',
+      verification_center: 'Verification Center：查看 PASS/FAIL/UNKNOWN 报告和推荐修复动作。',
       card_factory: 'Card Factory：查看卡型质量、复习队列和学习目标。',
       ledger_explorer: 'Operation Ledger：查看写入证据、回滚状态和残留对象。',
       knowledge_graph: 'Knowledge Graph：查看实体、关系、索引范围和检索结果。',
@@ -2177,6 +2294,11 @@
 
   function renderWorkspaceNavigator() {
     var surface = state.activeWorkspaceSurface || 'console';
+    var shell = byId('aiChatShell');
+    if (shell) {
+      shell.setAttribute('data-workspace-surface', surface);
+      shell.setAttribute('data-workspace-navigator-expanded', state.workspaceNavigatorExpanded ? 'true' : 'false');
+    }
     var buttons = document.querySelectorAll('.workspace-nav-card');
     for (var i = 0; i < buttons.length; i++) {
       var active = buttons[i].getAttribute('data-workspace-surface') === surface;
@@ -2184,13 +2306,325 @@
       else buttons[i].classList.remove('active');
       buttons[i].setAttribute('aria-selected', active ? 'true' : 'false');
     }
+    var select = byId('workspaceSurfaceSelect');
+    if (select) select.value = surface;
+    var toggle = byId('workspaceNavigatorToggleButton');
+    if (toggle) {
+      toggle.textContent = state.workspaceNavigatorExpanded ? '收起导航' : '展开导航';
+      toggle.setAttribute('aria-expanded', state.workspaceNavigatorExpanded ? 'true' : 'false');
+    }
     setText('workspaceNavigatorSummary', workspaceSurfaceSummary(surface));
+    renderNotebookWorkspaceShell();
+  }
+
+  function notebookWorkspaceDetailsVisible() {
+    return !!state.notebookWorkspaceExpanded || state.activeWorkspaceSurface === 'source_registry';
+  }
+
+  function renderNotebookWorkspaceShell() {
+    var panel = byId('notebookWorkspacePanel');
+    var toggle = byId('notebookWorkspaceDetailsToggleButton');
+    var details = byId('notebookWorkspaceDetails');
+    var expanded = notebookWorkspaceDetailsVisible();
+    if (panel) {
+      panel.classList.toggle('expanded', expanded);
+      panel.classList.toggle('compact', !expanded);
+    }
+    if (details) {
+      details.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+    }
+    if (toggle) {
+      toggle.textContent = expanded ? '收起工作台详情' : '展开工作台详情';
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
   }
 
   function notebookWorkspaceCardText(label, value, detail) {
     var text = label + '：' + (value || '等待');
     if (detail) text += ' / ' + detail;
     return text;
+  }
+
+  function notebookKnowledgeAxisLabel(status) {
+    status = String(status || '');
+    if (status === 'ready') return '通过';
+    if (status === 'action_required') return '需操作';
+    if (status === 'blocked') return '阻断';
+    if (status === 'waiting_evidence') return '等证据';
+    if (status === 'pending') return '等待';
+    return status || '未知';
+  }
+
+  function notebookKnowledgeAxisTone(status) {
+    status = String(status || '');
+    if (status === 'ready') return 'ready';
+    if (status === 'action_required') return 'warning';
+    if (status === 'blocked') return 'danger';
+    if (status === 'waiting_evidence' || status === 'pending') return 'pending';
+    return 'idle';
+  }
+
+  function notebookKnowledgeAxisPriority(axis, recommended) {
+    axis = axis || {};
+    var id = String(axis.id || '');
+    var status = String(axis.status || '');
+    if (recommended && recommended[id]) return 0;
+    if (status === 'blocked') return 1;
+    if (status === 'action_required') return 2;
+    if (status === 'waiting_evidence') return 3;
+    if (status === 'pending') return 4;
+    if (status === 'ready') return 5;
+    return 6;
+  }
+
+  function renderNotebookKnowledgeMatrix(matrix) {
+    matrix = matrix || {};
+    var panel = byId('notebookKnowledgeMatrix');
+    var summary = byId('notebookKnowledgeMatrixSummary');
+    var list = byId('notebookKnowledgeMatrixList');
+    var toggle = byId('notebookKnowledgeMatrixToggleButton');
+    if (!panel || !summary || !list) return;
+    if (matrix.schema && matrix.schema !== 'codex.mn.knowledgeConsoleMatrix.v1') {
+      matrix = {};
+    }
+    var status = String(matrix.status || 'idle');
+    var expanded = !!state.knowledgeMatrixExpanded;
+    panel.className = 'notebook-knowledge-matrix ' + notebookKnowledgeAxisTone(status) + (expanded ? ' expanded' : ' collapsed');
+    summary.textContent =
+      '零输入矩阵：通过 ' + (matrix.readyCount || 0) +
+      ' / 需操作 ' + (matrix.actionRequiredCount || 0) +
+      ' / 阻断 ' + (matrix.blockedCount || 0) +
+      ' / 等证据 ' + (matrix.waitingCount || 0);
+    var axes = (matrix.axes || []).slice();
+    if (!axes.length) {
+      replaceElementChildren(list, [textNode('div', 'notebook-knowledge-axis empty', '等待 Notebook Workspace 汇总知识对象状态。')]);
+      if (toggle) {
+        toggle.textContent = '展开详情';
+        toggle.disabled = true;
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+      return;
+    }
+    var recommended = {};
+    var recommendedIds = matrix.recommendedAxisIds || [];
+    for (var i = 0; i < recommendedIds.length; i++) recommended[String(recommendedIds[i] || '')] = true;
+    axes.sort(function(a, b) {
+      var priorityDiff = notebookKnowledgeAxisPriority(a, recommended) - notebookKnowledgeAxisPriority(b, recommended);
+      if (priorityDiff) return priorityDiff;
+      return String(a.title || a.id || '').localeCompare(String(b.title || b.id || ''));
+    });
+    if (toggle) {
+      var hiddenCount = Math.max(0, axes.length - 3);
+      toggle.disabled = hiddenCount === 0;
+      toggle.textContent = expanded ? '收起详情' : (hiddenCount ? '展开 ' + hiddenCount + ' 项' : '展开详情');
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+    var nodes = [];
+    for (var j = 0; j < axes.length; j++) {
+      (function(axis, index) {
+        axis = axis || {};
+        var axisStatus = String(axis.status || 'idle');
+        var row = document.createElement('div');
+        row.className = 'notebook-knowledge-axis ' + notebookKnowledgeAxisTone(axisStatus) +
+          (recommended[String(axis.id || '')] ? ' recommended' : '') +
+          (!expanded && index >= 3 ? ' secondary' : '');
+        row.setAttribute('data-notebook-knowledge-axis', axis.id || 'axis');
+        row.appendChild(textNode('div', 'notebook-knowledge-axis-status', notebookKnowledgeAxisLabel(axisStatus)));
+        var body = document.createElement('div');
+        body.className = 'notebook-knowledge-axis-body';
+        body.appendChild(textNode('div', 'notebook-knowledge-axis-title', axis.title || axis.id || 'Knowledge axis'));
+        body.appendChild(textNode('div', 'notebook-knowledge-axis-detail', axis.detail || '等待证据。'));
+        if (axis.metric) body.appendChild(textNode('div', 'notebook-knowledge-axis-metric', axis.metric));
+        row.appendChild(body);
+        var action = axis.action || {};
+        if (action && action.action) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'notebook-knowledge-axis-action ' + (action.tone || notebookKnowledgeAxisTone(axisStatus));
+          button.textContent = action.label || actionLabel(action.action);
+          button.title = action.detail || axis.detail || '';
+          button.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runNotebookWorkspaceAction(action);
+          });
+          row.appendChild(button);
+        } else {
+          var spacer = document.createElement('span');
+          spacer.className = 'notebook-knowledge-axis-spacer';
+          row.appendChild(spacer);
+        }
+        nodes.push(row);
+      })(axes[j], j);
+    }
+    replaceElementChildren(list, nodes);
+  }
+
+  function renderNotebookObjectIntake(intake) {
+    intake = intake || {};
+    var panel = byId('notebookObjectIntake');
+    var summary = byId('notebookObjectIntakeSummary');
+    var list = byId('notebookObjectIntakeRoutes');
+    if (!panel || !summary || !list) return;
+    if (intake.schema && intake.schema !== 'codex.mn.objectIntake.v1') {
+      intake = {};
+    }
+    var status = String(intake.status || 'idle');
+    panel.className = 'notebook-object-intake ' + notebookKnowledgeAxisTone(status);
+    var objectLabel = intake.objectLabel || '等待当前对象';
+    var objectKind = intake.objectKind || 'unknown';
+    summary.textContent =
+      '对象入口：' + agentObjectLabel(objectKind) + ' / ' + clip(objectLabel, 54) +
+      ' / 路线 ' + (intake.routeCount || 0) +
+      ' / 可用 ' + (intake.readyCount || 0) +
+      ' / 需操作 ' + (intake.actionRequiredCount || 0) +
+      ' / 等待 ' + (intake.pendingCount || 0);
+    var routes = intake.routes || [];
+    if (!routes.length) {
+      replaceElementChildren(list, [textNode('div', 'notebook-object-intake-route empty', '等待当前文档、选区或节点成为工作台输入。')]);
+      return;
+    }
+    var recommended = {};
+    var recommendedIds = intake.recommendedRouteIds || [];
+    for (var i = 0; i < recommendedIds.length; i++) recommended[String(recommendedIds[i] || '')] = true;
+    var nodes = [];
+    for (var j = 0; j < routes.length; j++) {
+      (function(route) {
+        route = route || {};
+        var routeStatus = String(route.status || 'idle');
+        var row = document.createElement('div');
+        row.className = 'notebook-object-intake-route ' + notebookKnowledgeAxisTone(routeStatus) + (recommended[String(route.id || '')] ? ' recommended' : '');
+        row.setAttribute('data-object-intake-route', route.id || 'route');
+        row.appendChild(textNode('div', 'notebook-object-intake-status', notebookKnowledgeAxisLabel(routeStatus)));
+        var body = document.createElement('div');
+        body.className = 'notebook-object-intake-body';
+        body.appendChild(textNode('div', 'notebook-object-intake-title', route.title || route.id || '对象路线'));
+        body.appendChild(textNode('div', 'notebook-object-intake-detail', route.detail || '等待工作台证据。'));
+        if (route.evidence) body.appendChild(textNode('div', 'notebook-object-intake-evidence', route.evidence));
+        row.appendChild(body);
+        var action = route.action || {};
+        if (action && action.action) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'notebook-object-intake-action ' + (action.tone || notebookKnowledgeAxisTone(routeStatus));
+          button.textContent = action.label || actionLabel(action.action);
+          button.title = action.detail || route.detail || '';
+          button.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runNotebookWorkspaceAction(action);
+          });
+          row.appendChild(button);
+        } else {
+          row.appendChild(textNode('span', 'notebook-object-intake-spacer', ''));
+        }
+        nodes.push(row);
+      })(routes[j]);
+    }
+    replaceElementChildren(list, nodes);
+  }
+
+  function renderNotebookObjectTaskComposer(composer) {
+    composer = composer || {};
+    var panel = byId('notebookObjectTaskComposer');
+    var summary = byId('notebookObjectTaskComposerSummary');
+    var list = byId('notebookObjectTaskComposerList');
+    if (!panel || !summary || !list) return;
+    if (composer.schema && composer.schema !== 'codex.mn.objectTaskComposer.v1') {
+      composer = {};
+    }
+    var status = String(composer.status || 'idle');
+    panel.className = 'notebook-object-task-composer ' + notebookKnowledgeAxisTone(status);
+    summary.textContent =
+      '任务草案：' + clip(composer.objectLabel || '等待当前对象', 56) +
+      ' / ' + (composer.taskCount || 0) +
+      ' 个任务 / 策略 ' + (composer.writePolicy || 'no_write_task_draft');
+    var tasks = composer.tasks || [];
+    if (!tasks.length) {
+      replaceElementChildren(list, [textNode('div', 'notebook-object-task empty', '等待当前对象生成任务草案。')]);
+      return;
+    }
+    var recommended = {};
+    var ids = composer.recommendedTaskIds || [];
+    for (var i = 0; i < ids.length; i++) recommended[String(ids[i] || '')] = true;
+    var nodes = [];
+    for (var j = 0; j < tasks.length; j++) {
+      (function(task) {
+        task = task || {};
+        var taskStatus = String(task.status || 'idle');
+        var row = document.createElement('div');
+        row.className = 'notebook-object-task ' + notebookKnowledgeAxisTone(taskStatus) + (recommended[String(task.id || '')] ? ' recommended' : '');
+        row.setAttribute('data-object-task-id', task.id || 'task');
+        row.setAttribute('data-object-task-route', task.routeId || '');
+        row.appendChild(textNode('div', 'notebook-object-task-status', notebookKnowledgeAxisLabel(taskStatus)));
+        var body = document.createElement('div');
+        body.className = 'notebook-object-task-body';
+        body.appendChild(textNode('div', 'notebook-object-task-title', task.title || task.id || '任务草案'));
+        body.appendChild(textNode('div', 'notebook-object-task-objective', task.objective || '等待任务目标。'));
+        var detail = [];
+        if (task.evidence) detail.push(task.evidence);
+        if (task.expectedOutput) detail.push('输出 ' + task.expectedOutput);
+        if (task.writePolicy) detail.push(task.writePolicy);
+        if (detail.length) body.appendChild(textNode('div', 'notebook-object-task-detail', detail.join(' / ')));
+        var workflowCandidate = task.workflowCandidate || {};
+        if (workflowCandidate && workflowCandidate.schema === 'codex.mn.objectTaskWorkflowCandidate.v1') {
+          var workflowLine = 'Workflow：' +
+            (workflowCandidate.title || workflowCandidate.workflowId || '候选') +
+            ' / ' + (workflowCandidate.status || 'unknown') +
+            ' / ' + (workflowCandidate.stepCount || 0) + ' 步';
+          if (workflowCandidate.confirmationPoints && workflowCandidate.confirmationPoints.length) {
+            workflowLine += ' / 确认点 ' + workflowCandidate.confirmationPoints.join('、');
+          }
+          body.appendChild(textNode('div', 'notebook-object-task-workflow', workflowLine));
+        }
+        row.appendChild(body);
+        var actionWrap = document.createElement('div');
+        actionWrap.className = 'notebook-object-task-actions';
+        var startAction = task.startAction || {};
+        if (startAction && startAction.action) {
+          var startButton = document.createElement('button');
+          startButton.type = 'button';
+          startButton.className = 'notebook-object-task-action primary';
+          startButton.textContent = startAction.label || '启动 workflow';
+          startButton.title = startAction.detail || '';
+          startButton.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runNotebookWorkspaceAction(startAction);
+          });
+          actionWrap.appendChild(startButton);
+        }
+        var compileAction = task.compileAction || {};
+        if (compileAction && compileAction.action) {
+          var compileButton = document.createElement('button');
+          compileButton.type = 'button';
+          compileButton.className = 'notebook-object-task-action secondary';
+          compileButton.textContent = compileAction.label || '编译计划';
+          compileButton.title = compileAction.detail || '';
+          compileButton.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runNotebookWorkspaceAction(compileAction);
+          });
+          actionWrap.appendChild(compileButton);
+        }
+        var routeAction = task.routeAction || {};
+        if (routeAction && routeAction.action) {
+          var routeButton = document.createElement('button');
+          routeButton.type = 'button';
+          routeButton.className = 'notebook-object-task-action secondary';
+          routeButton.textContent = routeAction.label || '打开';
+          routeButton.title = routeAction.detail || '';
+          routeButton.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runNotebookWorkspaceAction(routeAction);
+          });
+          actionWrap.appendChild(routeButton);
+        }
+        if (!actionWrap.childNodes.length) {
+          actionWrap.appendChild(textNode('span', 'notebook-object-task-action-spacer', '等待证据'));
+        }
+        row.appendChild(actionWrap);
+        nodes.push(row);
+      })(tasks[j]);
+    }
+    replaceElementChildren(list, nodes);
   }
 
   function sourceRegistryKindLabel(kind) {
@@ -2415,6 +2849,12 @@
   function runNotebookWorkspaceAction(item, done) {
     item = item || {};
     done = typeof done === 'function' ? done : function() {};
+    if (item.disabled) {
+      var disabledMessage = item.disabledReason || '当前动作缺少必要上下文，暂时不能执行。';
+      addMessage('assistant', disabledMessage);
+      done({ok: false, disabled: true, message: disabledMessage});
+      return;
+    }
     var action = String(item.action || '');
     var surface = String(item.surface || '');
     var payload = item.payload || {};
@@ -2447,23 +2887,71 @@
       window.setTimeout(function() { done({ok: true, delayed: true}); }, 900);
       return;
     }
+    if (action === 'open_mindmap_studio') {
+      renderMindmapStudioPanel();
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 200);
+      return;
+    }
     if (action === 'agent_plan') {
-      refreshAgentPlan(true);
+      refreshAgentPlan(true, payload);
       window.setTimeout(function() { done({ok: true, delayed: true}); }, 900);
       return;
     }
     if (action === 'review_queue_list') {
-      refreshKnowledgeWorkspace(true);
+      refreshKnowledgeWorkspace(true, payload);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'open_card_factory') {
+      refreshKnowledgeWorkspace(true, payload);
       window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
       return;
     }
     if (action === 'workflow_list') {
-      refreshWorkflowWorkspace(true);
+      refreshWorkflowWorkspace(true, payload);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'workflow_start') {
+      postCompanion('workflow_start', payload, function(result) {
+        renderControls(result || {});
+        if (!result || result.ok === false) {
+          addFailureMessage('启动 workflow 失败', result || {});
+          done(result || {ok: false});
+          return;
+        }
+        refreshWorkflowWorkspace(false, payload);
+        done(result || {});
+      }, {showReply: false});
+      return;
+    }
+    if (action === 'open_workflow_builder') {
+      refreshWorkflowWorkspace(true, payload);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'open_skill_center') {
+      refreshWorkflowWorkspace(true, payload);
       window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
       return;
     }
     if (action === 'operation_ledger_list') {
       refreshOperationLedger(true, payload);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'object_browser') {
+      refreshObjectBrowser(true, payload);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'open_source_registry') {
+      refreshNotebookWorkspace(false);
+      window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
+      return;
+    }
+    if (action === 'verification_report_list') {
+      refreshVerificationCenter(true, payload);
       window.setTimeout(function() { done({ok: true, delayed: true}); }, 400);
       return;
     }
@@ -2688,7 +3176,9 @@
           button.type = 'button';
           button.className = 'notebook-runbook-action ' + (action.tone || rowTone || 'secondary');
           button.textContent = action.label || actionLabel(action.action);
-          button.title = action.detail || '';
+          button.disabled = !!action.disabled;
+          button.title = action.disabledReason || action.detail || '';
+          if (action.disabledReason) button.setAttribute('data-disabled-reason', action.disabledReason);
           button.addEventListener('click', function(ev) {
             releaseButtonFocus(ev.currentTarget);
             runNotebookWorkspaceAction(action);
@@ -2708,6 +3198,7 @@
   function renderNotebookWorkspace(data) {
     if (arguments.length) state.notebookWorkspace = data || {};
     data = state.notebookWorkspace || {};
+    renderNotebookWorkspaceShell();
     var focus = data.focusObject || {};
     var objects = data.objects || {};
     var mindmap = data.mindmap || {};
@@ -2732,6 +3223,9 @@
     setText('notebookWorkspaceWorkflow', notebookWorkspaceCardText('工作流', workflows.runCount || 0, workflows.latestStatus || 'none'));
     setText('notebookWorkspaceLedger', notebookWorkspaceCardText('账本', ledger.total || 0, '证据项'));
     setText('notebookWorkspaceSources', notebookWorkspaceCardText('来源', sourceSummary.readable || 0, 'PDF ' + (sourceSummary.cachedPdf || 0) + ' / 上传 ' + (sourceSummary.readableUploads || 0) + '/' + (sourceSummary.uploads || 0)));
+    renderNotebookKnowledgeMatrix(data.knowledgeMatrix || {});
+    renderNotebookObjectIntake(data.objectIntake || {});
+    renderNotebookObjectTaskComposer(data.objectTaskComposer || {});
     renderNotebookSourceRegistry(sourceRegistry);
     renderNotebookStudyProgram(data.studyProgram || {});
     renderNotebookWorkspaceRunbook(data.runbook || {});
@@ -2750,8 +3244,10 @@
         button.className = 'notebook-workspace-action ' + (item.tone || 'secondary');
         button.type = 'button';
         button.textContent = item.label || actionLabel(item.action || '');
-        button.title = item.detail || '';
+        button.disabled = !!item.disabled;
+        button.title = item.disabledReason || item.detail || '';
         button.setAttribute('data-notebook-workspace-action', item.id || item.action || 'action');
+        if (item.disabledReason) button.setAttribute('data-disabled-reason', item.disabledReason);
         button.addEventListener('click', function(ev) {
           releaseButtonFocus(ev.currentTarget);
           runNotebookWorkspaceAction(item);
@@ -2791,7 +3287,10 @@
     surface = String(surface || 'console');
     var valid = {
       console: true,
+      object_browser: true,
+      source_registry: true,
       mindmap_studio: true,
+      verification_center: true,
       card_factory: true,
       ledger_explorer: true,
       knowledge_graph: true,
@@ -2801,12 +3300,169 @@
     if (!valid[surface]) surface = 'console';
     state.activeWorkspaceSurface = surface;
     state.activeProductMode = 'workspace';
+    state.expertModeExpanded = true;
+    if (state.workspaceNavigatorExpanded) state.workspaceNavigatorExpanded = false;
     switchWorkbenchPane(workspaceSurfacePane(surface), {fromWorkspaceSurface: true});
+    renderExpertMode();
     renderWorkspaceNavigator();
     var anchorId = workspaceSurfaceAnchor(surface);
     window.setTimeout(function() {
       focusWorkspaceSurfaceAnchor(anchorId);
     }, 0);
+  }
+
+  function setAdvancedStatusCard(id, tone, label, value, detail) {
+    var node = byId(id);
+    if (!node) return;
+    node.className = 'advanced-status-card ' + (tone || 'idle');
+    replaceElementChildren(node, [
+      textNode('span', '', label || '状态'),
+      textNode('strong', '', value || '等待'),
+      textNode('small', '', detail || '')
+    ]);
+  }
+
+  function renderAdvancedToolCenter() {
+    var pdfState = normalizePdfCacheState(state.pdfCache || {});
+    var pdfTone = 'idle';
+    var pdfValue = '等待当前文档';
+    var pdfDetail = '打开文档后自动检查全文是否可读。';
+    if (pdfState === 'cached') {
+      pdfTone = 'ready';
+      pdfValue = '全文可读';
+      pdfDetail = '可以进行全文解读、脑图和制卡。';
+    } else if (pdfState === 'waiting_native' || pdfState === 'warning') {
+      pdfTone = 'waiting';
+      pdfValue = '缓存中';
+      pdfDetail = '保持当前 PDF 打开，等待缓存完成。';
+    } else if (pdfState === 'permission' || pdfState === 'error') {
+      pdfTone = 'blocked';
+      pdfValue = '需要处理';
+      pdfDetail = '选择 PDF 或检查文件权限。';
+    } else if (pdfState === 'missing') {
+      pdfTone = 'waiting';
+      pdfValue = '未缓存';
+      pdfDetail = '需要选择 PDF 或让 MN4 缓存当前文档。';
+    }
+    setAdvancedStatusCard('advancedStatusPdf', pdfTone, '材料', pdfValue, pdfDetail);
+
+    var targetState = state.mindmapTarget || {};
+    var targetStatus = normalizeMindmapTargetState(targetState);
+    var target = targetState.target || {};
+    var mindmapTone = 'idle';
+    var mindmapValue = '等待目标';
+    var mindmapDetail = '生成或整理脑图前先确认目标。';
+    if (targetStatus === 'ready' || targetStatus === 'suggested' || targetStatus === 'ok') {
+      mindmapTone = 'ready';
+      mindmapValue = '目标可用';
+      mindmapDetail = targetState.label || target.rootTitle || '会写入当前文档对应脑图。';
+    } else if (targetStatus === 'blocked' || targetStatus === 'error') {
+      mindmapTone = 'blocked';
+      mindmapValue = '需要刷新';
+      mindmapDetail = targetState.label || '请刷新目标脑图或切回 MarginNote 选择节点。';
+    }
+    setAdvancedStatusCard('advancedStatusMindmap', mindmapTone, '脑图', mindmapValue, mindmapDetail);
+
+    var txStatus = state.aiEditTransactionStatus || {};
+    var latest = txStatus.latest || txStatus.transaction || {};
+    var verification = txStatus.verification || {};
+    var txId = latest.transactionId || verification.transactionId || txStatus.transactionId || '';
+    var verificationStatus = String(verification.status || txStatus.status || latest.status || '').toLowerCase();
+    var writeTone = txId ? 'waiting' : 'idle';
+    var writeValue = txId ? '有事务可检查' : '暂无待确认';
+    var writeDetail = txId ? '可以进入验证、证据或回滚。' : '写入、验证和回滚状态会显示在这里。';
+    if (verificationStatus === 'pass') {
+      writeTone = 'ready';
+      writeValue = '最近验证通过';
+    } else if (verificationStatus === 'fail' || verificationStatus === 'failed' || verificationStatus === 'block') {
+      writeTone = 'blocked';
+      writeValue = '需要处理残留';
+    }
+    setAdvancedStatusCard('advancedStatusWrite', writeTone, '写入', writeValue, writeDetail);
+
+    var nextAction = 'chat';
+    var nextText = '可以直接回到对话提问，或选择下面一个任务。';
+    var nextLabel = '回到对话';
+    if (pdfTone === 'blocked' || pdfState === 'missing' || pdfState === 'unknown') {
+      nextAction = 'choose_pdf';
+      nextText = '当前资料还没有稳定的全文来源。先选择 PDF，后续解读、脑图和制卡会更可靠。';
+      nextLabel = '选择 PDF';
+    } else if (mindmapTone === 'blocked' || targetStatus === 'unknown') {
+      nextAction = 'refresh_mindmap_target';
+      nextText = '脑图写入目标还不明确。先刷新目标脑图，避免写到错误页面。';
+      nextLabel = '刷新目标脑图';
+    } else if (txId) {
+      nextAction = 'verify';
+      nextText = '检测到最近写入事务。建议先检查证据，必要时回滚。';
+      nextLabel = '检查写入';
+    }
+    setText('advancedNextStepText', nextText);
+    var button = byId('advancedNextStepButton');
+    if (button) {
+      button.textContent = nextLabel;
+      button.setAttribute('data-advanced-next-action', nextAction);
+    }
+  }
+
+  function renderExpertMode() {
+    var shell = byId('aiChatShell');
+    if (shell) shell.setAttribute('data-expert-mode', state.expertModeExpanded ? 'true' : 'false');
+    var panel = byId('expertModePanel');
+    if (panel) panel.className = 'expert-mode-panel ' + (state.expertModeExpanded ? 'expanded' : 'collapsed');
+    var button = byId('expertModeToggleButton');
+    if (button) {
+      button.textContent = state.expertModeExpanded ? '收起专家模式' : '展开专家模式';
+      button.setAttribute('aria-expanded', state.expertModeExpanded ? 'true' : 'false');
+    }
+    setText(
+      'expertModeHint',
+      state.expertModeExpanded
+        ? '正在显示完整工作台。这里适合排错、查看账本、验证和 workflow。'
+        : '打开后显示 Notebook Workspace、对象、操作、知识、工作流和账本详情。'
+    );
+  }
+
+  function toggleExpertMode() {
+    state.expertModeExpanded = !state.expertModeExpanded;
+    renderExpertMode();
+    renderWorkspaceNavigator();
+  }
+
+  function exitExpertMode() {
+    state.expertModeExpanded = false;
+    state.commandPaneExpanded = false;
+    renderExpertMode();
+    renderProductMode();
+    renderWorkspaceNavigator();
+  }
+
+  function runAdvancedPrimaryAction(action) {
+    action = String(action || '');
+    if (action === 'choose_pdf') {
+      choosePdfCacheFile();
+      return;
+    }
+    if (action === 'refresh_mindmap_target') {
+      refreshMindmapTarget();
+      return;
+    }
+    if (action === 'verify') {
+      state.expertModeExpanded = true;
+      renderExpertMode();
+      switchWorkspaceSurface('verification_center');
+      refreshVerificationCenter(true);
+      return;
+    }
+    switchProductMode('chat');
+    var input = byId('promptInput');
+    if (input && typeof input.focus === 'function') input.focus();
+  }
+
+  function stageAdvancedToolPrompt(action, prompt, label) {
+    stagePromptAction(action, prompt, label);
+    switchProductMode('chat');
+    var input = byId('promptInput');
+    if (input && typeof input.focus === 'function') input.focus();
   }
 
   function renderCommandPane() {
@@ -2828,13 +3484,20 @@
 
   function toggleCommandPane() {
     state.commandPaneExpanded = !state.commandPaneExpanded;
+    if (state.commandPaneExpanded && state.workspaceNavigatorExpanded) {
+      state.workspaceNavigatorExpanded = false;
+      renderWorkspaceNavigator();
+    }
     renderCommandPane();
   }
 
   function renderProductMode() {
     var mode = state.activeProductMode === 'chat' ? 'chat' : 'workspace';
     var shell = byId('aiChatShell');
-    if (shell) shell.setAttribute('data-product-mode', mode);
+    if (shell) {
+      shell.setAttribute('data-product-mode', mode);
+      shell.setAttribute('data-expert-mode', state.expertModeExpanded ? 'true' : 'false');
+    }
     var buttons = document.querySelectorAll('.mode-switch-button');
     for (var i = 0; i < buttons.length; i++) {
       var active = buttons[i].getAttribute('data-product-mode') === mode;
@@ -2845,9 +3508,11 @@
     setText(
       'modeIntentLine',
       mode === 'chat'
-        ? '当前：Chat Mode，保持轻量对话、选区解释和回答后续动作。'
-        : '当前：Agent Workspace，围绕 MNObject、脑图、知识、账本和 workflow 操作。'
+        ? '当前：对话模式，保持轻量问答、选区解释和回答后续动作。'
+        : '当前：工具中心，先选任务；复杂诊断可展开专家模式。'
     );
+    renderAdvancedToolCenter();
+    renderExpertMode();
     renderCommandPane();
   }
 
@@ -2859,6 +3524,7 @@
       switchWorkbenchPane('dialog', {fromProductMode: true});
     } else {
       state.commandPaneExpanded = false;
+      state.expertModeExpanded = false;
       var pane = state.activeWorkbenchPane === 'dialog' ? state.lastWorkspacePane : state.activeWorkbenchPane;
       switchWorkbenchPane(pane || state.lastWorkspacePane || 'object', {fromProductMode: true});
     }
@@ -3137,6 +3803,107 @@
       })(runs[i]);
     }
     replaceElementChildren(target, nodes);
+  }
+
+  function workflowBoardTone(status) {
+    status = String(status || '');
+    if (status === 'ready') return 'ready';
+    if (status === 'action_required' || status === 'waiting_confirmation') return 'warning';
+    if (status === 'blocked' || status === 'failed') return 'danger';
+    if (status === 'empty') return 'empty';
+    return 'idle';
+  }
+
+  function renderWorkflowBuilderBoard(board) {
+    board = board || {};
+    var panel = byId('workflowBuilderBoardPanel');
+    var summary = byId('workflowBuilderBoardSummary');
+    var lanesTarget = byId('workflowBuilderBoardLanes');
+    if (!panel || !summary || !lanesTarget) return;
+    if (board.schema && board.schema !== 'codex.mn.workflowBuilderBoard.v1') {
+      board = {};
+    }
+    var status = String(board.status || 'idle');
+    panel.className = 'workflow-builder-board-panel ' + workflowBoardTone(status);
+    summary.textContent =
+      'Board：候选 ' + (board.draftCandidateCount || 0) +
+      ' / 运行中 ' + (board.activeRunCount || 0) +
+      ' / 待确认 ' + (board.waitingConfirmationCount || 0) +
+      ' / 证据 ' + (board.evidenceCount || 0);
+    var lanes = board.lanes || [];
+    if (!lanes.length) {
+      replaceElementChildren(lanesTarget, [textNode('div', 'workflow-builder-lane empty', '等待 Workflow Builder Board。')]);
+      return;
+    }
+    var laneNodes = [];
+    for (var i = 0; i < lanes.length; i++) {
+      (function(lane) {
+        lane = lane || {};
+        var laneNode = document.createElement('section');
+        laneNode.className = 'workflow-builder-lane ' + workflowBoardTone(lane.status);
+        laneNode.setAttribute('data-workflow-builder-lane', lane.id || 'lane');
+        laneNode.appendChild(textNode('div', 'workflow-builder-lane-title', (lane.title || lane.id || 'Lane') + ' · ' + (lane.cardCount || 0)));
+        laneNode.appendChild(textNode('div', 'workflow-builder-lane-detail', lane.detail || '等待 workflow 证据。'));
+        var cards = lane.cards || [];
+        if (!cards.length) {
+          laneNode.appendChild(textNode('div', 'workflow-builder-card empty', '暂无卡片。'));
+          laneNodes.push(laneNode);
+          return;
+        }
+        for (var j = 0; j < Math.min(cards.length, 5); j++) {
+          (function(card) {
+            card = card || {};
+            var cardNode = document.createElement('div');
+            cardNode.className = 'workflow-builder-card ' + workflowBoardTone(card.status);
+            cardNode.setAttribute('data-workflow-builder-card', card.id || 'card');
+            cardNode.setAttribute('data-workflow-builder-card-type', card.type || '');
+            cardNode.appendChild(textNode('div', 'workflow-builder-card-title', card.title || card.id || 'workflow card'));
+            cardNode.appendChild(textNode('div', 'workflow-builder-card-meta', [card.status || 'unknown', card.evidence || '', card.detail || ''].filter(Boolean).join(' / ')));
+            var actions = document.createElement('div');
+            actions.className = 'workflow-builder-card-actions';
+            var startAction = card.startAction || {};
+            if (startAction && startAction.action) {
+              var startButton = document.createElement('button');
+              startButton.type = 'button';
+              startButton.className = 'small-button workflow-builder-card-start';
+              startButton.textContent = startAction.label || '启动';
+              startButton.title = startAction.detail || '';
+              startButton.addEventListener('click', function(ev) {
+                releaseButtonFocus(ev.currentTarget);
+                runNotebookWorkspaceAction(startAction, function(result) {
+                  if (result && result.ok !== false) refreshWorkflowWorkspace(false, startAction.payload || {});
+                });
+              });
+              actions.appendChild(startButton);
+            }
+            var action = card.action || {};
+            if (action && action.action) {
+              var openButton = document.createElement('button');
+              openButton.type = 'button';
+              openButton.className = 'small-button workflow-builder-card-open';
+              openButton.textContent = action.label || '查看';
+              openButton.title = action.detail || '';
+              openButton.addEventListener('click', function(ev) {
+                releaseButtonFocus(ev.currentTarget);
+                if (action.action === 'workflow_status') {
+                  openWorkflowRunInspector((action.payload || {}).workflowRunId || card.id || '');
+                } else {
+                  runNotebookWorkspaceAction(action);
+                }
+              });
+              actions.appendChild(openButton);
+            }
+            if (actions.childNodes.length) cardNode.appendChild(actions);
+            laneNode.appendChild(cardNode);
+          })(cards[j]);
+        }
+        if (cards.length > 5) {
+          laneNode.appendChild(textNode('div', 'workflow-builder-card more', '还有 ' + (cards.length - 5) + ' 项未展开。'));
+        }
+        laneNodes.push(laneNode);
+      })(lanes[i]);
+    }
+    replaceElementChildren(lanesTarget, laneNodes);
   }
 
   function workflowRunInspectorStep(step) {
@@ -3468,6 +4235,7 @@
     setText('workflowWorkspaceRuns', '运行：' + runCount + ' 个 workflow run / 最近状态：' + (data.latestStatus || data.status || '等待状态'));
     setText('workflowWorkspaceGateway', 'External Automation Gateway：' + gatewayBackend + ' / requestId、权限和回调会进入 ledger');
     setText('workflowWorkspaceSkills', 'Skill Runtime：' + skillCount + ' 个技能包 / 已安装 ' + (data.installedSkillCount || data.installedCount || 0) + ' 个 / 最近 skill run ' + skillRuns.length + ' 个 / 写入技能需声明权限、dry-run、回滚和验收规则');
+    renderWorkflowBuilderBoard(data.workflowBuilderBoard || {});
     renderWorkflowSkills(data);
     renderWorkflowTemplates(data);
     renderWorkflowRuns(data);
@@ -3667,15 +4435,17 @@
     renderOperationCompilerRepairActions(compiler);
   }
 
-  function refreshKnowledgeWorkspace(manual) {
+  function refreshKnowledgeWorkspace(manual, overridePayload) {
+    overridePayload = overridePayload || {};
     postCompanion('knowledge_index_status', {}, function(result) {
       if (result && result.ok !== false) {
         renderKnowledgeWorkspace(Object.assign({}, state.knowledgeWorkspace || {}, result));
       }
       else if (manual) addFailureMessage('刷新知识状态失败', result || {});
     }, {showReply: false});
-    var objectRef = currentMnObjectRef();
-    postCompanion('review_queue_list', {mnObject: objectRef, mnObjectId: objectRef.objectId || ''}, function(result) {
+    var objectRef = overridePayload.mnObject || currentMnObjectRef();
+    var mnObjectId = overridePayload.mnObjectId || objectRef.objectId || '';
+    postCompanion('review_queue_list', Object.assign({}, overridePayload, {mnObject: objectRef, mnObjectId: mnObjectId}), function(result) {
       if (result && result.ok !== false) {
         renderKnowledgeWorkspace(Object.assign({}, state.knowledgeWorkspace || {}, {
           reviewQueue: result,
@@ -3688,8 +4458,9 @@
     }, {showReply: false});
   }
 
-  function refreshWorkflowWorkspace(manual) {
-    postCompanion('workflow_list', {}, function(result) {
+  function refreshWorkflowWorkspace(manual, overridePayload) {
+    overridePayload = overridePayload || {};
+    postCompanion('workflow_list', Object.assign({}, overridePayload), function(result) {
       if (result && result.ok !== false) renderWorkflowWorkspace(result);
       else if (manual) addFailureMessage('刷新工作流状态失败', result || {});
     }, {showReply: false});
@@ -3766,6 +4537,7 @@
     renderObjectActivity();
     renderOperationLedger();
     renderOperationLedgerDetail();
+    renderVerificationCenter();
     var currentObjectId = mnObject.objectId || object.mnObjectId || '';
     if (currentObjectId && currentObjectId !== state.objectBrowserLastId) {
       state.objectBrowserLastId = currentObjectId;
@@ -3784,6 +4556,10 @@
       state.operationLedgerDetail = null;
       renderOperationLedgerDetail();
       refreshOperationLedger(false);
+    }
+    if (currentObjectId && currentObjectId !== state.verificationCenterLastId) {
+      state.verificationCenterLastId = currentObjectId;
+      refreshVerificationCenter(false);
     }
     renderOperationWorkspaceActions(operation);
     renderOperationWorkspaceVerification();
@@ -4045,6 +4821,15 @@
     var summary = byId('objectBrowserSummary');
     var list = byId('objectBrowserList');
     if (!panel || !summary || !list) return;
+    var scanButton = byId('objectRegistryScanButton');
+    var notebookScope = currentNotebookScopePayload();
+    if (scanButton) {
+      var scanBlocked = !notebookScope.topicid || state.objectRegistryScanInFlight;
+      scanButton.disabled = !!scanBlocked;
+      scanButton.title = !notebookScope.topicid
+        ? '缺少 topicid，无法请求 MarginNote 原生侧扫描当前 notebook。'
+        : '';
+    }
     var objectRef = currentMnObjectRef();
     if (!objectRef.objectId) {
       panel.className = 'object-browser-panel idle';
@@ -4096,9 +4881,11 @@
     replaceElementChildren(list, rows);
   }
 
-  function refreshObjectBrowser(manual) {
-    var objectRef = currentMnObjectRef();
-    if (!objectRef.objectId || state.objectBrowserInFlight) {
+  function refreshObjectBrowser(manual, overridePayload) {
+    overridePayload = overridePayload || {};
+    var objectRef = overridePayload.mnObject || currentMnObjectRef();
+    var objectId = overridePayload.mnObjectId || objectRef.objectId || '';
+    if (!objectId || state.objectBrowserInFlight) {
       renderObjectBrowser();
       return;
     }
@@ -4107,9 +4894,9 @@
     var filters = objectBrowserFilterPayload();
     postCompanion('object_browser', Object.assign({
       mnObject: objectRef,
-      mnObjectId: objectRef.objectId,
+      mnObjectId: objectId,
       limit: 12
-    }, filters), function(result) {
+    }, filters, overridePayload), function(result) {
       state.objectBrowserInFlight = false;
       if (!result || !result.ok) {
         state.objectBrowser = {ok: false, message: result && result.message ? result.message : 'Object Browser 读取失败。'};
@@ -4123,6 +4910,13 @@
 
   function requestObjectRegistryScan() {
     if (state.objectRegistryScanInFlight) return;
+    var notebookScope = currentNotebookScopePayload();
+    if (!notebookScope.topicid) {
+      var message = '缺少 topicid，无法请求 MarginNote 原生侧扫描当前 notebook。';
+      window.CodexPanel.setStatus({text: message});
+      addMessage('assistant', message);
+      return;
+    }
     var objectRef = currentMnObjectRef();
     var sourceRef = objectRef.sourceRef || {};
     state.objectRegistryScanInFlight = true;
@@ -4130,6 +4924,8 @@
     postCompanion('request_mn_object_registry_scan', {
       mnObject: objectRef,
       mnObjectId: objectRef.objectId || '',
+      topicid: notebookScope.topicid,
+      bookmd5: notebookScope.bookmd5,
       selectedNoteId: sourceRef.noteId || '',
       limit: 240,
       source: 'object-browser-scan-button'
@@ -4855,6 +5651,288 @@
         return;
       }
       renderOperationLedger(result);
+      refreshVerificationCenter(false, ledgerPayload);
+    }, {showReply: false});
+  }
+
+  function verificationStatusLabel(status) {
+    var normalized = String(status || 'UNKNOWN').toUpperCase();
+    if (normalized === 'PASS') return '通过';
+    if (normalized === 'FAIL') return '失败';
+    return '未知';
+  }
+
+  function verificationStatusClass(status) {
+    var normalized = String(status || 'UNKNOWN').toLowerCase();
+    if (normalized === 'pass') return 'pass';
+    if (normalized === 'fail') return 'fail';
+    return 'unknown';
+  }
+
+  function verificationReportProblemText(report) {
+    report = report || {};
+    var problems = report.problems;
+    if (!problems || !problems.length) return '无阻断问题';
+    var labels = [];
+    for (var i = 0; i < problems.length && labels.length < 3; i++) {
+      labels.push(String(problems[i] || ''));
+    }
+    return labels.join(' / ');
+  }
+
+  function verificationCenterCountNode(label, value, status) {
+    var node = document.createElement('div');
+    node.className = 'verification-center-count ' + verificationStatusClass(status);
+    var caption = document.createElement('span');
+    caption.textContent = label;
+    var number = document.createElement('strong');
+    number.textContent = String(value || 0);
+    node.appendChild(caption);
+    node.appendChild(number);
+    return node;
+  }
+
+  function verificationCenterRow(item) {
+    item = item || {};
+    var report = item.report || {};
+    var status = item.status || report.status || 'UNKNOWN';
+    var row = document.createElement('div');
+    row.className = 'verification-center-row ' + verificationStatusClass(status);
+    var badge = document.createElement('span');
+    badge.className = 'verification-center-status';
+    badge.textContent = verificationStatusLabel(status);
+    var body = document.createElement('div');
+    body.className = 'verification-center-body';
+    var title = document.createElement('strong');
+    title.textContent = item.title || item.sourceType || '验证报告';
+    var meta = document.createElement('span');
+    meta.textContent =
+      (report.subjectType || item.sourceType || 'report') +
+      ' / ' + verificationReportProblemText(report);
+    body.appendChild(title);
+    body.appendChild(meta);
+    row.appendChild(badge);
+    row.appendChild(body);
+    var actionGroup = document.createElement('div');
+    actionGroup.className = 'verification-center-actions';
+    var action = item.action || {};
+    if (action.action) {
+      var actionButton = document.createElement('button');
+      actionButton.type = 'button';
+      actionButton.className = 'small-button verification-center-action';
+      actionButton.textContent = action.label || '处理';
+      actionButton.setAttribute('data-verification-center-action', action.id || action.action || 'action');
+      actionButton.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        runVerificationCenterAction(action);
+      });
+      actionGroup.appendChild(actionButton);
+    }
+    if (item.ledgerAction && item.ledgerAction.payload && item.ledgerAction.payload.ledgerId) {
+      var open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'small-button verification-center-open';
+      open.textContent = '账本';
+      open.addEventListener('click', function(ev) {
+        releaseButtonFocus(ev.currentTarget);
+        openOperationLedgerEntry(item);
+      });
+      actionGroup.appendChild(open);
+    }
+    row.appendChild(actionGroup);
+    return row;
+  }
+
+  function runVerificationCenterAction(action) {
+    action = action || {};
+    var payload = action.payload || {};
+    if (!action.action) {
+      addMessage('assistant', action.detail || action.label || '这个验证动作暂未绑定处理器。');
+      return;
+    }
+    setVerificationCenterActionStatus('动作：正在提交 ' + (action.label || action.action) + '。', 'pending');
+    if (action.clientOnly || action.surface) {
+      runNotebookWorkspaceAction(action, function(result) {
+        if (!result || result.ok === false) {
+          setVerificationCenterActionStatus('动作失败：' + ((result && result.message) || action.label || action.action), 'fail');
+          return;
+        }
+        setVerificationCenterActionStatus('动作已提交：' + (result.message || action.label || action.action), 'pass');
+        refreshVerificationCenter(false);
+      });
+      return;
+    }
+    postCompanion(action.action, payload, function(result) {
+      if (!result || !result.ok) {
+        setVerificationCenterActionStatus('动作失败：' + ((result && result.message) || action.label || action.action), 'fail');
+        addFailureMessage('Verification Center 动作失败', result || {});
+        return;
+      }
+      setVerificationCenterActionStatus('动作已提交：' + (result.message || action.label || action.action), 'pass');
+      addMessage('assistant', result.reply || result.message || '验证动作已提交。');
+      refreshVerificationCenter(false);
+      if (action.action === 'request_mn_object_existence_probe' && payload.transactionId) {
+        refreshAiEditTransactionVerification(payload.transactionId);
+      }
+    }, {showReply: false});
+  }
+
+  function renderVerificationCenterActionStatus() {
+    var status = state.verificationCenterActionStatus || {};
+    var node = byId('verificationReportActionStatus');
+    if (!node) return;
+    var tone = String(status.tone || 'idle');
+    node.className = 'verification-center-action-status ' + tone;
+    node.textContent = status.text || '动作：等待验证修复操作。';
+  }
+
+  function setVerificationCenterActionStatus(text, tone) {
+    state.verificationCenterActionStatus = {
+      text: text || '动作：等待验证修复操作。',
+      tone: tone || 'idle'
+    };
+    renderVerificationCenterActionStatus();
+  }
+
+  function verificationRepairStatusLabel(status) {
+    status = String(status || '');
+    if (status === 'ready') return '通过';
+    if (status === 'action_required') return '需处理';
+    if (status === 'blocked') return '阻断';
+    if (status === 'waiting_evidence') return '等证据';
+    return status || '等待';
+  }
+
+  function runVerificationRepairRecommended() {
+    var plan = state.verificationCenter.repairPlan || {};
+    var action = plan.recommendedAction || {};
+    if (!action.action) {
+      setVerificationCenterActionStatus('动作：当前没有可执行的推荐修复。', 'idle');
+      return;
+    }
+    runVerificationCenterAction(action);
+  }
+
+  function renderVerificationRepairPlan(plan) {
+    plan = plan || {};
+    var panel = byId('verificationRepairPlanPanel');
+    var summary = byId('verificationRepairPlanSummary');
+    var recommendedButton = byId('verificationRepairPlanRecommendedButton');
+    var actionsNode = byId('verificationRepairPlanActions');
+    if (!panel || !summary || !actionsNode || !recommendedButton) return;
+    var status = String(plan.status || 'idle');
+    panel.className = 'verification-repair-plan ' + verificationStatusClass(status === 'ready' ? 'PASS' : (status === 'blocked' ? 'FAIL' : 'UNKNOWN'));
+    summary.textContent =
+      '修复计划：' + verificationRepairStatusLabel(status) +
+      ' / ' + (plan.detail || '等待验证报告。');
+    var recommendedAction = plan.recommendedAction || {};
+    var hasRecommended = !!recommendedAction.action;
+    recommendedButton.disabled = !hasRecommended;
+    recommendedButton.textContent = hasRecommended
+      ? ('执行推荐：' + (recommendedAction.label || recommendedAction.id || '修复'))
+      : '无推荐修复';
+    recommendedButton.title = hasRecommended
+      ? (recommendedAction.detail || recommendedAction.reportTitle || '执行当前验证修复计划的推荐动作')
+      : '当前修复计划没有可执行动作。';
+    recommendedButton.setAttribute('data-verification-recommended-action', hasRecommended ? (recommendedAction.id || recommendedAction.action || 'repair') : 'none');
+    var actions = plan.actions || [];
+    var recommendedActionId = String(plan.recommendedActionId || '');
+    var nodes = [];
+    for (var i = 0; i < actions.length && nodes.length < 3; i++) {
+      (function(action) {
+        action = action || {};
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'small-button verification-repair-action' + (String(action.id || '') === recommendedActionId ? ' primary' : '');
+        button.textContent = action.label || action.id || '修复';
+        button.title = action.reportTitle || action.detail || '';
+        button.setAttribute('data-verification-repair-action', action.id || action.action || 'repair');
+        button.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runVerificationCenterAction(action);
+        });
+        nodes.push(button);
+      })(actions[i]);
+    }
+    replaceElementChildren(actionsNode, nodes);
+  }
+
+  function renderVerificationCenter(center) {
+    if (arguments.length) state.verificationCenter = center || {};
+    center = state.verificationCenter || {};
+    var panel = byId('verificationReportPanel');
+    var summary = byId('verificationReportSummary');
+    var countsNode = byId('verificationReportCounts');
+    var list = byId('verificationReportList');
+    if (!panel || !summary || !countsNode || !list) return;
+    renderVerificationCenterActionStatus();
+    var objectRef = currentMnObjectRef();
+    if (!objectRef.objectId) {
+      panel.className = 'verification-report-panel idle';
+      summary.textContent = '等待当前对象验证报告。';
+      replaceElementChildren(countsNode, []);
+      replaceElementChildren(list, [textNode('div', 'verification-center-row empty', '刷新 Agent 计划后显示当前对象的验证报告。')]);
+      renderVerificationRepairPlan({status: 'idle', detail: '等待当前对象。', actions: []});
+      return;
+    }
+    if (state.verificationCenterInFlight) {
+      panel.className = 'verification-report-panel pending';
+      summary.textContent = '正在读取验证报告：' + objectRef.objectId;
+      return;
+    }
+    if (!center.ok) {
+      panel.className = 'verification-report-panel idle';
+      summary.textContent = 'Verification Center：尚未读取 / ' + objectRef.objectId;
+      replaceElementChildren(countsNode, []);
+      replaceElementChildren(list, [textNode('div', 'verification-center-row empty', '点击刷新验证，读取当前对象的操作、来源和技能验收报告。')]);
+      renderVerificationRepairPlan({status: 'idle', detail: '点击刷新验证后生成修复计划。', actions: []});
+      return;
+    }
+    var counts = center.counts || {};
+    var info = center.summary || {};
+    var worst = info.worstStatus || 'UNKNOWN';
+    panel.className = 'verification-report-panel ready ' + verificationStatusClass(worst);
+    summary.textContent =
+      '对象 ' + clip(objectRef.title || objectRef.objectId, 34) +
+      ' / 最差状态：' + verificationStatusLabel(worst) +
+      ' / 报告 ' + (counts.total || 0) + ' 条';
+    replaceElementChildren(countsNode, [
+      verificationCenterCountNode('PASS', counts.PASS || info.passCount || 0, 'PASS'),
+      verificationCenterCountNode('FAIL', counts.FAIL || info.failCount || 0, 'FAIL'),
+      verificationCenterCountNode('UNKNOWN', counts.UNKNOWN || info.unknownCount || 0, 'UNKNOWN')
+    ]);
+    renderVerificationRepairPlan(center.repairPlan || {});
+    var rows = [];
+    var reports = center.reports || [];
+    for (var i = 0; i < reports.length && rows.length < 8; i++) rows.push(verificationCenterRow(reports[i]));
+    if (!rows.length) rows.push(textNode('div', 'verification-center-row empty', '当前对象暂无验证报告。'));
+    replaceElementChildren(list, rows);
+  }
+
+  function refreshVerificationCenter(manual, overridePayload) {
+    var objectPayload = overridePayload || {};
+    var objectRef = currentMnObjectRef();
+    var objectId = objectPayload.mnObjectId || objectRef.objectId;
+    if (!objectId || state.verificationCenterInFlight) {
+      renderVerificationCenter();
+      return;
+    }
+    state.verificationCenterInFlight = true;
+    renderVerificationCenter();
+    var payload = Object.assign({}, objectPayload, {
+      mnObjectId: objectPayload.mnObjectId || objectRef.objectId,
+      mnObject: objectPayload.mnObject || objectRef,
+      limit: objectPayload.limit || 20
+    });
+    postCompanion('verification_report_list', payload, function(result) {
+      state.verificationCenterInFlight = false;
+      if (!result || !result.ok) {
+        state.verificationCenter = {ok: false, message: result && result.message ? result.message : '验证中心读取失败。'};
+        renderVerificationCenter();
+        if (manual) addFailureMessage('Verification Center 读取失败', result || {});
+        return;
+      }
+      renderVerificationCenter(result);
     }, {showReply: false});
   }
 
@@ -5350,7 +6428,10 @@
     status = state.aiEditTransactionStatus || {};
     var panel = byId('aiEditTransactionCenter');
     var notes = byId('aiEditTransactionNotes');
-    if (!panel || !notes) return;
+    if (!panel || !notes) {
+      renderAdvancedToolCenter();
+      return;
+    }
     var schema = String(status.schema || 'codex.mn.aiEditTransactionStatus.v1');
     var latest = status.latest || {};
     var verification = status.verification || {};
@@ -5366,6 +6447,7 @@
       renderAiEditTransactionResidualProof({});
       renderAiEditTransactionActions({}, {});
       renderMindmapStudioPanel();
+      renderAdvancedToolCenter();
       return;
     }
     var verificationStatus = String(verification.status || 'pending');
@@ -5429,6 +6511,7 @@
     renderAiEditTransactionResidualProof(verification.residualProof || {});
     renderAiEditTransactionActions(latest, verification);
     renderMindmapStudioPanel();
+    renderAdvancedToolCenter();
   }
 
   function renderMindmapTreeCacheStatus(status) {
@@ -5437,6 +6520,15 @@
     var bar = byId('mindmapTreeCacheStatus');
     var text = byId('mindmapTreeCacheText');
     if (!bar || !text) return;
+    var notebookScope = currentNotebookScopePayload();
+    var readButtons = [byId('mindmapTreeRefreshButton'), byId('mindmapStudioReadTreeButton')];
+    for (var rb = 0; rb < readButtons.length; rb++) {
+      if (!readButtons[rb]) continue;
+      readButtons[rb].disabled = !notebookScope.topicid;
+      readButtons[rb].title = !notebookScope.topicid
+        ? '缺少 topicid，无法请求 MarginNote 读取当前脑图树。'
+        : '';
+    }
     if (!status.available) {
       var pending = String(status.status || '') === 'pending';
       bar.className = 'mindmap-tree-cache-status ' + (pending ? 'pending' : 'idle');
@@ -5487,6 +6579,14 @@
   }
 
   function requestMindmapTreeRead() {
+    var notebookScope = currentNotebookScopePayload();
+    if (!notebookScope.topicid) {
+      var message = '缺少 topicid，无法请求 MarginNote 读取当前脑图树。';
+      window.CodexPanel.setStatus({text: message});
+      addMessage('assistant', message);
+      renderMindmapTreeCacheStatus(state.mindmapTreeCache || {});
+      return;
+    }
     var button = byId('mindmapTreeRefreshButton');
     if (button) button.disabled = true;
     renderMindmapTreeCacheStatus({
@@ -5497,6 +6597,8 @@
       treePreview: []
     });
     postCompanion('mn_read_tree', {
+      topicid: notebookScope.topicid,
+      bookmd5: notebookScope.bookmd5,
       mindmapTarget: state.mindmapTarget && state.mindmapTarget.target ? state.mindmapTarget.target : {}
     }, function(result) {
       if (button) button.disabled = false;
@@ -5559,11 +6661,16 @@
     return lines.join('\n');
   }
 
-  function refreshAgentPlan(manual) {
+  function refreshAgentPlan(manual, overridePayload) {
     if (state.agentPlanInFlight) return;
-    var prompt = promptValue() || state.latestAssistantReply || state.lastPromptFromSelection || '';
+    overridePayload = overridePayload || {};
+    var prompt = overridePayload.prompt || promptValue() || state.latestAssistantReply || state.lastPromptFromSelection || '';
     var hasAnyContext = !!(
       compactText(prompt) ||
+      compactText(overridePayload.documentTitle) ||
+      compactText(overridePayload.bookmd5) ||
+      compactText(overridePayload.topicid) ||
+      (overridePayload.mnObject && overridePayload.mnObject.objectId) ||
       compactText((state.context || {}).selectionText) ||
       compactText((state.context || {}).selectedNoteTitle) ||
       compactText((state.context || {}).documentTitle) ||
@@ -5573,7 +6680,7 @@
       renderAgentWorkbench(null);
       return;
     }
-    var key = agentPlanRefreshKey(prompt);
+    var key = agentPlanRefreshKey(prompt + '|' + JSON.stringify(overridePayload || {}).substring(0, 900));
     if (!manual && key && key === state.agentPlanLastKey) return;
     state.agentPlanLastKey = key;
     state.agentPlanInFlight = true;
@@ -5583,7 +6690,7 @@
       setText('agentWorkbenchLine', 'Agent：正在生成操作计划');
       setText('agentWorkbenchDetail', '正在检查当前对象、工作流、写入风险和确认点。');
     }
-    postCompanionAgentPlan({prompt: prompt}, function(result) {
+    postCompanionAgentPlan(Object.assign({}, overridePayload, {prompt: prompt}), function(result) {
       state.agentPlanInFlight = false;
       if (!result || !result.ok || !result.agentOperation) {
         var bar = byId('agentWorkbenchBar');
@@ -5803,6 +6910,7 @@
       open_full_disk_access_settings: '打开权限设置',
       single_document_acceptance_summary: '本文档验收',
       release_acceptance_summary: '发布验收',
+      ui_functional_acceptance_summary: 'UI 功能验收',
       export_annotated_pdf: '导出PDF',
       health: '检查连接'
     };
@@ -6265,6 +7373,7 @@
     var blockedText = blocked.length ? blocked.slice(0, 2).join('、') : '无';
     line.textContent = 'MN 原生能力：可执行 ' + ready.length + '（' + readyText + '） / 受阻 ' + blocked.length + '（' + blockedText + '）';
     line.className = ready.length ? 'native-capabilities-line ok' : 'native-capabilities-line warn';
+    renderRealMnAcceptanceOverview();
     updateActionAvailability();
   }
 
@@ -6514,6 +7623,7 @@
 
   function renderSingleDocumentAcceptance(result) {
     result = result || {};
+    state.latestSingleDocumentAcceptance = result;
     var line = byId('singleDocumentAcceptanceLine');
     var detail = byId('singleDocumentAcceptanceDetail');
     if (!line || !detail) return;
@@ -6521,6 +7631,7 @@
       line.textContent = '本文档验收：未运行';
       line.className = 'release-acceptance-line warn';
       detail.textContent = '点击“本文档验收”可检查当前 PDF 里按钮和工作流是否真的跑通过。';
+      renderRealMnAcceptanceOverview();
       return;
     }
     var ready = !!result.singleDocumentReady;
@@ -6530,6 +7641,356 @@
     line.textContent = '本文档验收：' + (ready ? 'PASS' : 'BLOCK') + ' / ' + passed + '/' + total + ' / 阻塞 ' + blocked;
     line.className = 'release-acceptance-line ' + (ready ? 'ok' : 'error');
     detail.textContent = formatSingleDocumentChecks(result.singleDocumentAcceptance || {});
+    renderRealMnAcceptanceOverview();
+  }
+
+  function formatUiFunctionalChecks(report) {
+    report = report || {};
+    var checks = Array.isArray(report.checks) ? report.checks : [];
+    if (!checks.length) return '尚未生成任意文档 UI 功能验收报告。';
+    var lines = [];
+    for (var i = 0; i < checks.length && i < 10; i++) {
+      var item = checks[i] || {};
+      var status = item.status || 'FAIL';
+      var id = item.id || 'check';
+      var label = item.label || id;
+      var problems = Array.isArray(item.problems) ? item.problems.filter(Boolean) : [];
+      lines.push('- ' + status + ' ' + id + ': ' + label + (problems.length ? ' - ' + problems.slice(0, 2).join('; ') : ''));
+    }
+    if (checks.length > 10) lines.push('- 另有 ' + (checks.length - 10) + ' 项，查看对话里的完整报告。');
+    var allProblems = Array.isArray(report.problems) ? report.problems.filter(Boolean) : [];
+    if (allProblems.length) {
+      lines.push('');
+      lines.push('主要问题：');
+      for (var p = 0; p < allProblems.length && p < 5; p++) {
+        lines.push('- ' + allProblems[p]);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function realMnRepairButtonId(action) {
+    var raw = String((action && action.id) || (action && action.handler) || 'repair');
+    return 'realMnRepair-' + raw.replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  function runRealMnRuntimeRepairAction(action) {
+    action = action || {};
+    var label = action.label || action.id || '推荐修复';
+    if (action.writeRisk) {
+      addMessage('assistant', '推荐修复需要写入确认：' + label + '。请在当前文档中手动执行对应动作，完成后重新运行 UI 功能验收。');
+      return;
+    }
+    var handler = String(action.handler || '');
+    if (handler === 'refreshNativeCapabilities') {
+      refreshNativeCapabilities();
+      return;
+    }
+    if (handler === 'cacheCurrentPdf') {
+      cacheCurrentPdf();
+      return;
+    }
+    if (handler === 'startNativeHighlightWizard') {
+      startNativeHighlightWizard();
+      return;
+    }
+    if (handler === 'saveSettings') {
+      saveSettings();
+      return;
+    }
+    if (handler === 'runToggle') {
+      runToggle();
+      return;
+    }
+    if (handler === 'openConversationHistory') {
+      openConversationHistory();
+      return;
+    }
+    addMessage('assistant', '推荐修复：' + label + '。请按上方“下一步”说明完成后重新运行验收。');
+  }
+
+  function realMnRuntimeSafeEvidenceActions() {
+    var result = state.latestUiFunctionalAcceptance || {};
+    var boundary = result.realMnRuntimeAcceptance || {};
+    var recommended = Array.isArray(boundary.recommendedActions) ? boundary.recommendedActions : [];
+    var safe = [];
+    var seen = {};
+    for (var i = 0; i < recommended.length; i++) {
+      var action = recommended[i] || {};
+      var handler = String(action.handler || '');
+      if (action.writeRisk) continue;
+      if (!handler || seen[handler]) continue;
+      if (
+        handler !== 'refreshNativeCapabilities' &&
+        handler !== 'cacheCurrentPdf' &&
+        handler !== 'startNativeHighlightWizard' &&
+        handler !== 'saveSettings' &&
+        handler !== 'openConversationHistory'
+      ) {
+        continue;
+      }
+      seen[handler] = true;
+      safe.push(action);
+    }
+    return safe;
+  }
+
+  function runRealMnRuntimeSafeEvidence() {
+    var actions = realMnRuntimeSafeEvidenceActions();
+    if (!actions.length) {
+      addMessage('assistant', '当前没有可自动执行的安全采证动作；写入风险动作需要手动确认。');
+      return;
+    }
+    addMessage('assistant', '开始真实 MN4 安全采证：只执行无写入动作，不会创建或删除卡片/脑图。');
+    for (var i = 0; i < actions.length; i++) {
+      runRealMnRuntimeRepairAction(actions[i]);
+    }
+  }
+
+  function runRealMnAcceptanceSafeEvidence() {
+    var actions = realMnRuntimeSafeEvidenceActions();
+    if (actions.length) {
+      runRealMnRuntimeSafeEvidence();
+      renderRealMnAcceptanceOverview({safeEvidenceRequested: true});
+      return;
+    }
+    addMessage('assistant', '开始真实 MN4 默认安全采证：刷新 MN 能力并启动高亮采证向导，不会写入卡片或脑图。');
+    refreshNativeCapabilities();
+    startNativeHighlightWizard();
+    renderRealMnAcceptanceOverview({safeEvidenceRequested: true});
+  }
+
+  function realMnAcceptanceStepState(type) {
+    if (type === 'single') {
+      var single = state.latestSingleDocumentAcceptance || {};
+      if (!single.singleDocumentAcceptance && single.singleDocumentReady === undefined) return {tone: 'warn', text: '1. 当前文档验收：等待运行'};
+      var singleReady = !!single.singleDocumentReady;
+      var singlePassed = parseInt(single.singleDocumentPassedCount || 0, 10);
+      var singleTotal = parseInt(single.singleDocumentTotalCount || 0, 10);
+      var singleBlocked = parseInt(single.singleDocumentBlockerCount || 0, 10);
+      return {
+        tone: singleReady ? 'ok' : 'error',
+        text: '1. 当前文档验收：' + (singleReady ? 'PASS' : 'BLOCK') + ' / ' + singlePassed + '/' + singleTotal + ' / 阻塞 ' + singleBlocked
+      };
+    }
+    if (type === 'ui') {
+      var ui = state.latestUiFunctionalAcceptance || {};
+      if (!ui.uiFunctionalAcceptance && ui.uiFunctionalReady === undefined) return {tone: 'warn', text: '2. 任意文档 UI 验收：等待运行'};
+      var uiReady = !!ui.uiFunctionalReady;
+      var uiPassed = parseInt(ui.uiFunctionalPassedCount || 0, 10);
+      var uiTotal = parseInt(ui.uiFunctionalTotalCount || 0, 10);
+      var uiBlocked = parseInt(ui.uiFunctionalBlockerCount || 0, 10);
+      return {
+        tone: uiReady ? 'ok' : 'error',
+        text: '2. 任意文档 UI 验收：' + (uiReady ? 'PASS' : 'BLOCK') + ' / ' + uiPassed + '/' + uiTotal + ' / 阻塞 ' + uiBlocked
+      };
+    }
+    var caps = state.nativeApiCapabilities || {};
+    var matrix = caps.capabilityMatrix || {};
+    var readyCount = 0;
+    var availableCount = 0;
+    for (var key in matrix) {
+      if (!Object.prototype.hasOwnProperty.call(matrix, key)) continue;
+      var item = matrix[key] || {};
+      if (item.available) availableCount += 1;
+      if (item.ready) readyCount += 1;
+    }
+    if (caps.available) {
+      return {
+        tone: readyCount ? 'ok' : 'warn',
+        text: '3. 安全采证：原生能力已上报 / 可执行 ' + readyCount + ' / 已识别 ' + availableCount
+      };
+    }
+    return {tone: 'warn', text: '3. 安全采证：等待原生能力刷新或高亮采证向导'};
+  }
+
+  function renderRealMnAcceptanceOverview(extra) {
+    extra = extra || {};
+    var statusLine = byId('realMnAcceptanceStatusLine');
+    var checklist = byId('realMnAcceptanceChecklist');
+    var panel = byId('realMnAcceptancePanel');
+    if (!statusLine || !checklist) return;
+    var steps = [
+      realMnAcceptanceStepState('single'),
+      realMnAcceptanceStepState('ui'),
+      realMnAcceptanceStepState('safe')
+    ];
+    var hasError = false;
+    var hasWarn = false;
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i].tone === 'error') hasError = true;
+      if (steps[i].tone === 'warn') hasWarn = true;
+    }
+    var statusTone = hasError ? 'error' : (hasWarn ? 'warn' : 'ok');
+    var statusText = hasError ? '真实 MN4 验收：存在阻塞，按清单处理后重跑。' :
+      (hasWarn ? '真实 MN4 验收：未完成，建议运行验收流程。' : '真实 MN4 验收：PASS，当前工作台闭环可用。');
+    if (state.realMnAcceptanceSequenceRunning) {
+      statusTone = 'warn';
+      statusText = '真实 MN4 验收：流程运行中，正在按当前文档、UI、采证顺序执行。';
+    } else if (extra.safeEvidenceRequested) {
+      statusText = '真实 MN4 验收：已请求安全采证，等待 MN4 返回能力或选区证据。';
+    }
+    statusLine.textContent = statusText;
+    statusLine.className = 'real-mn-acceptance-status-line ' + statusTone;
+    if (panel) panel.className = 'real-mn-acceptance-panel ' + statusTone;
+    var nodes = [];
+    for (var j = 0; j < steps.length; j++) {
+      var node = document.createElement('div');
+      node.className = 'real-mn-acceptance-step ' + steps[j].tone;
+      node.textContent = steps[j].text;
+      nodes.push(node);
+    }
+    replaceElementChildren(checklist, nodes);
+  }
+
+  function runRealMnAcceptanceSequence() {
+    if (state.realMnAcceptanceSequenceRunning) {
+      addMessage('assistant', '真实 MN4 验收流程已经在运行。');
+      return;
+    }
+    state.realMnAcceptanceSequenceRunning = true;
+    renderRealMnAcceptanceOverview();
+    addMessage('assistant', '开始真实 MN4 验收流程：先检查当前文档，再跑任意文档 UI 验收，最后执行无写入安全采证。');
+    checkSingleDocumentAcceptance(function() {
+      renderRealMnAcceptanceOverview();
+      window.setTimeout(function() {
+        checkUiFunctionalAcceptance(function() {
+          renderRealMnAcceptanceOverview();
+          window.setTimeout(function() {
+            runRealMnAcceptanceSafeEvidence();
+            state.realMnAcceptanceSequenceRunning = false;
+            renderRealMnAcceptanceOverview({safeEvidenceRequested: true});
+          }, 250);
+        });
+      }, 250);
+    });
+  }
+
+  function setAcceptanceLineAndDetail(lineId, detailId, lineText, lineClassName, detailText) {
+    var line = byId(lineId);
+    var detail = byId(detailId);
+    if (line) {
+      line.textContent = lineText;
+      line.className = lineClassName;
+    }
+    if (detail) {
+      detail.textContent = detailText;
+    }
+  }
+
+  function renderRealMnAcceptancePanel(result) {
+    result = result || {};
+    if (result.singleDocumentAcceptance || result.singleDocumentReady !== undefined) {
+      renderSingleDocumentAcceptance(result);
+    }
+    if (result.uiFunctionalAcceptance || result.uiFunctionalReady !== undefined || result.uiFunctionalBlockerCount !== undefined) {
+      renderUiFunctionalAcceptance(result);
+    }
+    renderRealMnAcceptanceOverview();
+  }
+
+  function renderUiFunctionalAcceptance(result) {
+    result = result || {};
+    state.latestUiFunctionalAcceptance = result;
+    var line = byId('uiFunctionalAcceptanceLine');
+    var detail = byId('uiFunctionalAcceptanceDetail');
+    var mainLine = byId('mainUiFunctionalAcceptanceLine');
+    var mainDetail = byId('mainUiFunctionalAcceptanceDetail');
+    if ((!line || !detail) && (!mainLine || !mainDetail)) return;
+    if (!result.uiFunctionalAcceptance && result.uiFunctionalReady === undefined) {
+      setAcceptanceLineAndDetail(
+        'uiFunctionalAcceptanceLine',
+        'uiFunctionalAcceptanceDetail',
+        'UI 功能验收：未运行',
+        'release-acceptance-line warn',
+        '点击后会用任意文档 payload 跑完整 WebView 渲染、交互、动作和写入桥接验收；它不等于真实 MN4 当前文档验收通过，结果里会单独显示真实 MN4 运行态边界。'
+      );
+      setAcceptanceLineAndDetail(
+        'mainUiFunctionalAcceptanceLine',
+        'mainUiFunctionalAcceptanceDetail',
+        '任意文档 UI 验收：未运行',
+        'release-acceptance-line warn',
+        '点击“任意文档 UI 验收”跑 WebView 渲染、交互、动作和写入桥接 gate。'
+      );
+      renderRealMnAcceptanceOverview();
+      return;
+    }
+    var ready = !!result.uiFunctionalReady;
+    var blocked = parseInt(result.uiFunctionalBlockerCount || 0, 10);
+    var passed = parseInt(result.uiFunctionalPassedCount || 0, 10);
+    var total = parseInt(result.uiFunctionalTotalCount || 0, 10);
+    var lineClass = 'release-acceptance-line ' + (ready ? 'ok' : 'error');
+    var settingsLineText = 'UI 功能验收：' + (ready ? 'PASS' : 'BLOCK') + ' / ' + passed + '/' + total + ' / 阻塞 ' + blocked;
+    var mainLineText = '任意文档 UI 验收：' + (ready ? 'PASS' : 'BLOCK') + ' / ' + passed + '/' + total + ' / 阻塞 ' + blocked;
+    var boundary = result.realMnRuntimeAcceptance || {};
+    var boundaryStatus = boundary.status || (result.realMnRuntimeReady ? 'PASS' : 'BLOCK');
+    var boundaryPassed = parseInt(boundary.passedCount || 0, 10);
+    var boundaryTotal = parseInt(boundary.totalCount || 0, 10);
+    var boundaryBlocked = parseInt(boundary.blockerCount || result.realMnRuntimeBlockerCount || 0, 10);
+    var boundaryScope = boundary.topicid || boundary.bookmd5
+      ? ' / topicid=' + (boundary.topicid || '') + ' / bookmd5=' + (boundary.bookmd5 || '')
+      : '';
+    var boundaryText = '真实 MN4 运行态验收：' + boundaryStatus + ' / ' + boundaryPassed + '/' + boundaryTotal + ' / 阻塞 ' + boundaryBlocked + boundaryScope +
+      '\n说明：UI 功能验收只证明 WebView/桥接，不证明当前 MN4 文档真实写入、回滚和高亮通过。';
+    if (boundary.singleDocumentAcceptance) {
+      boundaryText += '\n' + formatSingleDocumentChecks(boundary.singleDocumentAcceptance);
+    } else if (Array.isArray(boundary.nextActions) && boundary.nextActions.length) {
+      boundaryText += '\n下一步：' + boundary.nextActions[0];
+    }
+    var recommended = Array.isArray(boundary.recommendedActions) ? boundary.recommendedActions : [];
+    var recommendedButtons = [];
+    if (recommended.length) {
+      var labels = [];
+      for (var ri = 0; ri < recommended.length && ri < 5; ri++) {
+        (function(action) {
+          action = action || {};
+          var label = action.label || action.id || '';
+          if (label) labels.push(label + (action.writeRisk ? '（写入）' : ''));
+          var button = document.createElement('button');
+          button.id = realMnRepairButtonId(action);
+          button.className = 'small-button real-mn-runtime-repair-button' + (action.writeRisk ? ' warn' : '');
+          button.type = 'button';
+          button.textContent = label || '推荐修复';
+          button.title = action.writeRisk ? '需要写入确认，不会自动执行。' : '点击执行这个安全修复动作。';
+          button.setAttribute('data-real-mn-repair-action', action.id || action.handler || 'repair');
+          button.addEventListener('click', function(ev) {
+            releaseButtonFocus(ev.currentTarget);
+            runRealMnRuntimeRepairAction(action);
+          });
+          recommendedButtons.push(button);
+        })(recommended[ri]);
+      }
+      if (labels.length) boundaryText += '\n推荐修复：' + labels.join(' / ');
+    }
+    var textNode = document.createElement('div');
+    textNode.className = 'release-acceptance-detail-text';
+    var detailText = formatUiFunctionalChecks(result.uiFunctionalAcceptance || {}) + '\n\n' + boundaryText;
+    setAcceptanceLineAndDetail('uiFunctionalAcceptanceLine', 'uiFunctionalAcceptanceDetail', settingsLineText, lineClass, detailText);
+    setAcceptanceLineAndDetail('mainUiFunctionalAcceptanceLine', 'mainUiFunctionalAcceptanceDetail', mainLineText, lineClass, detailText);
+    textNode.textContent = detailText;
+    if (detail && recommendedButtons.length) {
+      var actionsNode = document.createElement('div');
+      actionsNode.className = 'real-mn-runtime-repair-actions';
+      var safeActions = realMnRuntimeSafeEvidenceActions();
+      if (safeActions.length) {
+        var safeButton = document.createElement('button');
+        safeButton.id = 'realMnRuntimeSafeEvidenceButton';
+        safeButton.className = 'small-button primary-lite real-mn-runtime-safe-evidence-button';
+        safeButton.type = 'button';
+        safeButton.textContent = '一键安全采证';
+        safeButton.title = '只执行无写入的真实 MN4 采证动作；写入风险动作仍需手动确认。';
+        safeButton.addEventListener('click', function(ev) {
+          releaseButtonFocus(ev.currentTarget);
+          runRealMnRuntimeSafeEvidence();
+        });
+        actionsNode.appendChild(safeButton);
+      }
+      for (var bi = 0; bi < recommendedButtons.length; bi++) actionsNode.appendChild(recommendedButtons[bi]);
+      replaceElementChildren(detail, [textNode, actionsNode]);
+    } else if (detail) {
+      replaceElementChildren(detail, [textNode]);
+    }
+    renderRealMnAcceptanceOverview();
   }
 
   function renderNativeHighlightWizard(result) {
@@ -6539,6 +8000,7 @@
     var mainPanel = byId('mainNativeHighlightWizardPanel');
     var mainLine = byId('mainNativeHighlightWizardLine');
     var mainDetail = byId('mainNativeHighlightWizardDetail');
+    var mainActions = byId('mainNativeHighlightWizardActions');
     if (!line && !mainLine) return;
     var wizard = result.nativeHighlightWizard || {};
     var lineText = '';
@@ -6563,11 +8025,40 @@
       var latest = wizard.latestEvent || {};
       var pieces = [];
       if (wizard.instruction) pieces.push(wizard.instruction);
-      if (latest.event) pieces.push('最近事件：' + latest.event);
-      if (wizard.latestEventAgeSeconds !== undefined && wizard.latestEventAgeSeconds !== null) {
-        pieces.push('等待已超过：' + wizard.latestEventAgeSeconds + ' 秒');
+      var latestName = wizard.latestEventName || latest.event || '';
+      if (latestName) {
+        var latestLine = '最近事件：' + latestName;
+        if (wizard.latestEventReason) latestLine += ' / 原因：' + wizard.latestEventReason;
+        pieces.push(latestLine);
       }
+      if (wizard.elapsedSeconds !== undefined && wizard.elapsedSeconds !== null) {
+        pieces.push('已等待：' + wizard.elapsedSeconds + ' 秒');
+      } else if (wizard.latestEventAgeSeconds !== undefined && wizard.latestEventAgeSeconds !== null) {
+        pieces.push('已等待：' + wizard.latestEventAgeSeconds + ' 秒');
+      }
+      if (wizard.secondsRemaining !== undefined && wizard.secondsRemaining !== null && !expired && !complete) {
+        pieces.push('剩余窗口：' + wizard.secondsRemaining + ' 秒');
+      }
+      var probe = wizard.selectionProbe || result.selectionProbe || {};
+      if (probe && probe.schema) {
+        var probeLine = '选区探针：';
+        if (probe.hasSelectionText) {
+          probeLine += '已读到选区 ' + (probe.selectionLength || 0) + ' 字符';
+        } else if (probe.hasSelectionImage) {
+          probeLine += '已读到区域/图片选区 ' + (probe.selectionImageBytes || 0) + ' bytes';
+        } else if (probe.hasDocumentController) {
+          probeLine += 'controller 可见，但 selectionText=0 / imageFromSelection=0';
+        } else {
+          probeLine += '未找到可用 controller';
+        }
+        if (probe.selectedDocumentControllerLabel) probeLine += ' / ' + probe.selectedDocumentControllerLabel;
+        if (probe.error) probeLine += ' / 错误：' + probe.error;
+        pieces.push(probeLine);
+      }
+      var checklist = Array.isArray(wizard.selectionChecklist) ? wizard.selectionChecklist : [];
+      if (checklist.length) pieces.push('操作检查：\n- ' + checklist.join('\n- '));
       if (blocked.length) pieces.push('阻塞项：' + blocked.join(', '));
+      if (wizard.recoverable && wizard.retryAction) pieces.push('可恢复：点击“重新高亮采证”后在 PDF 原文重新选中一小段文字。');
       detailText = pieces.join('\n') || '等待高亮采证状态。';
     }
     if (line) {
@@ -6581,6 +8072,16 @@
       mainLine.className = 'native-highlight-guide-line ' + stateClass;
     }
     if (mainDetail) mainDetail.textContent = detailText;
+    if (mainActions) {
+      mainActions.className = 'native-highlight-guide-actions' + (hideMain ? ' hidden' : '');
+      var retry = byId('nativeHighlightWizardRetryButton');
+      var refresh = byId('nativeHighlightWizardRefreshButton');
+      if (retry) {
+        retry.textContent = wizard.retryLabel || (wizard.stage ? '重新高亮采证' : '高亮采证');
+        retry.disabled = wizard.stage === 'complete';
+      }
+      if (refresh) refresh.disabled = false;
+    }
   }
 
   function renderReleaseAcceptance(result) {
@@ -6816,11 +8317,12 @@
     stopNativeHighlightWizardRefresh();
     state.nativeHighlightWizardTimer = window.setTimeout(function() {
       state.nativeHighlightWizardTimer = null;
-      refreshNativeHighlightWizard();
+      refreshNativeHighlightWizard(false);
     }, 3000);
   }
 
-  function checkSingleDocumentAcceptance() {
+  function checkSingleDocumentAcceptance(done) {
+    if (typeof done !== 'function') done = null;
     startProgress('single_document_acceptance_summary', '正在检查本文档', 'Companion 正在读取当前 topic/book 的事件、action result 和高亮证据。');
     postCompanion('single_document_acceptance_summary', {}, function(result) {
       finishProgressStage('本文档验收完成', result && result.message ? result.message : '本文档验收已返回。');
@@ -6830,10 +8332,50 @@
       } else if (!result || !result.ok) {
         addFailureMessage('本文档验收失败', result);
       }
+      if (done) done(result || {});
     });
   }
 
-  function refreshNativeHighlightWizard() {
+  function checkUiFunctionalAcceptance(done) {
+    if (typeof done !== 'function') done = null;
+    startProgress('ui_functional_acceptance_summary', '正在运行 UI 功能验收', 'Companion 正在启动本地 headless browser，执行任意文档渲染和交互 gate。完整按钮动作 gate 由命令行验收覆盖，避免真实 WebView 递归触发自身。');
+    postCompanion('ui_functional_acceptance_summary', {
+      fullBrowser: false,
+      browserRender: true,
+      browserInteraction: true,
+      browserActions: false,
+      browserWriteActions: false,
+      browserTimeout: 15,
+      invocationSurface: 'marginnote-webview'
+    }, function(result) {
+      finishProgressStage('UI 功能验收完成', result && result.message ? result.message : 'UI 功能验收已返回。');
+      renderUiFunctionalAcceptance(result || {});
+      if (result && result.reply) {
+        addMessage('assistant', result.reply);
+      } else if (!result || !result.ok) {
+        addFailureMessage('UI 功能验收失败', result);
+      }
+      if (done) done(result || {});
+    });
+  }
+
+  function refreshNativeHighlightWizard(probeFirst) {
+    if (probeFirst) {
+      startProgress('request_pdf_selection_probe', '正在刷新 PDF 选区探针', 'Companion 正在请求 MN4 原生侧只读读取当前 PDF 选区；不会写入高亮、卡片或脑图。');
+      postCompanion('request_pdf_selection_probe', {source: 'native-highlight-wizard-refresh'}, function(probeResult) {
+        finishProgressStage('PDF 选区探针已请求', probeResult && probeResult.message ? probeResult.message : '保持当前 PDF 打开，稍后刷新高亮采证状态。');
+        if (probeResult && probeResult.nativeHighlightWizard) renderNativeHighlightWizard(probeResult || {});
+        if (probeResult && probeResult.selectionProbe && !probeResult.nativeHighlightWizard) renderNativeHighlightWizard({nativeHighlightWizard: {stage: 'waiting_selection', selectionProbe: probeResult.selectionProbe}});
+        if (!probeResult || !probeResult.ok) {
+          addFailureMessage('PDF 选区探针刷新失败', probeResult);
+          return;
+        }
+        window.setTimeout(function() {
+          refreshNativeHighlightWizard(false);
+        }, 1200);
+      });
+      return;
+    }
     postCompanion('native_highlight_wizard_status', {}, function(result) {
       renderNativeHighlightWizard(result || {});
       if (!result || !result.ok) addFailureMessage('高亮采证状态刷新失败', result);
@@ -7836,6 +9378,7 @@
       var idleLabel = cache.label || (pdfState === 'missing' ? 'PDF缓存：尚未缓存' : 'PDF缓存：等待当前文档');
       var idleDetail = cache.detail || (pdfState === 'missing' ? '当前文档还没有缓存副本。' : '打开或刷新当前文档后会自动更新状态。');
       text.textContent = idleDetail ? idleLabel + '：' + idleDetail : idleLabel;
+      renderAdvancedToolCenter();
       return;
     }
     var label = cache.label || 'PDF缓存';
@@ -7864,6 +9407,7 @@
     }
     banner.className = className;
     text.textContent = detail ? label + '：' + detail : label;
+    renderAdvancedToolCenter();
   }
 
   function normalizeMindmapTargetState(targetState) {
@@ -7909,6 +9453,7 @@
     var label = targetState.label || (target.rootTitle ? ('文档脑图：' + target.rootTitle) : '目标脑图');
     select.title = (targetState.detail ? targetState.detail + '\n' : '') + label;
     bar.className = 'mindmap-target-bar ' + status;
+    renderAdvancedToolCenter();
     scheduleAgentPlanRefresh();
   }
 
@@ -7998,8 +9543,20 @@
     if (result.releaseAcceptance || result.releasable !== undefined || result.blockerCount !== undefined) {
       renderReleaseAcceptance(result);
     }
+    if (
+      result.singleDocumentAcceptance ||
+      result.singleDocumentReady !== undefined ||
+      result.singleDocumentBlockerCount !== undefined ||
+      result.uiFunctionalAcceptance ||
+      result.uiFunctionalReady !== undefined ||
+      result.uiFunctionalBlockerCount !== undefined
+    ) {
+      renderRealMnAcceptancePanel(result);
+    }
     renderMainPinnedButtons();
     renderCustomButtons();
+    renderAdvancedToolCenter();
+    renderExpertMode();
     updateActionAvailability();
     if (!state.busy && pending > 0) {
       window.setTimeout(drainNextQueuedAction, 300);
@@ -8230,13 +9787,14 @@
     var message = update.message || '尚未检查更新。';
     setText('updateVersionLine', '当前：' + current + ' / 最新：' + latest);
     var line = byId('updateStatusLine');
+    var showNotice = !!(update.available && update.ok !== false && status !== 'error');
     if (line) {
-      if (update.available) {
-        line.textContent = '更新：发现新版本 ' + latest;
-        line.className = 'update-status-line available';
-      } else if (status === 'error' || update.ok === false) {
+      if (status === 'error' || update.ok === false) {
         line.textContent = '更新：检查失败';
         line.className = 'update-status-line error';
+      } else if (update.available) {
+        line.textContent = '更新：发现新版本 ' + latest;
+        line.className = 'update-status-line available';
       } else if (status === 'installing') {
         line.textContent = '更新：正在安装';
         line.className = 'update-status-line available';
@@ -8259,9 +9817,9 @@
     }
     var notice = byId('updateNotice');
     if (notice) {
-      notice.className = update.available ? 'update-notice' : 'update-notice hidden';
+      notice.className = showNotice ? 'update-notice' : 'update-notice hidden';
     }
-    setText('updateNoticeText', update.available ? ('发现插件更新：v' + latest) : '');
+    setText('updateNoticeText', showNotice ? ('发现插件更新：v' + latest) : '');
   }
 
   function openUpdateSettings() {
@@ -8828,6 +10386,9 @@
         refreshAiEditVerification(transactionId, panels[i]);
       }
     },
+    setAiEditTransactionStatus: function(payload) {
+      renderAiEditTransactionCenter(payload || {});
+    },
     setBusy: function(payload) {
       state.busy = !!(payload && payload.busy);
       setBusyButtons(isActiveRun());
@@ -8895,12 +10456,54 @@
         switchWorkspaceSurface(ev.currentTarget.getAttribute('data-workspace-surface'));
       });
     }
+    var workspaceSurfaceSelect = byId('workspaceSurfaceSelect');
+    if (workspaceSurfaceSelect) {
+      releaseSelectFocusBeforeNativeMenu(workspaceSurfaceSelect);
+      workspaceSurfaceSelect.addEventListener('change', function(ev) {
+        switchWorkspaceSurface(ev.currentTarget.value || 'console');
+        releaseTextInputFocus('workspaceSurfaceSelect');
+      });
+    }
+    bindButton('workspaceNavigatorToggleButton', function() {
+      state.workspaceNavigatorExpanded = !state.workspaceNavigatorExpanded;
+      renderWorkspaceNavigator();
+    });
     bindButton('chatModeButton', function() {
       switchProductMode('chat');
     });
     bindButton('agentWorkspaceModeButton', function() {
       switchProductMode('workspace');
     });
+    bindButton('advancedNextStepButton', function() {
+      var button = byId('advancedNextStepButton');
+      runAdvancedPrimaryAction(button ? button.getAttribute('data-advanced-next-action') : 'chat');
+    });
+    bindButton('advancedReadButton', function() {
+      stageAdvancedToolPrompt(
+        'generate_full_reading',
+        '解读当前资料：请先说明这份资料讲什么、核心问题、关键概念、方法或论证链条、证据、局限，并给出一版可以直接讲给别人听的结构化讲解。',
+        '解读当前资料'
+      );
+    });
+    bindButton('advancedMindmapButton', function() {
+      stageAdvancedToolPrompt(
+        'generate_mindmap',
+        '根据当前资料生成结构化脑图大纲：节点要短，层级清楚，覆盖核心章节、概念、方法、证据、结论和局限；先生成草稿，等待我确认后再写入脑图。',
+        '生成/整理脑图'
+      );
+    });
+    bindButton('advancedCardsButton', function() {
+      stageAdvancedToolPrompt(
+        'generate_card',
+        '根据当前选区或当前资料生成复习卡：每张卡只覆盖一个概念、公式、方法、证据或局限点；卡片要短，能复习，保留来源线索，等待我确认后再写入。',
+        '生成复习卡'
+      );
+    });
+    bindButton('advancedVerifyButton', function() {
+      runAdvancedPrimaryAction('verify');
+    });
+    bindButton('expertModeToggleButton', toggleExpertMode);
+    bindButton('expertModeBackButton', exitExpertMode);
     bindButton('closeButton', function() {
       bridge('close', {});
     });
@@ -8911,6 +10514,24 @@
     bindButton('commandPaneToggleButton', toggleCommandPane);
     bindButton('notebookWorkspaceRefreshButton', function() {
       refreshNotebookWorkspace(true);
+    });
+    bindButton('notebookWorkspaceDetailsToggleButton', function() {
+      state.notebookWorkspaceExpanded = !state.notebookWorkspaceExpanded;
+      renderNotebookWorkspaceShell();
+      var details = byId('notebookWorkspaceDetails');
+      if (state.notebookWorkspaceExpanded && details) {
+        window.setTimeout(function() {
+          try {
+            details.scrollIntoView({block: 'nearest', inline: 'nearest'});
+          } catch (err) {
+            details.scrollIntoView();
+          }
+        }, 0);
+      }
+    });
+    bindButton('notebookKnowledgeMatrixToggleButton', function() {
+      state.knowledgeMatrixExpanded = !state.knowledgeMatrixExpanded;
+      renderNotebookKnowledgeMatrix(state.notebookWorkspace ? state.notebookWorkspace.knowledgeMatrix : {});
     });
     bindButton('notebookWorkspaceRunbookAutoButton', runNotebookWorkspaceAutoPlan);
     bindButton('notebookWorkspaceRunbookContinueButton', runNotebookWorkspaceContinue);
@@ -8945,6 +10566,10 @@
       refreshOperationLedger(true);
     });
     bindButton('operationLedgerDetailCloseButton', closeOperationLedgerDetail);
+    bindButton('verificationReportRefreshButton', function() {
+      refreshVerificationCenter(true);
+    });
+    bindButton('verificationRepairPlanRecommendedButton', runVerificationRepairRecommended);
     bindButton('workflowRunInspectorCloseButton', closeWorkflowRunInspector);
     bindButton('configBackButton', closeConfigPage);
     bindButton('contextButton', function() {
@@ -8985,8 +10610,14 @@
     bindButton('updateNoticeOpenSettingsButton', openUpdateSettings);
     bindButton('settingsHighlightStatusButton', diagnoseHighlights);
     bindButton('nativeHighlightWizardButton', startNativeHighlightWizard);
+    bindButton('nativeHighlightWizardRetryButton', startNativeHighlightWizard);
+    bindButton('nativeHighlightWizardRefreshButton', function() { refreshNativeHighlightWizard(true); });
+    bindButton('realMnAcceptanceRunAllButton', runRealMnAcceptanceSequence);
     bindButton('singleDocumentAcceptanceButton', checkSingleDocumentAcceptance);
     bindButton('releaseAcceptanceButton', checkReleaseAcceptance);
+    bindButton('uiFunctionalAcceptanceButton', checkUiFunctionalAcceptance);
+    bindButton('mainUiFunctionalAcceptanceButton', checkUiFunctionalAcceptance);
+    bindButton('realMnAcceptanceSafeEvidenceButton', runRealMnAcceptanceSafeEvidence);
     bindButton('openPermissionSettingsButton', openPermissionSettings);
     bindButton('mnRuntimeNoticeRefreshButton', refreshNativeCapabilities);
     bindButton('mnRuntimeNoticeSettingsButton', function() {

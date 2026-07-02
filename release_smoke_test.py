@@ -14,8 +14,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.40-latest-dist.zip"
-DEFAULT_MNADDON = ROOT / "release/CodexCompanion-0.4.40-latest.mnaddon"
+DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.41-latest-dist.zip"
+DEFAULT_MNADDON = ROOT / "release/CodexCompanion-0.4.41-latest.mnaddon"
 
 REQUIRED_SUFFIXES = [
     "README.md",
@@ -39,6 +39,7 @@ REQUIRED_SUFFIXES = [
     "release_smoke_test.py",
     "release_acceptance.py",
     "single_document_acceptance.py",
+    "ui_functional_acceptance.py",
     "build_pkg.py",
     "notarize_pkg.py",
     "prepare_release_handoff.py",
@@ -57,6 +58,7 @@ PRIVATE_NAMES = {
     "companion/companion_settings.json",
     "companion/events.jsonl",
     "companion/goal.json",
+    "companion/mn-object-registry.json",
     "companion/companion.pid",
 }
 PRIVATE_PARTS = (
@@ -68,12 +70,13 @@ PRIVATE_PARTS = (
     "companion/control/",
     "companion/backups/",
     "companion/sessions/",
+    "companion/mn-object-registry/",
 )
 
 MARKERS = {
     "README.md": "Codex Companion for MarginNote 4",
     "README.zh-CN.md": "语言: [English](README.md) | **简体中文**",
-    "CHANGELOG.md": "## 0.4.40 - 2026-06-27",
+    "CHANGELOG.md": "## 0.4.41 - 2026-07-02",
     "LICENSE": "MIT License",
     "README-FIRST.txt": "Double-click: Install Codex Companion.command",
     "Install Codex Companion.command": "install.sh",
@@ -88,6 +91,7 @@ MARKERS = {
     "Prepare Release Handoff.command": "prepare_release_handoff.py",
     "release_acceptance.py": "Run final release acceptance gates",
     "single_document_acceptance.py": "codex-companion-single-document-acceptance-v1",
+    "ui_functional_acceptance.py": "codex-companion-ui-functional-acceptance-v1",
     "build_pkg.py": "PACKAGE_IDENTIFIER = \"com.codex.marginnote-companion\"",
     "notarize_pkg.py": "notarytool submit",
     "prepare_release_handoff.py": "Prepare a Codex Companion release handoff bundle",

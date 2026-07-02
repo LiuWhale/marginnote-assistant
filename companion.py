@@ -28,14 +28,19 @@ from urllib.parse import parse_qs, unquote, urlparse
 import agent_workbench
 import diagnostic_log
 import external_gateway
+import knowledge_console
 import knowledge_index
 import marginnote_api_adapter
+import notebook_runbook
+import object_intake
 import object_kernel
+import object_task_composer
 import operation_runtime
 import source_registry
 import skill_marketplace
 import transaction_manager
 import verification_agent
+import workflow_builder
 import workflow_engine
 import update_manager
 from runtime_config import (
@@ -94,7 +99,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.40"
+CURRENT_PLUGIN_VERSION = "0.4.41"
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -106,9 +111,12 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-command-prepared",
     "selection-popup-diagnostics-v1",
     "native-highlight-selection-poll-v1",
+    "native-highlight-selection-poll-probe-v1",
     "selection-popup-scene-observer-v1",
     "selection-popup-notebook-rebind-v1",
     "native-highlight-selection-text-resolver-v1",
+    "native-pdf-selection-probe-v1",
+    "native-pdf-selection-image-probe-v1",
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
     "ai-edit-undo-rollback-v2",
@@ -208,10 +216,12 @@ READ_ONLY_ACTIONS = {
     "request_pdf_cache",
     "request_web_panel_reload",
     "request_native_capability_probe",
+    "request_pdf_selection_probe",
     "collect_mn_runtime_evidence",
     "restart_marginnote4",
     "release_acceptance_summary",
     "single_document_acceptance_summary",
+    "ui_functional_acceptance_summary",
     "native_highlight_wizard_start",
     "native_highlight_wizard_status",
     "queue_status",
@@ -232,6 +242,7 @@ READ_ONLY_ACTIONS = {
     "object_activity",
     "operation_ledger_list",
     "operation_ledger_get",
+    "verification_report_list",
     "ai_edit_transaction_list",
     "ai_edit_transaction_get",
     "ai_edit_transaction_verify",
@@ -323,6 +334,7 @@ NATIVE_QUEUE_ACTIONS = {
     "highlight_current_selection",
     "reload_web_panel",
     "probe_native_api_capabilities",
+    "probe_pdf_selection",
     "write_draft",
     "read_mindmap_tree",
     "scan_mn_objects",
@@ -1566,7 +1578,7 @@ def workflow_list(payload: dict[str, Any]) -> dict[str, Any]:
         runs.append(summary)
         if len(runs) >= int(payload.get("limit") or 20):
             break
-    return {
+    result = {
         "ok": True,
         "message": f"已读取 {len(runs)} 个工作流。",
         "workflowRuns": runs,
@@ -1574,6 +1586,8 @@ def workflow_list(payload: dict[str, Any]) -> dict[str, Any]:
         "latestStatus": str(runs[0].get("status") or "none") if runs else "none",
         "workflowTemplates": workflow_engine.list_workflow_templates(),
     }
+    result["workflowBuilderBoard"] = workflow_builder.build_board(result)
+    return result
 
 
 def notebook_workspace_action(
@@ -1584,6 +1598,8 @@ def notebook_workspace_action(
     surface: str,
     detail: str,
     tone: str = "primary",
+    disabled: bool = False,
+    disabled_reason: str = "",
 ) -> dict[str, Any]:
     return {
         "schema": "codex.mn.notebookWorkspaceAction.v1",
@@ -1594,6 +1610,8 @@ def notebook_workspace_action(
         "surface": surface,
         "detail": detail,
         "tone": tone,
+        "disabled": bool(disabled),
+        "disabledReason": str(disabled_reason or ""),
     }
 
 
@@ -1606,11 +1624,15 @@ def notebook_workspace_primary_actions(
     workflow_count: int,
     ledger_total: int,
 ) -> list[dict[str, Any]]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    has_notebook_scope = bool(topic_id)
+    notebook_scope_reason = "缺少 topicid，无法请求 MarginNote 原生侧扫描或读取当前 notebook。"
     object_payload = {
         "mnObject": object_ref if object_ref_has_identity(object_ref) else {},
         "mnObjectId": str(object_ref.get("objectId") or ""),
-        "topicid": normalize_topic_id(payload),
-        "bookmd5": normalize_book_md5(payload),
+        "topicid": topic_id,
+        "bookmd5": book_md5,
     }
     actions = [
         notebook_workspace_action(
@@ -1620,6 +1642,30 @@ def notebook_workspace_primary_actions(
             object_payload,
             "console",
             "请求 MarginNote 原生侧扫描当前 notebook 可见对象，更新 Object Browser。",
+            disabled=not has_notebook_scope,
+            disabled_reason=notebook_scope_reason if not has_notebook_scope else "",
+        ),
+        notebook_workspace_action(
+            "open_object_browser",
+            "打开对象浏览器",
+            "object_browser",
+            object_payload,
+            "object_browser",
+            "打开 Object Browser，浏览已登记的真实 MN 对象、图谱、活动和账本入口。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "open_source_registry",
+            "打开 Source Registry",
+            "open_source_registry",
+            {
+                **object_payload,
+                "documentTitle": str(payload.get("documentTitle") or payload.get("bookTitle") or ""),
+                "source": "notebook-workspace",
+            },
+            "source_registry",
+            "打开 Source Registry，检查当前文档、PDF 缓存、上传文件和文件路径来源。",
+            "secondary",
         ),
         notebook_workspace_action(
             "read_mindmap_tree",
@@ -1629,6 +1675,17 @@ def notebook_workspace_primary_actions(
             "mindmap_studio",
             "读取当前选中脑图树，作为 Diff 和重组的真实基线。",
             "primary" if not mindmap_ready else "secondary",
+            disabled=not has_notebook_scope,
+            disabled_reason=notebook_scope_reason if not has_notebook_scope else "",
+        ),
+        notebook_workspace_action(
+            "open_mindmap_studio",
+            "打开 Mindmap Studio",
+            "open_mindmap_studio",
+            object_payload,
+            "mindmap_studio",
+            "打开 Mindmap Studio，查看已有脑图基线、Diff、事务和验证状态。",
+            "secondary",
         ),
         notebook_workspace_action(
             "plan_next_operation",
@@ -1648,12 +1705,39 @@ def notebook_workspace_primary_actions(
             "secondary",
         ),
         notebook_workspace_action(
+            "open_card_factory",
+            "打开 Card Factory",
+            "open_card_factory",
+            object_payload,
+            "card_factory",
+            "打开 Card Factory，查看卡片覆盖、复习队列、学习目标和质量风险。",
+            "secondary",
+        ),
+        notebook_workspace_action(
             "open_workflows",
             f"查看工作流 {workflow_count}",
             "workflow_list",
             object_payload,
             "workflow_builder",
             "查看当前对象的 workflow run、模板和确认点。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "open_workflow_builder",
+            "打开 Workflow Builder",
+            "open_workflow_builder",
+            object_payload,
+            "workflow_builder",
+            "打开 Workflow Builder，查看模板、最近 run、确认点、重试和恢复入口。",
+            "secondary",
+        ),
+        notebook_workspace_action(
+            "open_skill_center",
+            "打开 Skill Center",
+            "open_skill_center",
+            object_payload,
+            "skill_center",
+            "打开 Skill Center，查看围绕当前对象可用的技能包、权限声明、dry-run、回滚和验收规则。",
             "secondary",
         ),
         notebook_workspace_action(
@@ -1665,68 +1749,17 @@ def notebook_workspace_primary_actions(
             "查看当前对象的操作证据、事务、回滚和残留记录。",
             "secondary",
         ),
+        notebook_workspace_action(
+            "open_verification_center",
+            "打开验证中心",
+            "verification_report_list",
+            object_payload,
+            "verification_center",
+            "读取当前对象的 PASS/FAIL/UNKNOWN 验证报告和推荐修复动作。",
+            "secondary",
+        ),
     ]
     return actions
-
-
-def notebook_runbook_step(
-    step_id: str,
-    title: str,
-    status: str,
-    detail: str,
-    *,
-    action: dict[str, Any] | None = None,
-    evidence: str = "",
-) -> dict[str, Any]:
-    tone = {
-        "ready": "ready",
-        "action_required": "warning",
-        "blocked": "danger",
-        "pending": "secondary",
-    }.get(status, "secondary")
-    return {
-        "schema": "codex.mn.notebookRunbookStep.v1",
-        "id": step_id,
-        "title": title,
-        "status": status,
-        "tone": tone,
-        "detail": detail,
-        "evidence": evidence,
-        "action": action if isinstance(action, dict) else {},
-    }
-
-
-def notebook_runbook_summary(steps: list[dict[str, Any]]) -> dict[str, int]:
-    ready = sum(1 for step in steps if step.get("status") == "ready")
-    blocked = sum(1 for step in steps if step.get("status") == "blocked")
-    action_required = sum(1 for step in steps if step.get("status") == "action_required")
-    pending = sum(1 for step in steps if step.get("status") == "pending")
-    return {
-        "total": len(steps),
-        "ready": ready,
-        "blocked": blocked,
-        "actionRequired": action_required,
-        "pending": pending,
-    }
-
-
-def notebook_runbook_continue_action(step: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(step, dict):
-        return {}
-    action = step.get("action") if isinstance(step.get("action"), dict) else {}
-    if not action.get("action"):
-        return {}
-    return {
-        "schema": "codex.mn.notebookRunbookContinue.v1",
-        "stepId": str(step.get("id") or ""),
-        "stepTitle": str(step.get("title") or ""),
-        "label": f"继续：{step.get('title') or action.get('label') or '下一步'}",
-        "action": str(action.get("action") or ""),
-        "payload": action.get("payload") if isinstance(action.get("payload"), dict) else {},
-        "surface": str(action.get("surface") or ""),
-        "detail": str(step.get("detail") or action.get("detail") or ""),
-        "tone": str(action.get("tone") or step.get("tone") or "primary"),
-    }
 
 
 def clean_notebook_runbook_preflight_actions(actions: Any) -> list[dict[str, Any]]:
@@ -1912,39 +1945,6 @@ def notebook_runbook_preflight_record(payload: dict[str, Any]) -> dict[str, Any]
         "ok": True,
         "message": f"Notebook Runbook 预检已记录：{summary['status']}。",
         "preflightRun": summary,
-    }
-
-
-def notebook_runbook_auto_plan(steps: list[dict[str, Any]], latest_run: dict[str, Any] | None = None) -> dict[str, Any]:
-    safe_step_ids = ["scan_objects", "mindmap_baseline", "operation_plan"]
-    actions: list[dict[str, Any]] = []
-    blocked: list[dict[str, str]] = []
-    by_id = {str(step.get("id") or ""): step for step in steps if isinstance(step, dict)}
-    for step_id in safe_step_ids:
-        step = by_id.get(step_id) if isinstance(by_id.get(step_id), dict) else {}
-        if not step:
-            continue
-        status = str(step.get("status") or "")
-        action = notebook_runbook_continue_action(step)
-        if status == "action_required" and action.get("action"):
-            actions.append({**action, "order": len(actions) + 1})
-        elif status == "blocked":
-            blocked.append(
-                {
-                    "stepId": step_id,
-                    "stepTitle": str(step.get("title") or ""),
-                    "detail": str(step.get("detail") or ""),
-                }
-            )
-    return {
-        "schema": "codex.mn.notebookRunbookAutoPlan.v1",
-        "mode": "safe_preflight",
-        "label": "自动准备工作台",
-        "canRun": bool(actions),
-        "actions": actions,
-        "blocked": blocked,
-        "latestRun": latest_run if isinstance(latest_run, dict) and latest_run else notebook_runbook_preflight_summary({}),
-        "detail": "顺序执行安全预检动作：扫描 MN 对象、读取脑图基线、生成操作计划；不直接写入 MarginNote。",
     }
 
 
@@ -2482,101 +2482,6 @@ def notebook_study_program(
     }
 
 
-def notebook_workspace_runbook(
-    summary: dict[str, Any],
-    primary_actions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    actions_by_id = {str(item.get("id") or ""): item for item in primary_actions if isinstance(item, dict)}
-    focus = summary.get("focusObject") if isinstance(summary.get("focusObject"), dict) else {}
-    objects = summary.get("objects") if isinstance(summary.get("objects"), dict) else {}
-    mindmap = summary.get("mindmap") if isinstance(summary.get("mindmap"), dict) else {}
-    workflows = summary.get("workflows") if isinstance(summary.get("workflows"), dict) else {}
-    ledger = summary.get("ledger") if isinstance(summary.get("ledger"), dict) else {}
-    readiness = summary.get("readiness") if isinstance(summary.get("readiness"), dict) else {}
-    has_context = bool(summary.get("topicid") or summary.get("bookmd5") or summary.get("documentTitle") or object_ref_has_identity(focus))
-    registry_count = int(objects.get("registry") or 0)
-    native_scan_count = int(objects.get("nativeScan") or 0)
-    mindmap_ready = str(mindmap.get("status") or "") == "available"
-    workflow_count = int(workflows.get("runCount") or 0)
-    ledger_total = int(ledger.get("total") or 0)
-    mn_api_available = bool(readiness.get("mnApiAvailable"))
-
-    steps = [
-        notebook_runbook_step(
-            "context_scope",
-            "确认上下文",
-            "ready" if has_context else "blocked",
-            "已识别当前 notebook、文档或 MNObject。" if has_context else "还没有可用的 MarginNote 上下文。",
-            evidence=str(summary.get("documentTitle") or summary.get("bookmd5") or summary.get("topicid") or ""),
-        ),
-        notebook_runbook_step(
-            "scan_objects",
-            "扫描 MN 对象",
-            "ready" if native_scan_count > 0 else ("action_required" if mn_api_available else "blocked"),
-            f"Native Scan 已确认 {native_scan_count} 个原生对象。" if native_scan_count > 0 else "需要扫描当前 notebook 的原生对象，Object Browser 才不是只看聊天和本地证据。",
-            action=actions_by_id.get("scan_mn_objects"),
-            evidence=f"objects={int(objects.get('total') or 0)} / registry={registry_count} / nativeScan={native_scan_count}",
-        ),
-        notebook_runbook_step(
-            "mindmap_baseline",
-            "读取脑图基线",
-            "ready" if mindmap_ready else ("action_required" if mn_api_available else "blocked"),
-            f"已读取 {int(mindmap.get('nodeCount') or 0)} 个脑图节点。" if mindmap_ready else "需要读取当前脑图树，后续 Diff/合并/回滚才有真实基线。",
-            action=actions_by_id.get("read_mindmap_tree"),
-            evidence=str(mindmap.get("rootTitle") or mindmap.get("updatedAt") or ""),
-        ),
-        notebook_runbook_step(
-            "operation_plan",
-            "生成操作计划",
-            "action_required" if has_context else "blocked",
-            "把当前对象、权限、目标脑图和写入意图编译成 Operation Plan，再决定是否写入。" if has_context else "缺少上下文，不能生成可靠操作计划。",
-            action=actions_by_id.get("plan_next_operation"),
-            evidence=f"permission={readiness.get('permission') or 'unknown'} / mnApi={readiness.get('mnApiBackend') or 'unknown'}",
-        ),
-        notebook_runbook_step(
-            "workflow_runtime",
-            "检查工作流",
-            "ready" if workflow_count > 0 else "pending",
-            f"已有 {workflow_count} 个 workflow run，最近状态：{workflows.get('latestStatus') or 'unknown'}。" if workflow_count > 0 else "还没有当前文档 workflow run；长任务应从这里进入可审计运行。",
-            action=actions_by_id.get("open_workflows"),
-            evidence=f"templates={int(workflows.get('templateCount') or 0)}",
-        ),
-        notebook_runbook_step(
-            "operation_evidence",
-            "核对操作证据",
-            "ready" if ledger_total > 0 else "pending",
-            f"Operation Ledger 已有 {ledger_total} 条证据。" if ledger_total > 0 else "还没有当前文档账本证据；写入、确认和回滚应在这里留痕。",
-            action=actions_by_id.get("open_operation_ledger"),
-            evidence=f"filtered={int(ledger.get('filteredTotal') or ledger_total)} / total={ledger_total}",
-        ),
-    ]
-    counts = notebook_runbook_summary(steps)
-    status = "blocked" if counts["blocked"] else ("action_required" if counts["actionRequired"] else ("ready" if counts["ready"] == counts["total"] else "pending"))
-    next_step: dict[str, Any] = {}
-    for status_group in ("action_required", "pending", "blocked"):
-        next_step = next(
-            (
-                step
-                for step in steps
-                if step.get("status") == status_group
-                and isinstance(step.get("action"), dict)
-                and step.get("action", {}).get("action")
-            ),
-            {},
-        )
-        if next_step:
-            break
-    return {
-        "schema": "codex.mn.notebookRunbook.v1",
-        "status": status,
-        "summary": counts,
-        "steps": steps,
-        "nextStep": next_step if isinstance(next_step, dict) else {},
-        "continueAction": notebook_runbook_continue_action(next_step),
-        "autoPlan": notebook_runbook_auto_plan(steps, latest_notebook_runbook_preflight_run(summary)),
-    }
-
-
 def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
@@ -2685,11 +2590,25 @@ def notebook_workspace(payload: dict[str, Any]) -> dict[str, Any]:
     )
     summary["primaryActions"] = primary_actions
     summary["sourceRegistry"] = notebook_source_registry(payload, summary, primary_actions)
+    summary["knowledgeMatrix"] = knowledge_console.build_matrix(summary, primary_actions)
+    summary["objectIntake"] = object_intake.build_intake(summary, primary_actions)
+    summary["objectTaskComposer"] = object_task_composer.build_composer(
+        summary,
+        primary_actions,
+        summary["objectIntake"],
+        native_caps=latest_native_api_capabilities(str(payload.get("topicid") or ""), str(payload.get("bookmd5") or "")),
+        mn_api=mn_api,
+    )
+    workflow_payload["workflowBuilderBoard"] = workflow_builder.build_board(workflow_payload, summary["objectTaskComposer"])
     summary["studyProgram"] = notebook_study_program(summary, primary_actions)
-    summary["runbook"] = notebook_workspace_runbook(summary, primary_actions)
+    summary["runbook"] = notebook_runbook.build_runbook(
+        summary,
+        primary_actions,
+        latest_run=latest_notebook_runbook_preflight_run(summary),
+    )
     return {
         "ok": True,
-        "message": "已读取 Notebook Workspace。",
+        "message": "已读取当前上下文。",
         "notebookWorkspace": summary,
         "objectBrowser": object_browser_payload,
         "operationLedger": ledger_payload,
@@ -4641,6 +4560,30 @@ def request_native_capability_probe(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def request_pdf_selection_probe(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    if not topic_id:
+        return {"ok": False, "message": "刷新 PDF 选区探针失败：缺少 topicid。"}
+    command = {
+        "nativeAction": "probe_pdf_selection",
+        "message": "请 MN4 插件只读探测当前 PDF 选区。",
+        "source": str(payload.get("source") or "request_pdf_selection_probe"),
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    queued = enqueue_command({**payload, "command": command})
+    if not queued.get("ok"):
+        return queued
+    return {
+        "ok": True,
+        "message": "已请求刷新 PDF 选区探针。",
+        "reply": "已把“只读探测当前 PDF 选区”命令加入当前 notebook 队列；不会写入卡片、脑图、高亮或 PDF。",
+        "queued": queued["queued"],
+        "queue": queue_status_payload(topic_id, book_md5),
+        "selectionProbe": latest_pdf_selection_probe(topic_id, book_md5),
+    }
+
+
 def request_web_panel_reload(payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
@@ -5291,7 +5234,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.40-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.41-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -5607,6 +5550,341 @@ def single_document_acceptance_summary(payload: dict[str, Any]) -> dict[str, Any
     }
 
 
+def ui_functional_acceptance_script() -> Path:
+    return Path(__file__).resolve().with_name("ui_functional_acceptance.py")
+
+
+def load_ui_functional_acceptance_module() -> Any:
+    script = ui_functional_acceptance_script()
+    if not script.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("codex_mn_ui_functional_acceptance_runtime", script)
+    if not spec or not spec.loader:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def summarize_ui_functional_acceptance(report: dict[str, Any], limit: int = 15) -> str:
+    checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    lines: list[str] = []
+    for check in checks[:limit]:
+        if not isinstance(check, dict):
+            continue
+        status = str(check.get("status") or "FAIL")
+        check_id = str(check.get("id") or "check")
+        label = str(check.get("label") or check_id)
+        problems = check.get("problems") if isinstance(check.get("problems"), list) else []
+        detail = "; ".join(str(item) for item in problems[:2] if str(item).strip())
+        lines.append(f"- {status} {check_id}: {label}" + (f" - {detail}" if detail else ""))
+    if len(checks) > limit:
+        lines.append(f"- 另有 {len(checks) - limit} 项检查，查看 JSON 详情。")
+    problems = report.get("problems") if isinstance(report.get("problems"), list) else []
+    if problems:
+        lines.append("")
+        lines.append("主要问题：")
+        for problem in problems[:5]:
+            problem_text = str(problem or "").strip()
+            if problem_text:
+                lines.append(f"- {problem_text}")
+    return "\n".join(lines)
+
+
+REAL_MN_RUNTIME_REPAIR_ACTIONS: dict[str, dict[str, Any]] = {
+    "runtime_web_controls": {
+        "id": "reload_web_panel",
+        "label": "重新打开或刷新 Codex 面板",
+        "kind": "guide",
+        "handler": "reopenWebPanel",
+        "writeRisk": False,
+    },
+    "native_api_matrix": {
+        "id": "refresh_native_capabilities",
+        "label": "刷新 MN 能力",
+        "kind": "button",
+        "handler": "refreshNativeCapabilities",
+        "action": "request_native_capability_probe",
+        "writeRisk": False,
+    },
+    "chat_or_explain": {
+        "id": "ask_or_explain_current_selection",
+        "label": "在当前文档问一句或解释选区",
+        "kind": "guide",
+        "handler": "sendButton",
+        "action": "chat",
+        "writeRisk": False,
+    },
+    "card_write": {
+        "id": "create_native_cards",
+        "label": "生成并写入一组测试卡片",
+        "kind": "guide",
+        "action": "generate_card",
+        "writeRisk": True,
+    },
+    "mindmap_create": {
+        "id": "create_native_mindmap",
+        "label": "生成并写入测试脑图",
+        "kind": "guide",
+        "action": "generate_mindmap",
+        "writeRisk": True,
+    },
+    "mindmap_merge": {
+        "id": "append_current_mindmap",
+        "label": "选中目标节点后补到当前脑图",
+        "kind": "guide",
+        "action": "expand_node",
+        "writeRisk": True,
+    },
+    "pdf_cache": {
+        "id": "cache_current_pdf",
+        "label": "缓存当前 PDF",
+        "kind": "button",
+        "handler": "cacheCurrentPdf",
+        "action": "request_pdf_cache",
+        "writeRisk": False,
+    },
+    "native_highlight_visible": {
+        "id": "run_native_highlight_wizard",
+        "label": "运行高亮采证",
+        "kind": "button",
+        "handler": "startNativeHighlightWizard",
+        "action": "native_highlight_wizard_start",
+        "writeRisk": False,
+    },
+    "selection_popup_highlight": {
+        "id": "run_native_highlight_wizard",
+        "label": "运行高亮采证",
+        "kind": "button",
+        "handler": "startNativeHighlightWizard",
+        "action": "native_highlight_wizard_start",
+        "writeRisk": False,
+    },
+    "settings": {
+        "id": "save_settings",
+        "label": "保存设置并重新验收",
+        "kind": "button",
+        "handler": "saveSettings",
+        "action": "settings_update",
+        "writeRisk": False,
+    },
+    "file_upload": {
+        "id": "upload_supplement_file",
+        "label": "上传一个补充文件",
+        "kind": "guide",
+        "action": "upload_file",
+        "writeRisk": False,
+    },
+    "goal_run": {
+        "id": "run_one_shot_goal",
+        "label": "运行一次性目标",
+        "kind": "guide",
+        "action": "goal_run",
+        "writeRisk": False,
+    },
+    "queue": {
+        "id": "refresh_queue_status",
+        "label": "刷新队列状态",
+        "kind": "button",
+        "handler": "runToggle",
+        "action": "queue_status",
+        "writeRisk": False,
+    },
+    "history": {
+        "id": "open_history",
+        "label": "打开历史页",
+        "kind": "button",
+        "handler": "openConversationHistory",
+        "action": "history_list",
+        "writeRisk": False,
+    },
+    "annotated_pdf_export": {
+        "id": "export_annotated_pdf",
+        "label": "导出标注 PDF 副本",
+        "kind": "guide",
+        "action": "export_annotated_pdf",
+        "writeRisk": False,
+    },
+}
+
+
+def real_mn_runtime_recommended_actions(blocked_checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for check in blocked_checks:
+        check_id = str(check.get("id") or "")
+        template = REAL_MN_RUNTIME_REPAIR_ACTIONS.get(check_id)
+        if not template:
+            continue
+        action_id = str(template.get("id") or check_id)
+        if action_id in seen:
+            continue
+        item = dict(template)
+        item["checkId"] = check_id
+        item["checkLabel"] = str(check.get("label") or check_id)
+        actions.append(item)
+        seen.add(action_id)
+    return actions[:8]
+
+
+def real_mn_runtime_acceptance_boundary(payload: dict[str, Any]) -> dict[str, Any]:
+    result = single_document_acceptance_summary(payload)
+    report = result.get("singleDocumentAcceptance") if isinstance(result.get("singleDocumentAcceptance"), dict) else {}
+    ready = bool(result.get("singleDocumentReady"))
+    blocked = int(result.get("singleDocumentBlockerCount") or 0)
+    passed = int(result.get("singleDocumentPassedCount") or 0)
+    total = int(result.get("singleDocumentTotalCount") or 0)
+    status = "PASS" if ready else "BLOCK"
+    topic_id = str((report.get("topicid") if isinstance(report, dict) else "") or normalize_topic_id(payload) or "")
+    book_md5 = str((report.get("bookmd5") if isinstance(report, dict) else "") or normalize_book_md5(payload) or "")
+    next_actions = result.get("singleDocumentNextActions") if isinstance(result.get("singleDocumentNextActions"), list) else []
+    if not next_actions and isinstance(report.get("nextActions"), list):
+        next_actions = report.get("nextActions")
+    checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    blocked_checks = [check for check in checks if isinstance(check, dict) and str(check.get("status") or "") != "PASS"]
+    recommended_actions = real_mn_runtime_recommended_actions(blocked_checks)
+    return {
+        "schema": "codex-companion-real-mn-runtime-boundary-v1",
+        "status": status,
+        "ready": ready,
+        "blockerCount": blocked,
+        "passedCount": passed,
+        "totalCount": total,
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "message": str(result.get("message") or ""),
+        "singleDocumentAcceptance": report,
+        "nextActions": [str(item) for item in next_actions if str(item or "").strip()][:8],
+        "blockedChecks": blocked_checks[:8],
+        "recommendedActions": recommended_actions,
+    }
+
+
+def summarize_real_mn_runtime_boundary(boundary: dict[str, Any]) -> str:
+    if not isinstance(boundary, dict) or not boundary:
+        return "真实 MN4 运行态验收：未证明。UI 功能验收只证明 WebView/桥接，不证明当前 MN4 文档真实写入、回滚和高亮通过。"
+    status = str(boundary.get("status") or "BLOCK")
+    passed = int(boundary.get("passedCount") or 0)
+    total = int(boundary.get("totalCount") or 0)
+    blocked = int(boundary.get("blockerCount") or 0)
+    topic_id = str(boundary.get("topicid") or "")
+    book_md5 = str(boundary.get("bookmd5") or "")
+    scope = f" / topicid={topic_id} / bookmd5={book_md5}" if topic_id or book_md5 else ""
+    recommended = boundary.get("recommendedActions") if isinstance(boundary.get("recommendedActions"), list) else []
+    recommended_lines = ""
+    if recommended:
+        labels = [str(item.get("label") or item.get("id") or "").strip() for item in recommended[:5] if isinstance(item, dict)]
+        labels = [label for label in labels if label]
+        if labels:
+            recommended_lines = "\n推荐修复：" + " / ".join(labels)
+    return (
+        f"真实 MN4 运行态验收：{status} / {passed}/{total} / 阻塞 {blocked}{scope}\n"
+        "说明：UI 功能验收只证明 WebView/桥接；真实完成仍需要当前 MN4 文档的 single-document evidence。"
+        + ("\n" + summarize_single_document_acceptance(boundary.get("singleDocumentAcceptance") or {}, limit=5) if boundary.get("singleDocumentAcceptance") else "")
+        + recommended_lines
+    )
+
+
+def ui_functional_acceptance_document_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload) or "UI-ACCEPTANCE-TOPIC"
+    book_md5 = normalize_book_md5(payload) or "ui-acceptance-book"
+    document_title = str(
+        payload.get("documentTitle")
+        or payload.get("docTitle")
+        or payload.get("bookTitle")
+        or "任意文档 UI 功能验收.pdf"
+    ).strip()
+    mn_object = payload.get("mnObject") if isinstance(payload.get("mnObject"), dict) else {}
+    if not mn_object:
+        mn_object = {
+            "objectId": f"mnobj:doc:{book_md5}",
+            "kind": "document",
+            "title": document_title,
+            "sourceRef": {
+                "topicid": topic_id,
+                "bookmd5": book_md5,
+                "documentTitle": document_title,
+            },
+        }
+    return {
+        "action": "notebook_workspace",
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "docmd5": str(payload.get("docmd5") or book_md5),
+        "documentTitle": document_title,
+        "mnObject": mn_object,
+    }
+
+
+def ui_functional_acceptance_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    module = load_ui_functional_acceptance_module()
+    if module is None:
+        message = "找不到 ui_functional_acceptance.py，无法运行任意文档 UI 功能验收。"
+        return {
+            "ok": False,
+            "message": message,
+            "reply": message,
+            "uiFunctionalReady": False,
+            "uiFunctionalBlockerCount": 0,
+            "uiFunctionalAcceptance": None,
+        }
+    full_browser_value = payload.get("fullBrowser")
+    full_browser = True if full_browser_value is None else bool(full_browser_value)
+    try:
+        browser_timeout = float(payload.get("browserTimeout") or 15)
+    except Exception:
+        browser_timeout = 15.0
+    try:
+        report = module.evaluate_ui_functional_acceptance(
+            root=Path(__file__).resolve().parent,
+            document_payload=ui_functional_acceptance_document_payload(payload),
+            browser_render=bool(payload.get("browserRender", full_browser)),
+            browser_interaction=bool(payload.get("browserInteraction", full_browser)),
+            browser_actions=bool(payload.get("browserActions", full_browser)),
+            browser_write_actions=bool(payload.get("browserWriteActions", full_browser)),
+            browser_path=str(payload.get("browserPath") or ""),
+            browser_timeout=browser_timeout,
+        )
+    except Exception as exc:
+        message = f"任意文档 UI 功能验收执行失败：{exc}"
+        return {
+            "ok": False,
+            "message": message,
+            "reply": message,
+            "uiFunctionalReady": False,
+            "uiFunctionalBlockerCount": 0,
+            "uiFunctionalAcceptance": None,
+        }
+    checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    passed = sum(1 for item in checks if isinstance(item, dict) and str(item.get("status") or "") == "PASS")
+    total = len([item for item in checks if isinstance(item, dict)])
+    blocked = max(total - passed, 0)
+    ready = bool(report.get("ok"))
+    status_text = "PASS" if ready else "BLOCK"
+    real_mn_boundary = real_mn_runtime_acceptance_boundary(payload)
+    reply = (
+        f"任意文档 UI 功能验收：{status_text}\n"
+        f"文档：{report.get('documentTitle') or '任意文档'}\n"
+        f"通过：{passed}/{total}，阻塞项：{blocked}\n\n"
+        f"{summarize_ui_functional_acceptance(report)}\n\n"
+        f"{summarize_real_mn_runtime_boundary(real_mn_boundary)}"
+    )
+    return {
+        "ok": True,
+        "message": f"任意文档 UI 功能验收：{status_text}，阻塞项 {blocked}。",
+        "reply": reply,
+        "uiFunctionalReady": ready,
+        "uiFunctionalBlockerCount": blocked,
+        "uiFunctionalPassedCount": passed,
+        "uiFunctionalTotalCount": total,
+        "uiFunctionalProblems": report.get("problems") if isinstance(report.get("problems"), list) else [],
+        "uiFunctionalAcceptance": report,
+        "realMnRuntimeReady": bool(real_mn_boundary.get("ready")),
+        "realMnRuntimeBlockerCount": int(real_mn_boundary.get("blockerCount") or 0),
+        "realMnRuntimeAcceptance": real_mn_boundary,
+    }
+
+
 def latest_scoped_plugin_event(
     event_names: set[str],
     topic_id: str = "",
@@ -5625,6 +5903,69 @@ def latest_scoped_plugin_event(
             continue
         matches.append(item)
     return matches[-1] if matches else None
+
+
+def latest_pdf_selection_probe(topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
+    event = latest_scoped_plugin_event({"nativeHighlightSelectionProbe"}, topic_id, book_md5)
+    if not isinstance(event, dict) or not event:
+        return {
+            "schema": "codex.mn.pdfSelectionProbe.v1",
+            "ready": False,
+            "hasSelectionText": False,
+            "hasSelectionImage": False,
+            "hasSelectionPayload": False,
+            "selectionLength": 0,
+            "selectionImageBytes": 0,
+            "hasDocumentController": False,
+            "candidateCount": 0,
+            "candidateLabels": [],
+            "selectedDocumentControllerLabel": "",
+            "ageSeconds": 0,
+            "error": "",
+            "event": {},
+        }
+    extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+    labels = extra.get("candidateLabels")
+    if isinstance(labels, list):
+        candidate_labels = [str(item) for item in labels if str(item or "")]
+    elif labels:
+        candidate_labels = [str(labels)]
+    else:
+        candidate_labels = []
+    age_seconds = 0
+    epoch = event_epoch(event)
+    if epoch > 0:
+        age_seconds = int(max(0, time.time() - epoch))
+    selection_length = int(extra.get("selectionLength") or 0)
+    selection_image_bytes = int(extra.get("selectionImageBytes") or 0)
+    has_selection_text = bool(extra.get("hasSelectionText")) or selection_length > 0
+    has_selection_image = bool(extra.get("hasSelectionImage")) or selection_image_bytes > 0
+    has_selection_payload = bool(extra.get("hasSelectionPayload")) or has_selection_text or has_selection_image
+    has_document_controller = bool(extra.get("hasDocumentController"))
+    return {
+        "schema": "codex.mn.pdfSelectionProbe.v1",
+        "ready": has_selection_payload,
+        "hasSelectionText": has_selection_text,
+        "hasSelectionImage": has_selection_image,
+        "hasSelectionPayload": has_selection_payload,
+        "selectionLength": selection_length,
+        "selectionImageBytes": selection_image_bytes,
+        "hasDocumentController": has_document_controller,
+        "candidateCount": int(extra.get("candidateCount") or len(candidate_labels)),
+        "candidateLabels": candidate_labels,
+        "selectedDocumentControllerLabel": str(extra.get("selectedDocumentControllerLabel") or ""),
+        "imageAvailable": bool(extra.get("imageAvailable")),
+        "imageError": str(extra.get("imageError") or ""),
+        "currPageNo": int(extra.get("currPageNo") or 0),
+        "currPageIndex": int(extra.get("currPageIndex") or 0),
+        "focusNoteId": str(extra.get("focusNoteId") or ""),
+        "lastFocusNoteId": str(extra.get("lastFocusNoteId") or ""),
+        "visibleFocusNoteId": str(extra.get("visibleFocusNoteId") or ""),
+        "ageSeconds": age_seconds,
+        "error": str(extra.get("error") or ""),
+        "source": str(extra.get("source") or ""),
+        "event": event,
+    }
 
 
 def check_status_by_id(report: dict[str, Any], check_id: str) -> str:
@@ -5666,13 +6007,16 @@ def native_highlight_wizard_status(payload: dict[str, Any], queued_result: dict[
             "selectionPopupHighlightMenuInstalled",
             "selectionPopupHighlightMenuSkipped",
             "selectionPopupHighlightMenuFailed",
+            "nativeHighlightSelectionProbe",
         },
         topic_id,
         book_md5,
     )
+    selection_probe = latest_pdf_selection_probe(topic_id, book_md5)
     event_name = str((latest_event or {}).get("event") or "")
     latest_event_extra = (latest_event or {}).get("extra")
     latest_event_extra = latest_event_extra if isinstance(latest_event_extra, dict) else {}
+    latest_event_reason = str(latest_event_extra.get("reason") or "")
     latest_event_epoch = event_epoch(latest_event)
     latest_event_age_seconds = int(max(0, time.time() - latest_event_epoch)) if latest_event_epoch > 0 else 0
     waiting_event_expired = (
@@ -5693,7 +6037,11 @@ def native_highlight_wizard_status(payload: dict[str, Any], queued_result: dict[
         instruction = "插件正在主动轮询当前 PDF 选区。请回到 PDF 原文重新选中一小段文字；即使 MN4 没弹出选区菜单，插件也会尝试捕获选区并高亮。"
     elif event_name == "nativeHighlightNextSelectionPollObserved":
         stage = "selection_observed"
-        instruction = "主动轮询已观察到 PDF 选区，正在等待同一文档的原生高亮和可见高亮证据通过。"
+        image_bytes = int(latest_event_extra.get("selectionImageBytes") or 0)
+        if image_bytes > 0 and not int(latest_event_extra.get("selectionLength") or 0):
+            instruction = "主动轮询已观察到 PDF 区域/图片选区，正在等待同一文档的原生高亮和可见高亮证据通过。"
+        else:
+            instruction = "主动轮询已观察到 PDF 文字选区，正在等待同一文档的原生高亮和可见高亮证据通过。"
     elif event_name == "nativeHighlightNextSelectionPollExpired":
         stage = "expired"
         instruction = "本次主动轮询 PDF 选区已超时。请点击“高亮采证”重新启动，然后在 90 秒内回到 PDF 原文重新选中一小段文字。"
@@ -5727,6 +6075,8 @@ def native_highlight_wizard_status(payload: dict[str, Any], queued_result: dict[
         reason = str(latest_event_extra.get("reason") or "")
         if reason == "missing-selection-text":
             instruction = "MN4 已触发选区菜单链路，但没有拿到可用选区文本。请不要在 Web 面板里选字，回到 PDF 原文重新框选一小段文字。"
+        elif reason == "missing-selection-payload":
+            instruction = "MN4 已触发选区菜单链路，但没有拿到文字选区或区域/图片选区。请回到 PDF 原文重新框选一小段内容。"
         elif reason == "missing-popup-menu":
             instruction = "MN4 已拿到选区文本，但当前没有可追加的选区弹出菜单。请重新选中 PDF 原文，等待系统弹出菜单出现后再点 Codex 高亮入口。"
         else:
@@ -5738,23 +6088,91 @@ def native_highlight_wizard_status(payload: dict[str, Any], queued_result: dict[
     elif event_name == "selectionPopupHighlightMenuInstalled":
         stage = "verifying"
         instruction = "PDF 选区菜单入口已经安装，正在等待同一文档的原生高亮和可见高亮证据通过。"
+    elif event_name == "nativeHighlightSelectionProbe":
+        if selection_probe.get("hasSelectionText"):
+            stage = "selection_observed"
+            instruction = (
+                f"只读 PDF 选区探针已读到当前选区文本（{selection_probe.get('selectionLength')} 字符）。"
+                "如果高亮仍未通过，请点击“重新高亮采证”，保持选区后让 MN4 调用原生高亮。"
+            )
+        elif selection_probe.get("hasSelectionImage"):
+            stage = "selection_observed"
+            instruction = (
+                f"只读 PDF 选区探针已读到当前区域/图片选区（{selection_probe.get('selectionImageBytes')} bytes）。"
+                "如果高亮仍未通过，请点击“重新高亮采证”，保持选区后让 MN4 调用原生高亮。"
+            )
+        elif selection_probe.get("hasDocumentController"):
+            stage = "waiting_selection"
+            label = str(selection_probe.get("selectedDocumentControllerLabel") or "unknown")
+            if bool(latest_event_extra.get("pollArmed")) or selection_probe.get("source") == "next-selection-poll":
+                instruction = (
+                    f"主动轮询正在运行，已找到 documentController（{label}），但当前 selectionText=0 且 imageFromSelection=0。"
+                    "请在左侧 PDF 原文文字上拖选一小段，直到 MN4 弹出复制/颜色/标签等选区菜单；"
+                    "不要点右侧脑图的“选择”按钮，脑图选择不会产生 PDF 选区。"
+                )
+            else:
+                instruction = (
+                    f"只读 PDF 选区探针已找到 documentController（{label}），但当前 selectionText=0 且 imageFromSelection=0。"
+                    "请在左侧 PDF 原文文字上拖选一小段，直到 MN4 弹出复制/颜色/标签等选区菜单；"
+                    "不要点右侧脑图的“选择”按钮，脑图选择不会产生 PDF 选区。"
+                )
+        else:
+            stage = "selection_diagnostic"
+            instruction = "只读 PDF 选区探针没有找到可用 documentController。请重新打开目标 PDF 或重启 MarginNote 4 后刷新 MN 能力。"
     else:
         stage = "ready"
         instruction = "点击“高亮采证”后，回到 PDF 原文重新选中一小段文字。"
     if queued_result and queued_result.get("ok"):
         stage = "waiting_selection"
         instruction = "已请求 MN4 高亮当前或下一次 PDF 选区。请回到 PDF 原文，重新选中一小段文字。"
+    timed_wait_events = {
+        "nativeHighlightNextSelectionArmed",
+        "nativeHighlightNextSelectionConsumed",
+        "nativeHighlightNextSelectionPollStarted",
+        "nativeHighlightNextSelectionPollObserved",
+    }
+    waiting_stage = stage in {"waiting_selection", "selection_observed", "verifying"}
+    seconds_remaining: int | None = None
+    if waiting_stage and event_name in timed_wait_events and latest_event_age_seconds >= 0:
+        seconds_remaining = max(0, NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS - latest_event_age_seconds)
+    if waiting_stage and event_name == "nativeHighlightSelectionProbe" and bool(latest_event_extra.get("pollArmed")):
+        seconds_remaining = max(
+            0,
+            NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS - int(latest_event_extra.get("elapsedSeconds") or 0),
+        )
+    manual_selection_required = bool(
+        stage in {"ready", "expired", "failed", "selection_diagnostic", "waiting_selection"}
+        and not visible_ready
+        and not bool(selection_probe.get("hasSelectionPayload"))
+    )
+    selection_checklist = [
+        "在左侧 PDF 页面正文里拖选一小段真实文字，选中后应看到 MN4 的复制/颜色/标签菜单。",
+        "不要点击右侧脑图里的“选择”按钮；那只会选中脑图卡片，不会产生 PDF 原文选区。",
+        "不要在 Codex 插件 Web 面板里选字；插件只能读取 MN4 PDF documentController 暴露的选区。",
+    ] if manual_selection_required else []
+    recoverable = stage in {"ready", "expired", "failed", "selection_diagnostic", "waiting_selection"}
+    retry_action = "native_highlight_wizard_start" if recoverable else ""
     wizard = {
         "stage": stage,
         "topicid": topic_id,
         "bookmd5": book_md5,
         "timeoutSeconds": NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS,
+        "secondsRemaining": seconds_remaining,
+        "elapsedSeconds": latest_event_age_seconds,
         "instruction": instruction,
         "visibleHighlightReady": visible_ready,
         "selectionPopupReady": popup_ready,
         "blockedChecks": [item for item in blocked_checks if item],
         "latestEvent": latest_event or {},
+        "latestEventName": event_name,
+        "latestEventReason": latest_event_reason,
         "latestEventAgeSeconds": latest_event_age_seconds,
+        "selectionProbe": selection_probe,
+        "manualSelectionRequired": manual_selection_required,
+        "selectionChecklist": selection_checklist,
+        "recoverable": recoverable,
+        "retryAction": retry_action,
+        "retryLabel": "重新高亮采证" if recoverable else "",
         "singleDocumentSummary": summary,
     }
     message = f"高亮采证：{stage}"
@@ -6750,6 +7168,36 @@ def transaction_operation_chain_evidence(record: dict[str, Any], verification: d
     }
 
 
+def transaction_native_probe_evidence(record: dict[str, Any]) -> dict[str, Any]:
+    native_probe = record.get("nativeProbe") if isinstance(record.get("nativeProbe"), dict) else {}
+    if isinstance(native_probe.get("objects"), list) and native_probe.get("objects"):
+        return native_probe
+    object_probe = record.get("objectExistenceProbe") if isinstance(record.get("objectExistenceProbe"), dict) else {}
+    results = object_probe.get("results") if isinstance(object_probe.get("results"), list) else []
+    objects = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        objects.append(
+            {
+                "noteId": str(item.get("noteId") or ""),
+                "cardId": str(item.get("cardId") or ""),
+                "objectId": str(item.get("objectId") or ""),
+                "title": str(item.get("title") or ""),
+                "exists": bool(item.get("exists")),
+                "probeId": str(object_probe.get("probeId") or item.get("probeId") or ""),
+            }
+        )
+    if not objects:
+        return {}
+    return {
+        "schema": "codex.mn.nativeProbeEvidence.v1",
+        "source": "objectExistenceProbe",
+        "probeId": str(object_probe.get("probeId") or ""),
+        "objects": objects,
+    }
+
+
 def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
     ledger_id = str(payload.get("ledgerId") or payload.get("id") or "").strip()
     if ":" not in ledger_id:
@@ -6818,7 +7266,7 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
                     {
                         "createdNoteIds": native_apply.get("createdNoteIds") if isinstance(native_apply.get("createdNoteIds"), list) else [],
                         "createdCardIds": native_apply.get("createdCardIds") if isinstance(native_apply.get("createdCardIds"), list) else [],
-                        "nativeProbe": record.get("nativeProbe") if isinstance(record.get("nativeProbe"), dict) else {},
+                        "nativeProbe": transaction_native_probe_evidence(record),
                     }
                 ),
                 "operationChain": operation_chain,
@@ -6923,6 +7371,250 @@ def operation_ledger_get(payload: dict[str, Any]) -> dict[str, Any]:
         "entry": entry,
         "record": record,
         "evidence": evidence,
+    }
+
+
+def verification_status_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"total": len(items), "PASS": 0, "FAIL": 0, "UNKNOWN": 0}
+    for item in items:
+        report = item.get("report") if isinstance(item.get("report"), dict) else {}
+        status = str(report.get("status") or "UNKNOWN").upper()
+        if status not in {"PASS", "FAIL", "UNKNOWN"}:
+            status = "UNKNOWN"
+        counts[status] += 1
+    return counts
+
+
+def verification_worst_status(counts: dict[str, int]) -> str:
+    if int(counts.get("FAIL") or 0) > 0:
+        return "FAIL"
+    if int(counts.get("UNKNOWN") or 0) > 0:
+        return "UNKNOWN"
+    if int(counts.get("PASS") or 0) > 0:
+        return "PASS"
+    return "UNKNOWN"
+
+
+def verification_center_item(
+    *,
+    source_type: str,
+    source_id: str,
+    title: str,
+    report: dict[str, Any],
+    object_ref: dict[str, Any] | None = None,
+    ledger_action: dict[str, Any] | None = None,
+    action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = report if isinstance(report, dict) else {}
+    return {
+        "schema": "codex.mn.verificationCenterReport.v1",
+        "sourceType": source_type,
+        "sourceId": source_id,
+        "title": title,
+        "status": str(report.get("status") or "UNKNOWN"),
+        "report": report,
+        "objectRef": object_ref if isinstance(object_ref, dict) else {},
+        "ledgerAction": ledger_action if isinstance(ledger_action, dict) else {},
+        "action": action if isinstance(action, dict) else {},
+        "checkedAt": str(report.get("checkedAt") or ""),
+    }
+
+
+def verification_center_transaction_repair_action(
+    report: dict[str, Any],
+    *,
+    transaction_id: str,
+    evidence: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    problems = report.get("problems") if isinstance(report.get("problems"), list) else []
+    if "native_probe_missing" not in {str(item) for item in problems}:
+        return {}
+    operation_chain = evidence.get("operationChain") if isinstance(evidence.get("operationChain"), dict) else {}
+    native_apply = operation_chain.get("nativeApply") if isinstance(operation_chain.get("nativeApply"), dict) else {}
+    note_ids = transaction_manager.unique_strings(
+        report.get("expectedNoteIds")
+        or native_apply.get("createdNoteIds")
+        or native_apply.get("appliedNoteIds")
+    )
+    if not note_ids or not transaction_id:
+        return {}
+    return {
+        "schema": "codex.mn.verificationCenterAction.v1",
+        "id": "request_object_existence_probe",
+        "label": "检查真实对象",
+        "action": "request_mn_object_existence_probe",
+        "payload": {
+            "topicid": normalize_topic_id(payload),
+            "bookmd5": normalize_book_md5(payload),
+            "transactionId": transaction_id,
+            "noteIds": note_ids,
+            "source": "verification_center",
+        },
+    }
+
+
+def verification_repair_plan(reports: list[dict[str, Any]], counts: dict[str, int]) -> dict[str, Any]:
+    actions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in reports:
+        if not isinstance(item, dict):
+            continue
+        report = item.get("report") if isinstance(item.get("report"), dict) else {}
+        report_status = str(report.get("status") or item.get("status") or "UNKNOWN").upper()
+        if report_status == "PASS":
+            continue
+        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        action_name = str(action.get("action") or "")
+        if not action_name:
+            continue
+        action_id = str(action.get("id") or action_name or "repair")
+        source_id = str(item.get("sourceId") or "")
+        key = f"{action_id}:{source_id}:{json.dumps(action.get('payload') or {}, sort_keys=True, ensure_ascii=False)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append(
+            {
+                **action,
+                "id": action_id,
+                "reportSourceId": source_id,
+                "reportTitle": str(item.get("title") or source_id),
+                "reportStatus": str(report.get("status") or item.get("status") or ""),
+                "reportSubjectType": str(report.get("subjectType") or item.get("sourceType") or ""),
+            }
+        )
+    recommended = actions[0] if actions else {}
+    fail_count = int(counts.get("FAIL") or 0)
+    unknown_count = int(counts.get("UNKNOWN") or 0)
+    if actions:
+        status = "action_required"
+        detail = f"有 {len(actions)} 个可执行修复动作；建议先执行 {recommended.get('label') or recommended.get('id') or '推荐动作'}。"
+    elif fail_count:
+        status = "blocked"
+        detail = f"有 {fail_count} 条失败报告，但当前没有可自动执行的修复动作。请打开账本证据人工处理。"
+    elif unknown_count:
+        status = "waiting_evidence"
+        detail = f"有 {unknown_count} 条未知报告，当前缺少可自动请求的证据。"
+    else:
+        status = "ready"
+        detail = "当前对象验证报告未发现失败或未知项。"
+    return {
+        "schema": "codex.mn.verificationRepairPlan.v1",
+        "status": status,
+        "detail": detail,
+        "recommendedActionId": str(recommended.get("id") or ""),
+        "recommendedAction": recommended,
+        "actionCount": len(actions),
+        "actions": actions,
+    }
+
+
+def verification_report_list(payload: dict[str, Any]) -> dict[str, Any]:
+    requested_object_ref, requested_object_id = operation_ledger_object_filter(payload)
+    try:
+        limit = max(1, min(int(payload.get("limit") or 20), 100))
+    except Exception:
+        limit = 20
+    reports: list[dict[str, Any]] = []
+
+    ledger = operation_ledger_list({**payload, "limit": max(limit, 60)})
+    if ledger.get("ok"):
+        requested_object_ref = merge_object_ref(
+            requested_object_ref,
+            ledger.get("objectRef") if isinstance(ledger.get("objectRef"), dict) else {},
+        )
+        for entry in ledger.get("entries") if isinstance(ledger.get("entries"), list) else []:
+            ledger_id = str(entry.get("ledgerId") or "")
+            if not ledger_id:
+                continue
+            detail = operation_ledger_get({"ledgerId": ledger_id})
+            evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else {}
+            report = evidence.get("verificationReport") if isinstance(evidence.get("verificationReport"), dict) else {}
+            if not report:
+                continue
+            entry_type = str(entry.get("entryType") or "operation_ledger")
+            reports.append(
+                verification_center_item(
+                    source_type=entry_type,
+                    source_id=ledger_id,
+                    title=str(entry.get("title") or ledger_id),
+                    report=report,
+                    object_ref=entry.get("objectRef") if isinstance(entry.get("objectRef"), dict) else {},
+                    ledger_action=entry.get("ledgerAction") if isinstance(entry.get("ledgerAction"), dict) else {},
+                    action=(
+                        verification_center_transaction_repair_action(
+                            report,
+                            transaction_id=ledger_id.split(":", 1)[1] if entry_type == "ai_edit_transaction" and ":" in ledger_id else "",
+                            evidence=evidence,
+                            payload=payload,
+                        )
+                        if entry_type == "ai_edit_transaction"
+                        else {}
+                    ),
+                )
+            )
+
+    workspace = notebook_workspace(payload)
+    workspace_summary = workspace.get("notebookWorkspace") if isinstance(workspace.get("notebookWorkspace"), dict) else {}
+    registry = workspace_summary.get("sourceRegistry") if isinstance(workspace_summary.get("sourceRegistry"), dict) else {}
+    if registry:
+        report = verification_agent.verify_source_registry(registry)
+        action_plan = registry.get("actionPlan") if isinstance(registry.get("actionPlan"), dict) else {}
+        reports.append(
+            verification_center_item(
+                source_type="source_registry",
+                source_id="source_registry",
+                title="Source Registry",
+                report=report,
+                object_ref=requested_object_ref,
+                action=action_plan.get("recommendedAction") if isinstance(action_plan.get("recommendedAction"), dict) else {},
+            )
+        )
+
+    skill_runs = skill_marketplace.latest_skill_runs(100)
+    for run in skill_runs.get("runs") if isinstance(skill_runs.get("runs"), list) else []:
+        if not isinstance(run, dict):
+            continue
+        object_ref = run.get("objectRef") if isinstance(run.get("objectRef"), dict) else {}
+        if requested_object_id and str(object_ref.get("objectId") or "") != requested_object_id:
+            continue
+        report = verification_agent.verify_skill_run(run)
+        reports.append(
+            verification_center_item(
+                source_type="skill_run",
+                source_id=str(run.get("runId") or ""),
+                title=str(run.get("skillId") or "Skill run"),
+                report=report,
+                object_ref=object_ref,
+                action={
+                    "schema": "codex.mn.verificationCenterAction.v1",
+                    "label": "查看技能运行",
+                    "action": "skill_run_latest",
+                    "payload": {"limit": 10},
+                },
+            )
+        )
+
+    reports.sort(key=lambda item: str(item.get("checkedAt") or ""), reverse=True)
+    reports = reports[:limit]
+    counts = verification_status_counts(reports)
+    worst = verification_worst_status(counts)
+    repair_plan = verification_repair_plan(reports, counts)
+    return {
+        "ok": True,
+        "schema": "codex.mn.verificationCenter.v1",
+        "message": f"已读取验证中心：{counts['total']} 条报告。",
+        "objectRef": requested_object_ref if object_ref_has_identity(requested_object_ref) else {},
+        "summary": {
+            "worstStatus": worst,
+            "passCount": counts["PASS"],
+            "failCount": counts["FAIL"],
+            "unknownCount": counts["UNKNOWN"],
+        },
+        "counts": counts,
+        "repairPlan": repair_plan,
+        "reports": reports,
     }
 
 
@@ -8887,7 +9579,7 @@ def mn4_runtime_status(limit: int = 600) -> dict[str, Any]:
             continue
         extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
         native_action = str(extra.get("nativeAction") or "")
-        if native_action in {"probe_native_api_capabilities", "reload_web_panel"}:
+        if native_action in {"probe_native_api_capabilities", "reload_web_panel", "probe_pdf_selection"}:
             latest_unknown_by_action[native_action] = max(
                 latest_unknown_by_action.get(native_action, 0.0),
                 event_epoch(item),
@@ -8897,6 +9589,7 @@ def mn4_runtime_status(limit: int = 600) -> dict[str, Any]:
         for action, reference_event in (
             ("probe_native_api_capabilities", latest_native),
             ("reload_web_panel", latest_web),
+            ("probe_pdf_selection", latest_native),
         )
         if latest_unknown_by_action.get(action, 0.0) > event_epoch(reference_event)
     ]
@@ -8996,6 +9689,12 @@ def latest_native_api_capabilities(topic_id: str = "", book_md5: str = "", limit
         "targetCount": int(extra.get("targetCount") or 0),
         "targets": extra.get("targets") if isinstance(extra.get("targets"), list) else [],
         "activeSelectionLength": int(extra.get("activeSelectionLength") or 0),
+        "activeSelectionImageBytes": int(extra.get("activeSelectionImageBytes") or 0),
+        "hasSelectionPayload": bool(
+            extra.get("hasSelectionPayload")
+            or int(extra.get("activeSelectionLength") or 0) > 0
+            or int(extra.get("activeSelectionImageBytes") or 0) > 0
+        ),
         "capabilityMatrix": matrix,
         "message": str(extra.get("message") or ""),
     }
@@ -9033,6 +9732,12 @@ def native_api_capability_matrix(extra: dict[str, Any], candidate_methods: list[
         ]
 
     active_selection_length = int(extra.get("activeSelectionLength") or extra.get("selectionLength") or 0) if isinstance(extra, dict) else 0
+    active_selection_image_bytes = int(extra.get("activeSelectionImageBytes") or extra.get("selectionImageBytes") or 0) if isinstance(extra, dict) else 0
+    has_selection_payload = bool(
+        active_selection_length > 0
+        or active_selection_image_bytes > 0
+        or (isinstance(extra, dict) and extra.get("hasSelectionPayload"))
+    )
     def document_controller_label_exists() -> bool:
         controller_markers = (
             "documentcontroller",
@@ -9077,12 +9782,12 @@ def native_api_capability_matrix(extra: dict[str, Any], candidate_methods: list[
     elif not has_highlight_selector and not can_attempt_unverified_highlight_call:
         highlight_blocked = "missing-highlight-selector"
         highlight_next = "当前 MN4 运行时未暴露可调用的选区高亮 selector。"
-    elif active_selection_length <= 0:
+    elif not has_selection_payload:
         highlight_blocked = "missing-active-pdf-selection"
         highlight_next = (
-            "已发现 PDF 控制器但 selector 不可枚举；先在 PDF 里选中文本，再点击“高亮选区”尝试官方 highlightFromSelection。"
+            "已发现 PDF 控制器但 selector 不可枚举；先在 PDF 里选中文本或框选区域，再点击“高亮选区”尝试官方 highlightFromSelection。"
             if can_attempt_unverified_highlight_call
-            else "先在 PDF 里选中文本，再点击“高亮选区”。"
+            else "先在 PDF 里选中文本或框选区域，再点击“高亮选区”。"
         )
     elif can_attempt_unverified_highlight_call:
         highlight_next = "已发现 PDF 控制器但 selector 不可枚举；点击“高亮选区”会尝试官方 highlightFromSelection 并记录结果。"
@@ -9106,7 +9811,7 @@ def native_api_capability_matrix(extra: dict[str, Any], candidate_methods: list[
             "nativeHighlightSelection": {
                 "label": "原生高亮当前 PDF 选区",
                 "available": bool(selection_controller_exists and (has_highlight_selector or can_attempt_unverified_highlight_call)),
-                "ready": bool(selection_controller_exists and (has_highlight_selector or can_attempt_unverified_highlight_call) and active_selection_length > 0),
+                "ready": bool(selection_controller_exists and (has_highlight_selector or can_attempt_unverified_highlight_call) and has_selection_payload),
                 "entryAction": "request_native_highlight_selection",
                 "nativeAction": "highlight_current_selection",
                 "blockedReason": highlight_blocked,
@@ -9116,10 +9821,10 @@ def native_api_capability_matrix(extra: dict[str, Any], candidate_methods: list[
             "selectionPopupHighlight": {
                 "label": "PDF 选区弹出菜单高亮入口",
                 "available": popup_ready,
-                "ready": bool(popup_ready and active_selection_length > 0),
+                "ready": bool(popup_ready and has_selection_payload),
                 "entryAction": "request_native_highlight_selection",
-                "blockedReason": "" if popup_ready and active_selection_length > 0 else "needs-selection-popup",
-                "nextStep": "在 PDF 中选中文本后，从弹出菜单点“Codex 高亮选区”。",
+                "blockedReason": "" if popup_ready and has_selection_payload else "needs-selection-popup",
+                "nextStep": "在 PDF 中选中文本或框选区域后，从弹出菜单点“Codex 高亮选区”。",
                 "evidence": ["PopupMenu.currentMenu", "PopupMenuItem"] if popup_ready else [],
             },
             "nativeCards": {
@@ -12479,6 +13184,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return request_web_panel_reload(payload)
     if action == "request_native_capability_probe":
         return request_native_capability_probe(payload)
+    if action == "request_pdf_selection_probe":
+        return request_pdf_selection_probe(payload)
     if action == "collect_mn_runtime_evidence":
         return collect_mn_runtime_evidence(payload)
     if action == "restart_marginnote4":
@@ -12487,6 +13194,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return release_acceptance_summary(payload)
     if action == "single_document_acceptance_summary":
         return single_document_acceptance_summary(payload)
+    if action == "ui_functional_acceptance_summary":
+        return ui_functional_acceptance_summary(payload)
     if action == "native_highlight_wizard_status":
         return native_highlight_wizard_status(payload)
     if action == "queue_status":
@@ -12554,6 +13263,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return operation_ledger_list(payload)
     if action == "operation_ledger_get":
         return operation_ledger_get(payload)
+    if action == "verification_report_list":
+        return verification_report_list(payload)
     if action == "logs_recent":
         try:
             limit = int(payload.get("limit") or 80)

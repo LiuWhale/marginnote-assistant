@@ -4,14 +4,49 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex Companion</title>
-  <link rel="stylesheet" href="app.css?v=20260627-source-registry-v1">
+  <link rel="stylesheet" href="app.css?v=20260629-tool-center-v1">
 </head>
 <body>
-  <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="workspace" data-command-pane-expanded="false">
+  <main id="aiChatShell" class="app-shell ai-chat-shell" data-product-mode="chat" data-workspace-surface="console" data-workspace-navigator-expanded="false" data-command-pane-expanded="true" data-expert-mode="false">
     <section class="topbar">
-      <div>
+      <div class="topbar-identity">
         <h1>Codex Companion</h1>
         <p id="contextLine">等待 MarginNote 上下文</p>
+      </div>
+      <div class="topbar-workspace-rail">
+        <section id="knowledgeOsContractPanel" class="knowledge-os-contract-panel" aria-label="Knowledge OS Contract">
+          <div class="knowledge-os-contract-main">
+            <div class="knowledge-os-contract-kicker">Advanced Workspace</div>
+            <h2 id="knowledgeOsContractTitle">MarginNote Knowledge OS</h2>
+            <p>高级模式用于对象、操作、证据和 workflow 诊断。</p>
+          </div>
+          <div class="knowledge-os-contract-layers" aria-label="Knowledge OS 三层">
+            <div id="knowledgeOsObjectLayer" class="knowledge-os-layer">
+              <span class="knowledge-os-layer-label">对象层</span>
+              <strong>MNObject / 来源 / 关系</strong>
+            </div>
+            <div id="knowledgeOsOperationLayer" class="knowledge-os-layer">
+              <span class="knowledge-os-layer-label">操作层</span>
+              <strong>Diff / Workflow / Skill</strong>
+            </div>
+            <div id="knowledgeOsEvidenceLayer" class="knowledge-os-layer">
+              <span class="knowledge-os-layer-label">证据层</span>
+              <strong>Verify / Ledger / Rollback</strong>
+            </div>
+          </div>
+        </section>
+
+        <section id="modeSwitchBar" class="mode-switch-bar" role="tablist" aria-label="产品模式">
+          <button id="chatModeButton" class="mode-switch-button active" data-product-mode="chat" type="button">
+            <span class="mode-switch-title">对话</span>
+            <span class="mode-switch-subtitle">轻量问答</span>
+          </button>
+          <button id="agentWorkspaceModeButton" class="mode-switch-button" data-product-mode="workspace" type="button">
+            <span class="mode-switch-title">工具</span>
+            <span class="mode-switch-subtitle">任务中心</span>
+          </button>
+          <div id="modeIntentLine" class="mode-intent-line">当前：对话模式，保持轻量问答、选区解释和回答后续动作。</div>
+        </section>
       </div>
       <div class="topbar-actions">
         <button class="small-button" id="newConversationButton" type="button">新对话</button>
@@ -21,23 +56,27 @@
       </div>
     </section>
 
-    <section id="modeSwitchBar" class="mode-switch-bar" role="tablist" aria-label="产品模式">
-      <button id="chatModeButton" class="mode-switch-button" data-product-mode="chat" type="button">
-        <span class="mode-switch-title">Chat Mode</span>
-        <span class="mode-switch-subtitle">轻量对话</span>
-      </button>
-      <button id="agentWorkspaceModeButton" class="mode-switch-button active" data-product-mode="workspace" type="button">
-        <span class="mode-switch-title">Agent Workspace</span>
-        <span class="mode-switch-subtitle">对象工作台</span>
-      </button>
-      <div id="modeIntentLine" class="mode-intent-line">当前：Agent Workspace，围绕 MNObject、脑图、知识和工作流操作。</div>
-    </section>
-
     <section id="workspaceNavigator" class="workspace-navigator" aria-label="Agent Workspace Navigator">
       <div class="workspace-navigator-header">
         <div>
           <div class="workspace-navigator-kicker">Workspace Navigator</div>
           <div id="workspaceNavigatorSummary" class="workspace-navigator-summary">Knowledge Console：当前对象、风险、关系和账本入口。</div>
+        </div>
+        <div class="workspace-navigator-controls">
+          <button id="expertModeBackButton" class="small-button expert-mode-back-button" type="button">返回工具</button>
+          <select id="workspaceSurfaceSelect" class="workspace-surface-select" aria-label="选择工作区">
+            <option value="console">Knowledge Console</option>
+            <option value="object_browser">Object Browser</option>
+            <option value="source_registry">Source Registry</option>
+            <option value="mindmap_studio">Mindmap Studio</option>
+            <option value="verification_center">Verification Center</option>
+            <option value="card_factory">Card Factory</option>
+            <option value="ledger_explorer">Operation Ledger</option>
+            <option value="knowledge_graph">Knowledge Graph</option>
+            <option value="workflow_builder">Workflow Builder</option>
+            <option value="skill_center">Skill Center</option>
+          </select>
+          <button id="workspaceNavigatorToggleButton" class="small-button workspace-navigator-toggle" type="button" aria-expanded="false">展开导航</button>
         </div>
       </div>
       <div class="workspace-nav-grid">
@@ -72,6 +111,75 @@
       </div>
     </section>
 
+    <section id="advancedToolCenterPanel" class="advanced-tool-center-panel" aria-label="工具任务中心">
+      <header class="advanced-tool-header">
+        <div>
+          <div class="advanced-tool-kicker">工具</div>
+          <h2>任务中心</h2>
+          <p>先看状态，再选择一个要做的事；高级诊断收在专家模式里。</p>
+        </div>
+      </header>
+
+      <section class="advanced-tool-section" aria-label="当前状态">
+        <div class="advanced-section-title">当前状态</div>
+        <div class="advanced-status-grid">
+          <div id="advancedStatusPdf" class="advanced-status-card idle">
+            <span>材料</span>
+            <strong>等待当前文档</strong>
+            <small>打开文档后自动检查全文是否可读</small>
+          </div>
+          <div id="advancedStatusMindmap" class="advanced-status-card idle">
+            <span>脑图</span>
+            <strong>等待目标</strong>
+            <small>生成或整理脑图前先确认目标</small>
+          </div>
+          <div id="advancedStatusWrite" class="advanced-status-card idle">
+            <span>写入</span>
+            <strong>暂无待确认</strong>
+            <small>事务、验证和回滚状态会显示在这里</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="advanced-tool-section advanced-next-step" aria-label="下一步建议">
+        <div class="advanced-section-title">下一步建议</div>
+        <div class="advanced-next-step-card">
+          <div id="advancedNextStepText">可以直接回到对话提问，或选择下面一个任务。</div>
+          <button id="advancedNextStepButton" class="small-button primary-lite" type="button" data-advanced-next-action="chat">回到对话</button>
+        </div>
+      </section>
+
+      <section class="advanced-tool-section" aria-label="你想做什么">
+        <div class="advanced-section-title">你想做什么</div>
+        <div class="advanced-task-grid">
+          <button id="advancedReadButton" class="advanced-task-button" type="button">
+            <span>解读当前资料</span>
+            <small>生成结构化解释和讲解</small>
+          </button>
+          <button id="advancedMindmapButton" class="advanced-task-button" type="button">
+            <span>生成/整理脑图</span>
+            <small>先生成草稿，再确认写入</small>
+          </button>
+          <button id="advancedCardsButton" class="advanced-task-button" type="button">
+            <span>生成复习卡</span>
+            <small>短卡片，确认后写入</small>
+          </button>
+          <button id="advancedVerifyButton" class="advanced-task-button" type="button">
+            <span>检查写入/回滚</span>
+            <small>看事务、证据和残留</small>
+          </button>
+        </div>
+      </section>
+
+      <section id="expertModePanel" class="expert-mode-panel collapsed" aria-label="专家模式">
+        <div>
+          <div class="expert-mode-title">专家模式</div>
+          <div id="expertModeHint" class="expert-mode-hint">打开后显示 Notebook Workspace、对象、操作、知识、工作流和账本详情。</div>
+        </div>
+        <button id="expertModeToggleButton" class="small-button" type="button" aria-expanded="false">展开专家模式</button>
+      </section>
+    </section>
+
     <section id="knowledgeConsolePanel" class="knowledge-console-panel" aria-label="Knowledge Console">
     <section id="notebookWorkspacePanel" class="notebook-workspace-panel" aria-label="Notebook Workspace">
       <div class="notebook-workspace-header">
@@ -80,61 +188,100 @@
           <h2 id="notebookWorkspaceTitle">当前 notebook 工作台</h2>
           <div id="notebookWorkspaceSummary" class="notebook-workspace-summary">当前 notebook 的对象、脑图、复习、workflow 和账本总览。</div>
         </div>
-        <button id="notebookWorkspaceRefreshButton" class="small-button notebook-workspace-refresh" type="button">刷新</button>
+        <div class="notebook-workspace-header-actions">
+          <button id="notebookWorkspaceDetailsToggleButton" class="small-button notebook-workspace-details-toggle" type="button" aria-expanded="false">展开工作台详情</button>
+          <button id="notebookWorkspaceRefreshButton" class="small-button notebook-workspace-refresh" type="button">刷新</button>
+        </div>
       </div>
-      <div class="notebook-workspace-grid">
-        <div id="notebookWorkspaceFocus" class="notebook-workspace-card">焦点：等待 MNObject</div>
-        <div id="notebookWorkspaceObjectCount" class="notebook-workspace-card">对象：等待扫描</div>
-        <div id="notebookWorkspaceMindmap" class="notebook-workspace-card">脑图：未读取</div>
-        <div id="notebookWorkspaceReview" class="notebook-workspace-card">复习：等待卡片</div>
-        <div id="notebookWorkspaceWorkflow" class="notebook-workspace-card">工作流：等待运行</div>
-        <div id="notebookWorkspaceLedger" class="notebook-workspace-card">账本：等待证据</div>
-        <div id="notebookWorkspaceSources" class="notebook-workspace-card">来源：等待材料</div>
+      <div id="notebookWorkspaceDetails" class="notebook-workspace-details" aria-label="Notebook Workspace 详情">
+        <div id="notebookWorkspaceGrid" class="notebook-workspace-grid">
+          <div id="notebookWorkspaceFocus" class="notebook-workspace-card">焦点：等待 MNObject</div>
+          <div id="notebookWorkspaceObjectCount" class="notebook-workspace-card">对象：等待扫描</div>
+          <div id="notebookWorkspaceMindmap" class="notebook-workspace-card">脑图：未读取</div>
+          <div id="notebookWorkspaceReview" class="notebook-workspace-card">复习：等待卡片</div>
+          <div id="notebookWorkspaceWorkflow" class="notebook-workspace-card">工作流：等待运行</div>
+          <div id="notebookWorkspaceLedger" class="notebook-workspace-card">账本：等待证据</div>
+          <div id="notebookWorkspaceSources" class="notebook-workspace-card">来源：等待材料</div>
+        </div>
+        <section id="notebookObjectIntake" class="notebook-object-intake idle" aria-label="Object Intake">
+          <div class="notebook-object-intake-header">
+            <div>
+              <div class="notebook-object-intake-kicker">Object Intake</div>
+              <div id="notebookObjectIntakeSummary" class="notebook-object-intake-summary">等待把当前文档、选区或节点作为工作台输入。</div>
+            </div>
+          </div>
+          <div id="notebookObjectIntakeRoutes" class="notebook-object-intake-routes">
+            <div class="notebook-object-intake-route empty">选择或打开文档后，读材料、看 MN 对象、脑图、Card Factory、workflow、技能和验证路线会显示在这里。</div>
+          </div>
+        </section>
+        <section id="notebookObjectTaskComposer" class="notebook-object-task-composer idle" aria-label="Object Task Composer">
+          <div class="notebook-object-task-header">
+            <div>
+              <div class="notebook-object-task-kicker">Object Task Composer</div>
+              <div id="notebookObjectTaskComposerSummary" class="notebook-object-task-summary">等待把当前对象转成任务草案。</div>
+            </div>
+          </div>
+          <div id="notebookObjectTaskComposerList" class="notebook-object-task-list">
+            <div class="notebook-object-task empty">对象级任务草案会显示输入对象、证据、输出和安全边界。</div>
+          </div>
+        </section>
+        <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
+        <section id="sourceRegistryPanel" class="source-registry-panel" aria-label="Source Registry Panel">
+        <section id="notebookWorkspaceSourceRegistry" class="notebook-source-registry idle" aria-label="Source Registry">
+          <div class="notebook-source-header">
+            <div>
+              <div class="notebook-source-kicker">Source Registry</div>
+              <div id="notebookWorkspaceSourceSummary" class="notebook-source-summary">等待当前材料来源。</div>
+            </div>
+          </div>
+          <div id="notebookWorkspaceSourceList" class="notebook-source-list">
+            <div class="notebook-source-item empty">当前 MN 文档、PDF 缓存、上传文件和文件搜索根会显示在这里。</div>
+          </div>
+          <div id="notebookWorkspaceSourceActionStatus" class="notebook-source-action-status idle">来源动作：尚未运行</div>
+          <div id="notebookWorkspaceSourceActions" class="notebook-source-actions" aria-label="Source Registry 动作"></div>
+        </section>
+        </section>
+        <section id="notebookWorkspaceStudyProgram" class="notebook-study-program idle" aria-label="Study Program">
+          <div class="notebook-study-header">
+            <div>
+              <div class="notebook-study-kicker">Study Program</div>
+              <div id="notebookWorkspaceStudyCoverage" class="notebook-study-coverage">等待当前材料覆盖率。</div>
+            </div>
+          </div>
+          <div id="notebookWorkspaceStudyGaps" class="notebook-study-gaps">
+            <div class="notebook-study-gap empty">对象、脑图、卡片、workflow 和账本缺口会显示在这里。</div>
+          </div>
+          <div id="notebookWorkspaceStudyRecommendations" class="notebook-study-recommendations">
+            <div class="notebook-study-recommendation empty">推荐 workflow 会在这里出现，不需要先输入 prompt。</div>
+          </div>
+        </section>
+        <section id="notebookWorkspaceRunbook" class="notebook-runbook idle" aria-label="Notebook Runbook">
+          <div class="notebook-runbook-header">
+            <div>
+              <div class="notebook-runbook-kicker">Notebook Runbook</div>
+              <div id="notebookWorkspaceRunbookSummary" class="notebook-runbook-summary">等待工作台检查当前 notebook 的下一步。</div>
+            </div>
+            <div class="notebook-runbook-header-actions">
+              <button id="notebookWorkspaceRunbookAutoButton" class="small-button notebook-runbook-auto hidden" type="button">自动准备</button>
+              <button id="notebookWorkspaceRunbookContinueButton" class="small-button notebook-runbook-continue hidden" type="button">继续下一步</button>
+            </div>
+          </div>
+          <div id="notebookWorkspaceRunbookAutoStatus" class="notebook-runbook-auto-status idle">自动准备：尚未运行</div>
+          <div id="notebookWorkspaceRunbookList" class="notebook-runbook-list">
+            <div class="notebook-runbook-step empty">上下文、MN 对象、脑图基线、操作计划、workflow 和账本证据会在这里排成可执行步骤。</div>
+          </div>
+        </section>
       </div>
-      <div id="notebookWorkspaceActions" class="notebook-workspace-actions" aria-label="Notebook Workspace 动作"></div>
-      <section id="sourceRegistryPanel" class="source-registry-panel" aria-label="Source Registry Panel">
-      <section id="notebookWorkspaceSourceRegistry" class="notebook-source-registry idle" aria-label="Source Registry">
-        <div class="notebook-source-header">
+      <section id="notebookKnowledgeMatrix" class="notebook-knowledge-matrix idle" aria-label="Knowledge Console Matrix">
+        <div class="notebook-knowledge-matrix-header">
           <div>
-            <div class="notebook-source-kicker">Source Registry</div>
-            <div id="notebookWorkspaceSourceSummary" class="notebook-source-summary">等待当前材料来源。</div>
+            <div class="notebook-knowledge-matrix-kicker">Knowledge Console Matrix</div>
+            <div id="notebookKnowledgeMatrixSummary" class="notebook-knowledge-matrix-summary">等待零输入工作台状态。</div>
           </div>
+          <button id="notebookKnowledgeMatrixToggleButton" class="small-button notebook-knowledge-matrix-toggle" type="button" aria-expanded="false">展开详情</button>
         </div>
-        <div id="notebookWorkspaceSourceList" class="notebook-source-list">
-          <div class="notebook-source-item empty">当前 MN 文档、PDF 缓存、上传文件和文件搜索根会显示在这里。</div>
-        </div>
-        <div id="notebookWorkspaceSourceActionStatus" class="notebook-source-action-status idle">来源动作：尚未运行</div>
-        <div id="notebookWorkspaceSourceActions" class="notebook-source-actions" aria-label="Source Registry 动作"></div>
-      </section>
-      </section>
-      <section id="notebookWorkspaceStudyProgram" class="notebook-study-program idle" aria-label="Study Program">
-        <div class="notebook-study-header">
-          <div>
-            <div class="notebook-study-kicker">Study Program</div>
-            <div id="notebookWorkspaceStudyCoverage" class="notebook-study-coverage">等待当前材料覆盖率。</div>
-          </div>
-        </div>
-        <div id="notebookWorkspaceStudyGaps" class="notebook-study-gaps">
-          <div class="notebook-study-gap empty">对象、脑图、卡片、workflow 和账本缺口会显示在这里。</div>
-        </div>
-        <div id="notebookWorkspaceStudyRecommendations" class="notebook-study-recommendations">
-          <div class="notebook-study-recommendation empty">推荐 workflow 会在这里出现，不需要先输入 prompt。</div>
-        </div>
-      </section>
-      <section id="notebookWorkspaceRunbook" class="notebook-runbook idle" aria-label="Notebook Runbook">
-        <div class="notebook-runbook-header">
-          <div>
-            <div class="notebook-runbook-kicker">Notebook Runbook</div>
-            <div id="notebookWorkspaceRunbookSummary" class="notebook-runbook-summary">等待工作台检查当前 notebook 的下一步。</div>
-          </div>
-          <div class="notebook-runbook-header-actions">
-            <button id="notebookWorkspaceRunbookAutoButton" class="small-button notebook-runbook-auto hidden" type="button">自动准备</button>
-            <button id="notebookWorkspaceRunbookContinueButton" class="small-button notebook-runbook-continue hidden" type="button">继续下一步</button>
-          </div>
-        </div>
-        <div id="notebookWorkspaceRunbookAutoStatus" class="notebook-runbook-auto-status idle">自动准备：尚未运行</div>
-        <div id="notebookWorkspaceRunbookList" class="notebook-runbook-list">
-          <div class="notebook-runbook-step empty">上下文、MN 对象、脑图基线、操作计划、workflow 和账本证据会在这里排成可执行步骤。</div>
+        <div id="notebookKnowledgeMatrixList" class="notebook-knowledge-matrix-list">
+          <div class="notebook-knowledge-axis empty">来源、MN 对象、脑图、卡片、workflow、账本和验证证据会在这里汇总。</div>
         </div>
       </section>
     </section>
@@ -441,7 +588,56 @@
           </div>
         </section>
         <section id="verificationReportPanel" class="verification-report-panel idle" aria-label="Verification Report">
+          <div class="verification-report-header">
+            <div>
+              <div class="verification-report-kicker">Verification Center</div>
+              <div id="verificationReportSummary" class="verification-report-summary">等待当前对象验证报告。</div>
+            </div>
+            <button id="verificationReportRefreshButton" class="small-button" type="button">刷新验证</button>
+          </div>
           <div id="operationWorkspaceVerification" class="workbench-verification-line">验证：等待操作结果</div>
+          <section id="realMnAcceptancePanel" class="real-mn-acceptance-panel idle" aria-label="真实 MN4 验收">
+            <div class="real-mn-acceptance-header">
+              <div>
+                <div class="real-mn-acceptance-kicker">真实 MN4 验收</div>
+                <div class="real-mn-acceptance-summary">当前文档验收、任意文档 UI 验收和安全采证都在这里执行。</div>
+              </div>
+            </div>
+            <div id="realMnAcceptanceStatusLine" class="real-mn-acceptance-status-line warn">真实 MN4 验收：未运行</div>
+            <div id="realMnAcceptanceChecklist" class="real-mn-acceptance-checklist">
+              <div class="real-mn-acceptance-step warn">1. 当前文档验收：等待运行</div>
+              <div class="real-mn-acceptance-step warn">2. 任意文档 UI 验收：等待运行</div>
+              <div class="real-mn-acceptance-step warn">3. 安全采证：等待运行</div>
+            </div>
+            <div id="singleDocumentAcceptanceLine" class="release-acceptance-line warn">当前文档验收：未运行</div>
+            <div id="singleDocumentAcceptanceDetail" class="release-acceptance-detail">点击“当前文档验收”检查当前 PDF 里按钮、原生动作、高亮和事务证据是否真的通过。</div>
+            <section id="mainNativeHighlightWizardPanel" class="native-highlight-guide hidden" aria-label="原生高亮恢复">
+              <div id="mainNativeHighlightWizardLine" class="native-highlight-guide-line warn">原生高亮：未运行</div>
+              <div id="mainNativeHighlightWizardDetail" class="native-highlight-guide-detail">点击“启动采证”后回到 PDF 重新选中一小段文字。</div>
+              <div id="mainNativeHighlightWizardActions" class="native-highlight-guide-actions">
+                <button id="nativeHighlightWizardRetryButton" class="small-button primary-lite" type="button">启动采证</button>
+                <button id="nativeHighlightWizardRefreshButton" class="small-button" type="button">刷新状态</button>
+              </div>
+            </section>
+            <div id="mainUiFunctionalAcceptanceLine" class="release-acceptance-line warn">任意文档 UI 验收：未运行</div>
+            <div id="mainUiFunctionalAcceptanceDetail" class="release-acceptance-detail">点击“任意文档 UI 验收”跑 WebView 渲染、交互、动作和写入桥接 gate。</div>
+            <div class="real-mn-acceptance-actions">
+              <button id="realMnAcceptanceRunAllButton" class="small-button primary-lite" type="button">运行验收流程</button>
+              <button id="singleDocumentAcceptanceButton" class="small-button primary-lite" type="button">当前文档验收</button>
+              <button id="mainUiFunctionalAcceptanceButton" class="small-button" type="button">任意文档 UI 验收</button>
+              <button id="realMnAcceptanceSafeEvidenceButton" class="small-button" type="button">安全采证</button>
+            </div>
+          </section>
+          <div id="verificationReportCounts" class="verification-center-counts" aria-label="验证计数"></div>
+          <div id="verificationRepairPlanPanel" class="verification-repair-plan idle" aria-label="验证修复计划">
+            <div id="verificationRepairPlanSummary" class="verification-repair-plan-summary">修复计划：等待验证报告。</div>
+            <button id="verificationRepairPlanRecommendedButton" class="small-button verification-repair-recommended" type="button" data-verification-recommended-action="none" disabled>执行推荐修复</button>
+            <div id="verificationRepairPlanActions" class="verification-repair-plan-actions"></div>
+          </div>
+          <div id="verificationReportList" class="verification-center-list" aria-label="验证报告列表">
+            <div class="verification-center-row empty">当前对象暂无验证报告。</div>
+          </div>
+          <div id="verificationReportActionStatus" class="verification-center-action-status idle">动作：等待验证修复操作。</div>
         </section>
 
         <section id="mindmapTargetBar" class="mindmap-target-bar" aria-label="目标脑图">
@@ -516,6 +712,17 @@
         </header>
         <div id="workflowWorkspaceSummary" class="workbench-panel-text">精读、卡片生成、重组、复习和外部自动化会进入可审计 workflow run。</div>
         <div id="workflowWorkspaceRuns" class="workflow-workspace-card">运行：等待 workflow 状态</div>
+        <section id="workflowBuilderBoardPanel" class="workflow-builder-board-panel idle" aria-label="Workflow Builder Board">
+          <div class="workflow-builder-board-header">
+            <div>
+              <div class="workflow-builder-board-kicker">Workflow Builder Board</div>
+              <div id="workflowBuilderBoardSummary" class="workflow-builder-board-summary">等待任务候选、运行中 workflow、确认点和证据。</div>
+            </div>
+          </div>
+          <div id="workflowBuilderBoardLanes" class="workflow-builder-board-lanes">
+            <div class="workflow-builder-lane empty">任务候选、运行中、待确认和证据会在这里分列显示。</div>
+          </div>
+        </section>
         <section id="externalGatewayPanel" class="external-gateway-panel" aria-label="External Automation Gateway">
           <div id="workflowWorkspaceGateway" class="workflow-workspace-card">External Automation Gateway：等待 MN API 状态</div>
         </section>
@@ -706,6 +913,15 @@
           <button id="cacheCurrentPdfButton" class="small-button" type="button">缓存当前 PDF</button>
           <button id="pdfCacheFileButton" class="small-button primary-lite" type="button">选择 PDF 缓存</button>
           <button id="nativeCapabilitiesRefreshButton" class="small-button" type="button">刷新 MN 能力</button>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <div class="config-section-title">质量验收</div>
+        <div id="uiFunctionalAcceptanceLine" class="release-acceptance-line warn">UI 功能验收：未运行</div>
+        <div id="uiFunctionalAcceptanceDetail" class="release-acceptance-detail">点击后会用任意文档 payload 跑完整 WebView 渲染、交互、动作和写入桥接验收；它不等于真实 MN4 当前文档验收通过，结果里会单独显示真实 MN4 运行态边界。</div>
+        <div class="config-actions">
+          <button id="uiFunctionalAcceptanceButton" class="small-button primary-lite" type="button">UI 功能验收</button>
         </div>
       </section>
 

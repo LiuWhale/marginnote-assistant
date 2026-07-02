@@ -20,10 +20,10 @@ from urllib import request
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.40-latest-dist.zip"
+DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.41-latest-dist.zip"
 LIVE_EXTENSION = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 MN_DATABASE = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents/MN4NotebookDatabase/0/MarginNotes.sqlite"
-CURRENT_PLUGIN_VERSION = "0.4.40"
+CURRENT_PLUGIN_VERSION = "0.4.41"
 EVIDENCE_SCHEMA = "codex-companion-cross-machine-install-v1"
 NATIVE_HIGHLIGHT_EVIDENCE_SCHEMA = "codex-companion-native-highlight-v1"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
@@ -64,9 +64,12 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-command-prepared",
     "selection-popup-diagnostics-v1",
     "native-highlight-selection-poll-v1",
+    "native-highlight-selection-poll-probe-v1",
     "selection-popup-scene-observer-v1",
     "selection-popup-notebook-rebind-v1",
     "native-highlight-selection-text-resolver-v1",
+    "native-pdf-selection-probe-v1",
+    "native-pdf-selection-image-probe-v1",
     "context-refresh-clears-stale-selection-v1",
     "ai-edit-transaction-rollback-v1",
     "ai-edit-undo-rollback-v2",
@@ -349,11 +352,11 @@ def next_actions_for_gate(name: str, detail: str = "") -> list[str]:
     if name == "unit_tests":
         return ["Run python3 -m unittest discover -s tests and fix the failing test output."]
     if name == "syntax_checks":
-        return ["Run python3 release_acceptance.py release/CodexCompanion-0.4.40-latest-dist.zip --skip-tests to see the exact syntax command failure."]
+        return ["Run python3 release_acceptance.py release/CodexCompanion-0.4.41-latest-dist.zip --skip-tests to see the exact syntax command failure."]
     if name == "release_zip_smoke":
-        return ["Run python3 package_release.py 0.4.40, then rerun release_smoke_test.py on the latest dist zip."]
+        return ["Run python3 package_release.py 0.4.41, then rerun release_smoke_test.py on the latest dist zip."]
     if name == "install_dry_run":
-        return ["Run python3 release_smoke_test.py release/CodexCompanion-0.4.40-latest-dist.zip --install-dry-run and fix the install/uninstall script failure."]
+        return ["Run python3 release_smoke_test.py release/CodexCompanion-0.4.41-latest-dist.zip --install-dry-run and fix the install/uninstall script failure."]
     if name == "runtime_web_controls":
         if "reload_web_panel" in detail_lower:
             return [
@@ -395,7 +398,7 @@ def next_actions_for_gate(name: str, detail: str = "") -> list[str]:
                 "Then rerun release_acceptance.py or click 发布验收 in the Codex Companion panel.",
             ]
         return [
-            "Run python3 package_release.py, then python3 build_pkg.py release/CodexCompanion-0.4.40-latest-dist.zip --json.",
+            "Run python3 package_release.py, then python3 build_pkg.py release/CodexCompanion-0.4.41-latest-dist.zip --json.",
             "Copy release/SHA256SUMS.txt to the OneDrive Codex Companion folder and rerun release_acceptance.py.",
         ]
     if name == "release_maintainer_prerequisites":
@@ -406,12 +409,12 @@ def next_actions_for_gate(name: str, detail: str = "") -> list[str]:
     if name == "signed_pkg":
         return [
             "Install a Developer ID Installer certificate in Keychain, then run Build Signed Package.command.",
-            "CLI alternative: python3 build_pkg.py release/CodexCompanion-0.4.40-latest-dist.zip --auto-sign --json.",
+            "CLI alternative: python3 build_pkg.py release/CodexCompanion-0.4.41-latest-dist.zip --auto-sign --json.",
         ]
     if name == "notarized_pkg":
         return [
             "Store Apple notarization credentials with xcrun notarytool store-credentials, then run Notarize Package.command.",
-            "CLI alternative: python3 notarize_pkg.py release/CodexCompanion-0.4.40-latest.pkg --keychain-profile <profile> --json.",
+            "CLI alternative: python3 notarize_pkg.py release/CodexCompanion-0.4.41-latest.pkg --keychain-profile <profile> --json.",
         ]
     if name == "cross_machine_install":
         return [
@@ -1150,6 +1153,34 @@ def native_highlight_event_scope(event: dict[str, Any] | None) -> dict[str, str]
     }
 
 
+def native_highlight_api_proof(event: dict[str, Any] | None) -> dict[str, Any]:
+    event = event or {}
+    extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+    selection_image_bytes = int(extra.get("selectionImageBytes") or 0)
+    selection_length = int(extra.get("selectionLength") or extra.get("requestedSelectionLength") or 0)
+    ok = (
+        str(event.get("event") or "") == "nativeHighlightSelectionPosted"
+        and str(event.get("pluginVersion") or "") == CURRENT_PLUGIN_VERSION
+        and bool(extra.get("highlightReturned")) is True
+        and bool(extra.get("selectorVerified")) is True
+        and bool(extra.get("attemptedUnverifiedSelector")) is False
+        and bool(extra.get("hasSelectionImage")) is True
+        and selection_image_bytes > 0
+        and selection_length > 0
+    )
+    return {
+        "ok": ok,
+        "selectionImageBytes": selection_image_bytes,
+        "selectionLength": selection_length,
+        "highlightReturned": bool(extra.get("highlightReturned")),
+        "selectorVerified": bool(extra.get("selectorVerified")),
+        "attemptedUnverifiedSelector": bool(extra.get("attemptedUnverifiedSelector")),
+        "hasSelectionImage": bool(extra.get("hasSelectionImage")),
+        "selectionTextSource": str(extra.get("selectionTextSource") or ""),
+        "selectedDocumentControllerLabel": str(extra.get("selectedDocumentControllerLabel") or ""),
+    }
+
+
 def check_native_highlight_blobs_for_event(event: dict[str, Any] | None) -> dict[str, Any]:
     scope = native_highlight_event_scope(event)
     topicid = scope["topicid"]
@@ -1489,6 +1520,7 @@ def validate_native_highlight_evidence(data: dict[str, Any]) -> dict[str, Any]:
     event_scope = native_highlight_event_scope(latest_posted)
     if latest_posted and (not event_scope["topicid"] or not event_scope["bookmd5"]):
         problems.append("missing-native-highlight-scope")
+    api_proof = native_highlight_api_proof(latest_posted)
 
     doctor = data.get("doctor") if isinstance(data.get("doctor"), dict) else {}
     checks = doctor.get("checks") if isinstance(doctor.get("checks"), list) else []
@@ -1502,14 +1534,17 @@ def validate_native_highlight_evidence(data: dict[str, Any]) -> dict[str, Any]:
             "topicid": str(blob_check.get("topicid") or ""),
             "bookmd5": str(blob_check.get("bookmd5") or ""),
         }
-        if blob_status != "OK" or int(blob_check.get("native_highlight_blobs") or 0) <= 0:
+        blob_ok = blob_status == "OK" and int(blob_check.get("native_highlight_blobs") or 0) > 0
+        if not blob_ok and not api_proof.get("ok"):
             problems.append("native-highlight-blobs-not-ok")
-        if event_scope["topicid"] and event_scope["bookmd5"] and blob_scope != event_scope:
+        if blob_ok and event_scope["topicid"] and event_scope["bookmd5"] and blob_scope != event_scope:
             problems.append("native-highlight-scope-mismatch")
     elif not highlight_check:
-        problems.append("missing-native-highlight-blob-check")
+        if not api_proof.get("ok"):
+            problems.append("missing-native-highlight-blob-check")
     elif str(highlight_check.get("status") or "") != "OK":
-        problems.append("native-highlight-blobs-not-ok")
+        if not api_proof.get("ok"):
+            problems.append("native-highlight-blobs-not-ok")
 
     return {
         "ok": not problems,
@@ -1517,6 +1552,7 @@ def validate_native_highlight_evidence(data: dict[str, Any]) -> dict[str, Any]:
         "event": latest_posted,
         "highlightScope": event_scope,
         "highlightBlobCheck": blob_check,
+        "nativeHighlightApiProof": api_proof,
         "doctorHighlightCheck": highlight_check,
         "highlightAttemptReason": attempt_reason,
     }

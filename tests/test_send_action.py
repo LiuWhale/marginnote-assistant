@@ -51,6 +51,38 @@ class SendActionTests(unittest.TestCase):
         self.assertIsInstance(payload, dict)
         self.assertEqual(payload["action"], "request_native_capability_probe")
 
+    def test_request_pdf_selection_probe_uses_direct_action_endpoint(self) -> None:
+        send_action = load_send_action()
+        captured: dict[str, object] = {}
+
+        def fake_post_json(url: str, payload: dict[str, object]) -> dict[str, object]:
+            captured["url"] = url
+            captured["payload"] = payload
+            return {"ok": True}
+
+        argv = [
+            "send_action.py",
+            "request_pdf_selection_probe",
+            "--topicid",
+            "T1",
+            "--bookmd5",
+            "B1",
+        ]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(send_action, "post_json", fake_post_json),
+            mock.patch("builtins.print"),
+        ):
+            exit_code = send_action.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured["url"], "http://127.0.0.1:48761/marginnote/action")
+        payload = captured["payload"]
+        self.assertIsInstance(payload, dict)
+        self.assertEqual(payload["action"], "request_pdf_selection_probe")
+        self.assertEqual(payload["topicid"], "T1")
+        self.assertEqual(payload["bookmd5"], "B1")
+
     def test_request_web_panel_reload_uses_direct_action_endpoint(self) -> None:
         send_action = load_send_action()
         captured: dict[str, object] = {}

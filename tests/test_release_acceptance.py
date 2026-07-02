@@ -324,10 +324,30 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                 "native_highlight_blobs": 0,
             },
         }
+        api_proof_without_blob = {
+            **missing_blob,
+            "events": {
+                "latestPosted": {
+                    "event": "nativeHighlightSelectionPosted",
+                    "pluginVersion": module.CURRENT_PLUGIN_VERSION,
+                    "topicid": "topic-a",
+                    "bookmd5": "book-a",
+                    "extra": {
+                        "highlightReturned": True,
+                        "selectorVerified": True,
+                        "attemptedUnverifiedSelector": False,
+                        "hasSelectionImage": True,
+                        "selectionImageBytes": 1878,
+                        "selectionLength": 6,
+                    },
+                }
+            },
+        }
 
         self.assertTrue(module.validate_native_highlight_evidence(valid)["ok"])
         self.assertIn("missing-nativeHighlightSelectionPosted", module.validate_native_highlight_evidence(missing_event)["problems"])
         self.assertIn("native-highlight-blobs-not-ok", module.validate_native_highlight_evidence(missing_blob)["problems"])
+        self.assertTrue(module.validate_native_highlight_evidence(api_proof_without_blob)["ok"])
 
     def test_native_highlight_evidence_rejects_missing_or_mismatched_scope(self) -> None:
         module = self.load_module()
@@ -484,9 +504,12 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                         "native-highlight-command-prepared",
                         "selection-popup-diagnostics-v1",
                         "native-highlight-selection-poll-v1",
+                        "native-highlight-selection-poll-probe-v1",
                         "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -547,9 +570,12 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -614,7 +640,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
             extension = Path(tmp) / "codex.mn.assistant"
             extension.mkdir(parents=True)
             (extension / "main.js").write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
                 encoding="utf-8",
             )
             module.LIVE_EXTENSION = extension
@@ -686,9 +712,12 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                 "native-highlight-command-prepared",
                 "selection-popup-diagnostics-v1",
                 "native-highlight-selection-poll-v1",
+                "native-highlight-selection-poll-probe-v1",
                 "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",

@@ -2,7 +2,11 @@
 set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
-EXT_SOURCE="$SOURCE_DIR/../extension/codex.mn.assistant"
+if [[ -d "$SOURCE_DIR/extension/codex.mn.assistant" ]]; then
+  EXT_SOURCE="$SOURCE_DIR/extension/codex.mn.assistant"
+else
+  EXT_SOURCE="$SOURCE_DIR/../extension/codex.mn.assistant"
+fi
 EXT_TARGET="$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 DRY_RUN="${CODEX_MN_DRY_RUN:-0}"
 

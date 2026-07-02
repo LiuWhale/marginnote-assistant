@@ -80,6 +80,11 @@ class DoctorNativeApiChecks(unittest.TestCase):
 
         for control_id in [
             "aiChatShell",
+            "knowledgeOsContractPanel",
+            "knowledgeOsContractTitle",
+            "knowledgeOsObjectLayer",
+            "knowledgeOsOperationLayer",
+            "knowledgeOsEvidenceLayer",
             "modeSwitchBar",
             "chatModeButton",
             "agentWorkspaceModeButton",
@@ -106,6 +111,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "notebookWorkspaceLedger",
             "notebookWorkspaceSources",
             "notebookWorkspaceActions",
+            "notebookObjectIntake",
+            "notebookObjectIntakeSummary",
+            "notebookObjectIntakeRoutes",
+            "notebookObjectTaskComposer",
+            "notebookObjectTaskComposerSummary",
+            "notebookObjectTaskComposerList",
             "sourceRegistryPanel",
             "notebookWorkspaceSourceRegistry",
             "notebookWorkspaceSourceSummary",
@@ -149,6 +160,23 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "operationLedgerPanel",
             "operationWorkspacePanel",
             "verificationReportPanel",
+            "realMnAcceptancePanel",
+            "realMnAcceptanceStatusLine",
+            "realMnAcceptanceChecklist",
+            "realMnAcceptanceRunAllButton",
+            "singleDocumentAcceptanceLine",
+            "singleDocumentAcceptanceDetail",
+            "singleDocumentAcceptanceButton",
+            "mainUiFunctionalAcceptanceLine",
+            "mainUiFunctionalAcceptanceDetail",
+            "mainUiFunctionalAcceptanceButton",
+            "realMnAcceptanceSafeEvidenceButton",
+            "mainNativeHighlightWizardPanel",
+            "mainNativeHighlightWizardLine",
+            "mainNativeHighlightWizardDetail",
+            "mainNativeHighlightWizardActions",
+            "nativeHighlightWizardRetryButton",
+            "nativeHighlightWizardRefreshButton",
             "operationCompilerPanel",
             "operationCompilerSummary",
             "operationPlanStats",
@@ -170,6 +198,9 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "mindmapStudioStatusLine",
             "knowledgeWorkspacePanel",
             "workflowWorkspacePanel",
+            "workflowBuilderBoardPanel",
+            "workflowBuilderBoardSummary",
+            "workflowBuilderBoardLanes",
             "agentWorkbenchBar",
             "mindmapDiffWorkbench",
             "aiEditTransactionCenter",
@@ -226,6 +257,91 @@ class DoctorNativeApiChecks(unittest.TestCase):
         sources = [str(path) for path in doctor.runtime_source_files()]
 
         self.assertTrue(any(path.endswith("web/app.css") for path in sources))
+
+    def test_doctor_prefers_complete_web_controls_when_legacy_event_is_later(self) -> None:
+        doctor = load_doctor()
+        with tempfile.TemporaryDirectory() as tmp:
+            events = Path(tmp) / "events.jsonl"
+            rows = [
+                {
+                    "ts": "2026-06-11T10:24:33+0800",
+                    "event": "webControlsReady",
+                    "pluginVersion": doctor.CURRENT_PLUGIN_VERSION,
+                    "extra": {
+                        "controls": ",".join(doctor.REQUIRED_WEB_CONTROL_IDS),
+                        "missing": "",
+                        "minWidth": "390",
+                        "minHeight": "520",
+                    },
+                },
+                {
+                    "ts": "2026-06-11T10:24:33+0800",
+                    "event": "webControlsReady",
+                    "pluginVersion": doctor.CURRENT_PLUGIN_VERSION,
+                    "extra": {
+                        "controls": "aiChatShell,modeSwitchBar,promptInput,sendButton",
+                        "missing": "",
+                        "minWidth": "390",
+                        "minHeight": "520",
+                    },
+                },
+            ]
+            events.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+            doctor.EVENTS_PATH = events
+            doctor.EXT_DIR = Path(tmp) / "missing-extension"
+
+            check = doctor.check_runtime_web_controls()
+
+            self.assertEqual(check.status, "OK")
+            self.assertIn("controls reported", check.detail)
+            self.assertIn("notebookWorkspaceRunbook", check.evidence["event"]["extra"]["controls"])
+
+    def test_doctor_prefers_native_api_event_with_current_handler_features(self) -> None:
+        doctor = load_doctor()
+        with tempfile.TemporaryDirectory() as tmp:
+            events = Path(tmp) / "events.jsonl"
+            full_features = list(doctor.REQUIRED_NATIVE_HANDLER_FEATURES)
+            rows = [
+                {
+                    "ts": "2026-06-11T10:24:33+0800",
+                    "event": "nativeApiCapabilities",
+                    "pluginVersion": doctor.CURRENT_PLUGIN_VERSION,
+                    "extra": {
+                        "hasNativeHighlightCandidate": True,
+                        "hasAnnotatedExportCandidate": False,
+                        "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
+                        "handlerFeatures": full_features,
+                        "capabilityMatrix": {
+                            "nativeCards": {"available": True, "ready": True},
+                            "nativeHighlightSelection": {"available": True, "ready": False},
+                        },
+                    },
+                },
+                {
+                    "ts": "2026-06-11T10:24:33+0800",
+                    "event": "nativeApiCapabilities",
+                    "pluginVersion": doctor.CURRENT_PLUGIN_VERSION,
+                    "extra": {
+                        "hasNativeHighlightCandidate": True,
+                        "hasAnnotatedExportCandidate": False,
+                        "candidateMethods": ["selectionDocumentController.highlightFromSelection"],
+                        "handlerFeatures": ["native-highlight-arm-next-selection-default"],
+                        "capabilityMatrix": {
+                            "nativeCards": {"available": True, "ready": True},
+                            "nativeHighlightSelection": {"available": True, "ready": False},
+                        },
+                    },
+                },
+            ]
+            events.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+            doctor.EVENTS_PATH = events
+            doctor.EXT_DIR = Path(tmp) / "missing-extension"
+
+            check = doctor.check_runtime_native_api_capabilities()
+
+            self.assertEqual(check.status, "OK")
+            self.assertFalse(check.evidence["runtimeHandlerStale"])
+            self.assertIn("native-pdf-selection-image-probe-v1", check.evidence["event"]["extra"]["handlerFeatures"])
 
     def test_doctor_reports_stale_runtime_web_controls_when_events_predate_installed_assets(self) -> None:
         doctor = load_doctor()
@@ -532,9 +648,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
                                 "native-highlight-command-prepared",
                                 "selection-popup-diagnostics-v1",
                                 "native-highlight-selection-poll-v1",
+                                "native-highlight-selection-poll-probe-v1",
                                 "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -588,9 +707,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
                                 "native-highlight-command-prepared",
                                 "selection-popup-diagnostics-v1",
                                 "native-highlight-selection-poll-v1",
+                                "native-highlight-selection-poll-probe-v1",
                                 "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -707,7 +829,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             extension.mkdir()
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
                 encoding="utf-8",
             )
             doctor.EXT_DIR = extension
@@ -741,9 +863,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -789,9 +914,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -809,9 +937,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
                     "native-highlight-command-prepared",
                     "selection-popup-diagnostics-v1",
                     "native-highlight-selection-poll-v1",
+                    "native-highlight-selection-poll-probe-v1",
                     "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -899,9 +1030,12 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-highlight-command-prepared",
                             "selection-popup-diagnostics-v1",
                             "native-highlight-selection-poll-v1",
+                            "native-highlight-selection-poll-probe-v1",
                             "selection-popup-scene-observer-v1",
                             "selection-popup-notebook-rebind-v1",
                             "native-highlight-selection-text-resolver-v1",
+                            "native-pdf-selection-probe-v1",
+                            "native-pdf-selection-image-probe-v1",
                             "context-refresh-clears-stale-selection-v1",
                             "ai-edit-transaction-rollback-v1",
                             "ai-edit-undo-rollback-v2",
@@ -981,6 +1115,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                 "CodexCompanion-test/Prepare Release Handoff.command": "#!/bin/zsh\nprepare_release_handoff.py\n",
                 "CodexCompanion-test/release_smoke_test.py": "print('smoke')\n",
                 "CodexCompanion-test/single_document_acceptance.py": "codex-companion-single-document-acceptance-v1\n",
+                "CodexCompanion-test/ui_functional_acceptance.py": "codex-companion-ui-functional-acceptance-v1\n",
                 "CodexCompanion-test/build_pkg.py": "PACKAGE_IDENTIFIER = \"com.codex.marginnote-companion\"\n",
                 "CodexCompanion-test/notarize_pkg.py": "notarytool submit\n",
                 "CodexCompanion-test/prepare_release_handoff.py": "Prepare a Codex Companion release handoff bundle\n",
@@ -1007,6 +1142,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             self.assertNotIn("Prepare Release Handoff.command", check.evidence["missingRootFiles"])
             self.assertNotIn("release_smoke_test.py", check.evidence["missingRootFiles"])
             self.assertNotIn("single_document_acceptance.py", check.evidence["missingRootFiles"])
+            self.assertNotIn("ui_functional_acceptance.py", check.evidence["missingRootFiles"])
             self.assertNotIn("build_pkg.py", check.evidence["missingRootFiles"])
             self.assertNotIn("notarize_pkg.py", check.evidence["missingRootFiles"])
             self.assertNotIn("prepare_release_handoff.py", check.evidence["missingRootFiles"])
