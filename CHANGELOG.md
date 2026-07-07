@@ -6,6 +6,16 @@ All notable changes to Codex Companion are documented here.
 
 No unreleased changes.
 
+## 0.4.42 - 2026-07-07
+
+### Fixed
+
+- Reduced long-running Companion memory growth by moving Codex CLI stdout/stderr capture to temporary files with bounded tail reads instead of in-memory pipes.
+- Reworked PDF text extraction so PyMuPDF writes page text to a temporary JSONL file and the Companion streams it into bounded chunks, avoiding large full-document stdout payloads in the main service process.
+- Changed recent event reads to tail-read the JSONL event log rather than loading the whole file for status/runtime checks.
+- Suppressed successful HTTP access-log noise by default and ignored client-disconnect write errors, preventing `launchd` out/err logs from growing quickly during normal UI polling.
+- Added a regression assertion that Codex CLI generation does not route stdout/stderr through `subprocess.PIPE`.
+
 ## 0.4.41 - 2026-07-02
 
 ### Added

@@ -5,7 +5,7 @@ This matrix prevents two mistakes:
 - Treating the current public preview as a final v1.0 release.
 - Treating the current Agent Workspace slices as the finished v3 MarginNote Knowledge Agent OS.
 
-Current release candidate: `0.4.41` public preview.
+Current release candidate: `0.4.42` public preview.
 
 Current UI shell: `Chat Mode` plus first-stage `Agent Workspace`. The runtime-required Knowledge OS anchors are:
 
@@ -81,7 +81,7 @@ git diff --check
 
 ## Current Blockers
 
-Current `0.4.41` work is still a public preview, not final v1.0 or v3:
+Current `0.4.42` work is still a public preview, not final v1.0 or v3:
 
 - Native visible highlight evidence is still required for final release.
 - Same-topic single-document PASS evidence is still required.

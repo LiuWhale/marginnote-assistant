@@ -1,26 +1,83 @@
 # Current Release Audit
 
-审计时间：2026-07-02 CST
+审计时间：2026-07-07 CST
 
 本文档记录当前 Codex Companion 公开预览版的可验证状态。它不是最终 v1.0 发布承诺，而是当前证据基线。历史条目保留当时版本号和当时判断。
 
 ## 版本与包
 
-- 当前发布候选：0.4.41 公开预览版
-- MN4 插件 manifest：0.4.41
-- Companion：0.4.41
-- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.41`
-- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.41-latest-dist.zip`
-- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.41-latest-dist.zip`
-- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.41-latest.mnaddon`
-- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.41-latest.mnaddon`
+- 当前发布候选：0.4.42 公开预览版
+- MN4 插件 manifest：0.4.42
+- Companion：0.4.42
+- GitHub Release：`https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.42`
+- 最新本地包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.42-latest-dist.zip`
+- 最新 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.42-latest-dist.zip`
+- 最新 MN4 插件包：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.42-latest.mnaddon`
+- 最新 MN4 插件包 OneDrive 镜像：`~/Library/CloudStorage/OneDrive-个人/Codex Companion/CodexCompanion-0.4.42-latest.mnaddon`
 - 当前 zip sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
 - 当前 `.mnaddon` sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
-- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.41-latest.pkg`，已生成但未签名、未公证；签名和公证仍需发布维护者证书。
+- 最新本地 pkg：`~/.codex/marginnote-assistant/release/CodexCompanion-0.4.42-latest.pkg`，已生成但未签名、未公证；签名和公证仍需发布维护者证书。
 - 当前 pkg sha256：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`
 - 精确 hash：见 release 目录和 OneDrive 镜像目录中的外部 `SHA256SUMS.txt`；当前 `release_sha256_manifest` gate 覆盖 zip、mnaddon 和 pkg。
 
 ## 当前证据
+
+### 2026-07-07 v0.4.42 发布候选：Companion memory and log stability
+
+本轮把 0.4.41 的 UI/Agent Workspace 公开预览版推进为 0.4.42 稳定性发布。重点是修复本地 Companion 长时间运行后的严重内存膨胀和日志堆积问题。现场证据显示旧 `companion.py` 进程运行约 9 天后 RSS 约 42.5GB，`vmmap` 物理 footprint 约 34.1GB、峰值约 79.2GB；同一时间 MarginNote 4 主进程仍为几百 MB 级别，因此问题边界定位在本地 Companion 后端。
+
+本轮修复：
+
+- Codex CLI 调用不再用 `stdout=subprocess.PIPE` / `stderr=subprocess.PIPE` 把输出全量接进主进程内存，改为临时日志文件并只读取尾部错误信息。
+- PDF 全文抽取不再通过 PyMuPDF 子进程把整篇 PDF 文本 JSON 打到 stdout，改为子进程写临时 JSONL，Companion 主进程逐页流式读取并生成受 `PDF_TEXT_MAX_CHUNKS` 约束的缓存。
+- 最近事件读取改为尾读 `events.jsonl`，避免运行态检查为了取最近几百条事件读完整日志文件。
+- 默认关闭成功 HTTP 请求 access log，只在 `CODEX_MN_ACCESS_LOG=1` 时输出 200/204/304 访问记录。
+- `_send_json` 忽略客户端断开造成的 `BrokenPipeError`、`ConnectionResetError` 和 `ConnectionAbortedError`，避免 UI 轮询或测试超时时刷 traceback。
+- 新增回归断言，确认 Codex CLI generation 不再把 stdout/stderr 路由到 `subprocess.PIPE`。
+
+本轮本机运行态修复结果：
+
+- 旧高内存 Companion 进程已通过 LaunchAgent 重启释放。
+- 最终发布前本机 Companion 已重启到 PID `8396`，启动后 RSS 约 141MB。
+- `/health` 返回 `{"ok": true, "message": "Codex MarginNote Companion is running."}`。
+- 新 `logs/companion.launchd.out.log` 重启后保持百字节级；旧 225MB access log 已轮转为 `logs/companion.launchd.out.log.before-memory-fix-20260707`。
+
+本轮最终验证结果：
+
+```text
+python3 -m unittest discover -s tests
+PASS, 581 tests
+
+node --check extension/codex.mn.assistant/main.js
+node --check extension/codex.mn.assistant/web/app.js
+PASS
+
+python3 -m py_compile doctor.py release_acceptance.py build_pkg.py companion.py package_release.py ui_functional_acceptance.py
+PASS
+
+python3 ui_functional_acceptance.py --browser-render --browser-interaction --browser-actions --browser-write-actions
+PASS
+
+python3 package_release.py 0.4.42
+PASS, generated latest zip and .mnaddon; synced to OneDrive
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.42-latest-dist.zip --mnaddon release/CodexCompanion-0.4.42-latest.mnaddon
+PASS
+
+python3 release_smoke_test.py release/CodexCompanion-0.4.42-latest-dist.zip --mnaddon release/CodexCompanion-0.4.42-latest.mnaddon --install-dry-run
+PASS
+
+python3 build_pkg.py release/CodexCompanion-0.4.42-latest-dist.zip --json
+PASS, generated unsigned 0.4.42 pkg; synced to OneDrive
+
+./install_extension.sh
+PASS, installed MN4 extension manifest 0.4.42
+
+./stop_companion.sh && ./start_companion.sh
+PASS, /health OK
+```
+
+`python3 release_acceptance.py release/CodexCompanion-0.4.42-latest-dist.zip --json` 已重新指向 0.4.42 并运行；当前 `releasable=false`，阻塞项为 `runtime_web_controls`、`native_api_matrix`、`native_visible_highlight`、`signed_pkg`、`notarized_pkg`、`cross_machine_install` 和 `single_document_acceptance`。这些阻塞项不影响 0.4.42 作为公开预览包发布，但意味着它还不能被声明为 final/v1.0/v3 完整验收版本。签名和 notarization 仍需发布维护者证书；当前 `.pkg` 仍按公开预览边界保留为 unsigned artifact。
 
 ### 2026-07-02 v0.4.41 发布候选：Expert-mode workspace and UI acceptance
 

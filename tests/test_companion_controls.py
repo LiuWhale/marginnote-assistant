@@ -2893,6 +2893,8 @@ class CompanionControlsTests(unittest.TestCase):
                 def __init__(self, args: list[str], **kwargs: Any) -> None:
                     captured["args"] = args
                     captured["env"] = kwargs.get("env")
+                    captured["stdout"] = kwargs.get("stdout")
+                    captured["stderr"] = kwargs.get("stderr")
                     output_path = Path(args[args.index("--output-last-message") + 1])
                     output_path.write_text("fast cli output", encoding="utf-8")
 
@@ -2920,6 +2922,8 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(backend, "codex-cli")
             self.assertEqual(captured["timeout"], 75)
             self.assertEqual(captured["input"], "")
+            self.assertIsNot(captured["stdout"], companion.subprocess.PIPE)
+            self.assertIsNot(captured["stderr"], companion.subprocess.PIPE)
             self.assertIn("model_reasoning_effort=medium", captured["args"])
             self.assertNotIn("--enable", captured["args"])
             self.assertNotIn("--disable", captured["args"])

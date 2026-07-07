@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -99,7 +100,10 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.41"
+CURRENT_PLUGIN_VERSION = "0.4.42"
+ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
+TEXT_TAIL_MAX_BYTES = 512 * 1024
+EVENT_TAIL_MAX_BYTES = 1024 * 1024
 NATIVE_HIGHLIGHT_WIZARD_TIMEOUT_SECONDS = 90
 MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
@@ -373,6 +377,36 @@ def read_json_file(path: Path, fallback: Any) -> Any:
 def write_json_file(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_text_tail(path: Path, max_bytes: int = TEXT_TAIL_MAX_BYTES) -> str:
+    if not path.exists():
+        return ""
+    safe_bytes = max(1, int(max_bytes or TEXT_TAIL_MAX_BYTES))
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - safe_bytes), os.SEEK_SET)
+            data = handle.read(safe_bytes)
+    except Exception:
+        return ""
+    return data.decode("utf-8", errors="replace")
+
+
+def read_recent_text_lines(path: Path, limit: int = 12, max_bytes: int = TEXT_TAIL_MAX_BYTES) -> list[str]:
+    safe_limit = max(1, int(limit or 12))
+    text = read_text_tail(path, max_bytes=max_bytes)
+    if not text:
+        return []
+    lines = text.splitlines()
+    if lines and not text.startswith(("\n", "\r")):
+        try:
+            if path.stat().st_size > max_bytes:
+                lines = lines[1:]
+        except Exception:
+            pass
+    return lines[-safe_limit:]
 
 
 def write_env_setting(key: str, value: str) -> None:
@@ -5234,7 +5268,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.41-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.42-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -9444,7 +9478,7 @@ def read_recent_events(limit: int = 12) -> list[dict[str, Any]]:
     if not EVENTS_PATH.exists():
         return []
     try:
-        lines = EVENTS_PATH.read_text(encoding="utf-8").splitlines()[-limit:]
+        lines = read_recent_text_lines(EVENTS_PATH, limit=limit, max_bytes=EVENT_TAIL_MAX_BYTES)
     except Exception:
         return []
     events: list[dict[str, Any]] = []
@@ -11504,7 +11538,12 @@ def pdf_text_cache_path(book_md5: str, source_sha: str) -> Path:
     return PDF_TEXT_CACHE_DIR / f"{safe_book}-{safe_sha}.json"
 
 
-def extract_pdf_pages_with_pymupdf(python: Path, source_pdf: Path) -> list[dict[str, Any]]:
+def extract_pdf_text_cache_record_with_pymupdf(
+    python: Path,
+    source_pdf: Path,
+    book_md5: str,
+    source_sha: str,
+) -> dict[str, Any]:
     script = r"""
 import json
 import sys
@@ -11512,27 +11551,64 @@ import sys
 import fitz
 
 source = sys.argv[1]
+output = sys.argv[2]
 doc = fitz.open(source)
-pages = []
 try:
-    for index in range(len(doc)):
-        page = doc[index]
-        pages.append({"page": index + 1, "text": page.get_text("text") or ""})
+    with open(output, "w", encoding="utf-8") as handle:
+        for index in range(len(doc)):
+            page = doc[index]
+            handle.write(json.dumps({"page": index + 1, "text": page.get_text("text") or ""}, ensure_ascii=False) + "\n")
 finally:
     doc.close()
-
-print(json.dumps({"pages": pages}, ensure_ascii=False))
 """
-    completed = subprocess.run(
-        [str(python), "-c", script, str(source_pdf)],
-        text=True,
-        capture_output=True,
-        timeout=90,
-        check=True,
-    )
-    data = json.loads(completed.stdout or "{}")
-    pages = data.get("pages")
-    return pages if isinstance(pages, list) else []
+    PDF_TEXT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix="pdf-pages-", suffix=".jsonl", dir=str(PDF_TEXT_CACHE_DIR))
+    os.close(fd)
+    temp_path = Path(temp_name)
+    try:
+        subprocess.run(
+            [str(python), "-c", script, str(source_pdf), str(temp_path)],
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=90,
+            check=True,
+        )
+        chunks: list[dict[str, Any]] = []
+        page_count = 0
+        with temp_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                page_count += 1
+                try:
+                    page = int(item.get("page") or page_count)
+                except Exception:
+                    page = page_count
+                if len(chunks) < PDF_TEXT_MAX_CHUNKS:
+                    chunks.extend(chunk_pdf_page_text(page, str(item.get("text") or "")))
+                    if len(chunks) > PDF_TEXT_MAX_CHUNKS:
+                        chunks = chunks[:PDF_TEXT_MAX_CHUNKS]
+        return {
+            "bookmd5": book_md5,
+            "sourcePdf": str(source_pdf),
+            "sourceSha256": source_sha,
+            "pageCount": page_count,
+            "chunkCount": len(chunks),
+            "extractedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "chunks": chunks,
+        }
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def is_macos_file_permission_error(exc: Exception) -> bool:
@@ -11585,13 +11661,12 @@ def ensure_pdf_text_cache(payload: dict[str, Any]) -> tuple[dict[str, Any] | Non
     if not python:
         return None, dependency_error or "PyMuPDF 不可用，无法读取 PDF 全文。"
     try:
-        pages = extract_pdf_pages_with_pymupdf(python, source_pdf)
+        record = extract_pdf_text_cache_record_with_pymupdf(python, source_pdf, book_md5, source_sha)
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc)).strip()
         return None, f"PDF 全文抽取失败：{detail[:800]}"
     except Exception as exc:
         return None, f"PDF 全文抽取失败：{exc}"
-    record = build_pdf_text_cache_record(source_pdf, book_md5, source_sha, pages)
     PDF_TEXT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     write_json_file(cache_path, record)
     return record, None
@@ -11906,38 +11981,55 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
     last_detail = "Codex CLI 返回为空。"
     for attempt in range(2):
         output_path = CONTROL_DIR / f"codex-cli-output-{uuid.uuid4().hex}.txt"
+        stdout_path = CONTROL_DIR / f"codex-cli-stdout-{uuid.uuid4().hex}.log"
+        stderr_path = CONTROL_DIR / f"codex-cli-stderr-{uuid.uuid4().hex}.log"
         process = None
+        stdout = ""
+        stderr = ""
         try:
-            process = subprocess.Popen(
-                [
-                    path,
-                    "exec",
-                    "--sandbox",
-                    "read-only",
-                    "-m",
-                    settings["model"],
-                    "-c",
-                    f"model_reasoning_effort={reasoning}",
-                    "--skip-git-repo-check",
-                    "--output-last-message",
-                    str(output_path),
-                    prompt,
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=str(ROOT),
-                env=codex_cli_env(settings),
-                start_new_session=True,
-            )
-            register_current_generation_process(process, "codex-cli")
-            stdout, stderr = process.communicate(input="", timeout=timeout)
-            returncode = process.returncode
+            with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open("w", encoding="utf-8") as stderr_handle:
+                process = subprocess.Popen(
+                    [
+                        path,
+                        "exec",
+                        "--sandbox",
+                        "read-only",
+                        "-m",
+                        settings["model"],
+                        "-c",
+                        f"model_reasoning_effort={reasoning}",
+                        "--skip-git-repo-check",
+                        "--output-last-message",
+                        str(output_path),
+                        prompt,
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    text=True,
+                    cwd=str(ROOT),
+                    env=codex_cli_env(settings),
+                    start_new_session=True,
+                )
+                register_current_generation_process(process, "codex-cli")
+                communicated_stdout, communicated_stderr = process.communicate(input="", timeout=timeout)
+                returncode = process.returncode
+                stdout = communicated_stdout or ""
+                stderr = communicated_stderr or ""
         except subprocess.TimeoutExpired:
             cancel_current_generation_process()
+            for temp_log in (output_path, stdout_path, stderr_path):
+                try:
+                    temp_log.unlink()
+                except FileNotFoundError:
+                    pass
             return f"Codex CLI 调用超时（{timeout}s）。自动模式会回退到其他后端；强制 CLI 时请检查 CLI 登录状态。", "codex-cli-error"
         except Exception as exc:
+            for temp_log in (output_path, stdout_path, stderr_path):
+                try:
+                    temp_log.unlink()
+                except FileNotFoundError:
+                    pass
             return f"Codex CLI 调用失败：{exc}", "codex-cli-error"
         finally:
             if process is not None:
@@ -11950,8 +12042,13 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
                 output_path.unlink()
             except FileNotFoundError:
                 pass
-        stdout = (stdout or "").strip()
-        stderr = (stderr or "").strip()
+        stdout = (stdout or read_text_tail(stdout_path)).strip()
+        stderr = (stderr or read_text_tail(stderr_path)).strip()
+        for temp_log in (stdout_path, stderr_path):
+            try:
+                temp_log.unlink()
+            except FileNotFoundError:
+                pass
         if returncode == 0 and final_text:
             return final_text, "codex-cli"
         if returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
@@ -13480,7 +13577,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
 
     def do_OPTIONS(self) -> None:
         self._send_json(200, {"ok": True})
@@ -13595,7 +13695,10 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if result.get("ok") else 400, result)
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        print(time.strftime("%Y-%m-%d %H:%M:%S"), fmt % args, flush=True)
+        message = fmt % args
+        if not ACCESS_LOG_ENABLED and any(token in message for token in ('" 200 ', '" 204 ', '" 304 ')):
+            return
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
 
 
 def main() -> None:

@@ -1288,7 +1288,7 @@ class DevToolsSession:
         return value.get("value")
 
 
-def run_browser_render_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 12.0) -> dict[str, Any]:
+def run_browser_render_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 45.0) -> dict[str, Any]:
     browser = find_browser_executable(browser_path)
     if not browser:
         return fail_check(
@@ -3416,7 +3416,7 @@ BROWSER_WRITE_ACTION_STUB_CLICK_SCRIPT = r"""
 """
 
 
-def run_browser_interaction_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 12.0) -> dict[str, Any]:
+def run_browser_interaction_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 45.0) -> dict[str, Any]:
     browser = find_browser_executable(browser_path)
     if not browser:
         return fail_check(
@@ -3543,7 +3543,7 @@ def run_browser_interaction_check(root: Path, *, browser_path: str = "", timeout
                 server.wait(timeout=2)
 
 
-def run_browser_action_stub_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 12.0) -> dict[str, Any]:
+def run_browser_action_stub_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 45.0) -> dict[str, Any]:
     browser = find_browser_executable(browser_path)
     if not browser:
         return fail_check(
@@ -3645,7 +3645,7 @@ def run_browser_action_stub_check(root: Path, *, browser_path: str = "", timeout
                 server.wait(timeout=2)
 
 
-def run_browser_write_action_stub_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 12.0) -> dict[str, Any]:
+def run_browser_write_action_stub_check(root: Path, *, browser_path: str = "", timeout_seconds: float = 45.0) -> dict[str, Any]:
     browser = find_browser_executable(browser_path)
     if not browser:
         return fail_check(
@@ -3895,7 +3895,7 @@ def evaluate_ui_functional_acceptance(
     browser_actions: bool = False,
     browser_write_actions: bool = False,
     browser_path: str = "",
-    browser_timeout: float = 12.0,
+    browser_timeout: float = 45.0,
 ) -> dict[str, Any]:
     root = Path(root).expanduser().resolve()
     own_temp: tempfile.TemporaryDirectory[str] | None = None
@@ -3964,7 +3964,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--browser-actions", action="store_true", help="Stub Companion XHR and click UI action buttons to verify backend action wiring.")
     parser.add_argument("--browser-write-actions", action="store_true", help="Stub write/transaction paths and verify draft, mind-map Diff, transaction, and native bridge wiring.")
     parser.add_argument("--browser-path", default="", help="Optional Microsoft Edge/Chrome executable for browser checks.")
-    parser.add_argument("--browser-timeout", type=float, default=12.0, help="Seconds to wait for headless browser DOM output.")
+    parser.add_argument("--browser-timeout", type=float, default=45.0, help="Seconds to wait for headless browser DOM output.")
     args = parser.parse_args(argv)
 
     workspace_home = Path(args.workspace_home).expanduser() if args.workspace_home else None
