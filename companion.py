@@ -45,12 +45,14 @@ import workflow_builder
 import workflow_engine
 import update_manager
 from runtime_config import (
-    CODEX_CLI_REASONING,
+    CODEX_CLI_SERVICE_TIERS,
     CODEX_CLI_TIMEOUTS,
     CONTEXT_SCOPE_ALIASES,
     CUSTOM_BUTTON_ACTIONS,
     DEFAULT_MODEL,
     DEFAULT_RUNTIME_SETTINGS,
+    MODEL_PRESETS,
+    REASONING_EFFORTS,
     SPEED_MAX_OUTPUT_TOKENS,
     ai_backend_label,
     sanitize_ai_backend,
@@ -65,6 +67,7 @@ from runtime_config import (
     sanitize_openai_api_key,
     sanitize_permission,
     sanitize_proxy_url,
+    sanitize_reasoning_effort,
     sanitize_speed,
 )
 
@@ -100,7 +103,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.42"
+CURRENT_PLUGIN_VERSION = "0.4.47"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -442,7 +445,11 @@ def runtime_settings() -> dict[str, Any]:
         if key in settings and key not in {"customButtons", "fileSearchRoots"}:
             settings[key] = str(value)
     settings["permission"] = sanitize_permission(settings.get("permission"))
+    legacy_speed = str(saved.get("speed", "") if isinstance(saved, dict) else "").strip()
     settings["speed"] = sanitize_speed(settings.get("speed"))
+    settings["reasoningEffort"] = sanitize_reasoning_effort(settings.get("reasoningEffort"))
+    if "reasoningEffort" not in saved and legacy_speed in {"fast", "balanced", "deep"}:
+        settings["reasoningEffort"] = sanitize_reasoning_effort(legacy_speed)
     settings["model"] = sanitize_model(settings.get("model"), get_setting("OPENAI_MODEL", DEFAULT_MODEL))
     settings["proxyUrl"] = sanitize_proxy_url(settings.get("proxyUrl"))
     settings["aiBackend"] = sanitize_ai_backend(settings.get("aiBackend"))
@@ -461,6 +468,8 @@ def save_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
         current["permission"] = sanitize_permission(values.get("permission"))
     if "speed" in values:
         current["speed"] = sanitize_speed(values.get("speed"))
+    if "reasoningEffort" in values:
+        current["reasoningEffort"] = sanitize_reasoning_effort(values.get("reasoningEffort"))
     if "model" in values:
         current["model"] = sanitize_model(values.get("model"), get_setting("OPENAI_MODEL", DEFAULT_MODEL))
     if "proxyUrl" in values:
@@ -3755,9 +3764,11 @@ def codex_cli_status(settings: dict[str, str] | None = None) -> dict[str, Any]:
 
 def prepare_codex_lite_home() -> Path:
     CODEX_LITE_HOME.mkdir(parents=True, exist_ok=True)
-    source_auth = HOME / ".codex/auth.json"
-    target_auth = CODEX_LITE_HOME / "auth.json"
-    if source_auth.exists():
+    for filename in ("auth.json", "config.toml"):
+        source_auth = HOME / ".codex" / filename
+        target_auth = CODEX_LITE_HOME / filename
+        if not source_auth.exists():
+            continue
         try:
             shutil.copy2(source_auth, target_auth)
         except Exception:
@@ -3805,6 +3816,129 @@ def codex_cli_env(settings: dict[str, str] | None = None) -> dict[str, str]:
         env["NO_PROXY"] = no_proxy
         env["no_proxy"] = no_proxy
     return env
+
+
+CODEX_MODEL_PRESET_CACHE: dict[str, Any] = {"key": "", "ts": 0.0, "presets": [], "source": "fallback", "error": ""}
+
+
+def read_codex_config_scalar(key: str) -> str:
+    path = HOME / ".codex/config.toml"
+    if not path.exists():
+        return ""
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.+?)\s*$")
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            match = pattern.match(raw)
+            if not match:
+                continue
+            value = match.group(1).split("#", 1)[0].strip()
+            return value.strip('"').strip("'").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def effective_reasoning_effort(settings: dict[str, str] | None = None) -> str:
+    settings = settings or runtime_settings()
+    configured = sanitize_reasoning_effort(settings.get("reasoningEffort"))
+    if configured != "codex_config":
+        return configured
+    return read_codex_config_scalar("model_reasoning_effort") or "codex_config"
+
+
+def effective_service_tier(settings: dict[str, str] | None = None) -> str:
+    settings = settings or runtime_settings()
+    speed = sanitize_speed(settings.get("speed"))
+    service_tier = CODEX_CLI_SERVICE_TIERS[speed]
+    if service_tier:
+        return service_tier
+    return read_codex_config_scalar("service_tier") or "codex_config"
+
+
+def codex_model_presets(settings: dict[str, str] | None = None) -> dict[str, Any]:
+    settings = settings or runtime_settings()
+    cli = codex_cli_status(settings)
+    path = str(cli.get("path") or "")
+    cache_key = f"{path}|{settings.get('proxyUrl', '')}"
+    now = time.time()
+    if (
+        CODEX_MODEL_PRESET_CACHE.get("key") == cache_key
+        and now - float(CODEX_MODEL_PRESET_CACHE.get("ts") or 0) < 60
+        and CODEX_MODEL_PRESET_CACHE.get("presets")
+    ):
+        return dict(CODEX_MODEL_PRESET_CACHE)
+    if not cli.get("available"):
+        return {"presets": MODEL_PRESETS, "source": "fallback", "error": "codex-cli-unavailable"}
+    try:
+        completed = subprocess.run(
+            [path, "debug", "models"],
+            text=True,
+            capture_output=True,
+            timeout=20,
+            env=codex_cli_env(settings),
+            cwd=str(ROOT),
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError((completed.stderr or completed.stdout or "").strip() or f"exit {completed.returncode}")
+        data = json.loads(completed.stdout or "{}")
+        presets: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in data.get("models", []):
+            if not isinstance(item, dict):
+                continue
+            slug = str(item.get("slug") or "").strip()
+            if not slug or slug in seen or slug == "codex-auto-review":
+                continue
+            seen.add(slug)
+            label = str(item.get("display_name") or slug).strip()
+            reasoning = str(item.get("default_reasoning_level") or "").strip()
+            speed_tiers = item.get("additional_speed_tiers") if isinstance(item.get("additional_speed_tiers"), list) else []
+            service_tiers = item.get("service_tiers") if isinstance(item.get("service_tiers"), list) else []
+            note_parts = []
+            if reasoning:
+                note_parts.append(f"default reasoning: {reasoning}")
+            service_labels = [
+                str(tier.get("name") or tier.get("id") or "").strip()
+                for tier in service_tiers
+                if isinstance(tier, dict)
+            ]
+            if not service_labels and speed_tiers:
+                service_labels = ["Fast" if str(tier).strip() == "fast" else str(tier).strip() for tier in speed_tiers]
+            service_labels = [label for label in service_labels if label]
+            if service_labels:
+                note_parts.append("service tier: " + ", ".join(service_labels))
+            presets.append({"id": slug, "label": label, "note": " / ".join(note_parts)})
+        if presets:
+            result = {"key": cache_key, "ts": now, "presets": presets, "source": "codex-cli", "error": ""}
+            CODEX_MODEL_PRESET_CACHE.update(result)
+            return dict(result)
+    except Exception as exc:
+        result = {"key": cache_key, "ts": now, "presets": MODEL_PRESETS, "source": "fallback", "error": str(exc)}
+        CODEX_MODEL_PRESET_CACHE.update(result)
+        return dict(result)
+    result = {"key": cache_key, "ts": now, "presets": MODEL_PRESETS, "source": "fallback", "error": "empty-catalog"}
+    CODEX_MODEL_PRESET_CACHE.update(result)
+    return dict(result)
+
+
+def effective_codex_cli_model(settings: dict[str, str] | None = None) -> str:
+    settings = settings or runtime_settings()
+    requested = sanitize_model(settings.get("model"), DEFAULT_MODEL)
+    catalog = codex_model_presets(settings)
+    ids = [
+        str(item.get("id") or "").strip()
+        for item in catalog.get("presets", [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ]
+    if not ids:
+        return requested
+    if requested in ids:
+        return requested
+    alias = sanitize_model(requested, DEFAULT_MODEL)
+    if alias in ids:
+        return alias
+    return ids[0]
 
 
 def ai_status_fields(settings: dict[str, str] | None = None) -> dict[str, Any]:
@@ -5268,7 +5402,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.42-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            "生成/更新 release/CodexCompanion-0.4.47-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -10040,6 +10174,8 @@ def status_payload() -> dict[str, Any]:
     proxy_scheme = urlparse(proxy_url).scheme if proxy_url else ""
     ai_status = ai_status_fields(settings)
     mn_api_status = mn_api_status_fields(settings)
+    model_catalog = codex_model_presets(settings)
+    effective_model = effective_codex_cli_model(settings) if settings.get("aiBackend") in {"auto", "codex_cli"} else settings["model"]
     return {
         "ok": True,
         "message": "Codex MarginNote Companion is running.",
@@ -10048,7 +10184,15 @@ def status_payload() -> dict[str, Any]:
         **ai_status,
         **mn_api_status,
         "model": settings["model"],
+        "effectiveModel": effective_model,
+        "modelPresets": model_catalog["presets"],
+        "modelPresetSource": model_catalog["source"],
+        "modelPresetError": model_catalog["error"],
         "speed": settings["speed"],
+        "reasoningEffort": settings["reasoningEffort"],
+        "effectiveServiceTier": effective_service_tier(settings),
+        "effectiveReasoningEffort": effective_reasoning_effort(settings),
+        "reasoningEfforts": sorted(REASONING_EFFORTS),
         "permission": settings["permission"],
         "proxy_configured": bool(proxy_url),
         "proxy_scheme": proxy_scheme,
@@ -11975,7 +12119,22 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
     )
     speed = sanitize_speed(settings.get("speed"))
     timeout = CODEX_CLI_TIMEOUTS[speed]
-    reasoning = CODEX_CLI_REASONING[speed]
+    service_tier = CODEX_CLI_SERVICE_TIERS[speed]
+    reasoning = sanitize_reasoning_effort(settings.get("reasoningEffort"))
+    model = effective_codex_cli_model(settings)
+    command = [
+        path,
+        "exec",
+        "--sandbox",
+        "read-only",
+        "-m",
+        model,
+        "--skip-git-repo-check",
+    ]
+    if service_tier:
+        command.extend(["-c", f"service_tier={service_tier}"])
+    if reasoning != "codex_config":
+        command.extend(["-c", f"model_reasoning_effort={reasoning}"])
     CONTROL_DIR.mkdir(parents=True, exist_ok=True)
     retried_startup_error = False
     last_detail = "Codex CLI 返回为空。"
@@ -11989,20 +12148,7 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
         try:
             with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open("w", encoding="utf-8") as stderr_handle:
                 process = subprocess.Popen(
-                    [
-                        path,
-                        "exec",
-                        "--sandbox",
-                        "read-only",
-                        "-m",
-                        settings["model"],
-                        "-c",
-                        f"model_reasoning_effort={reasoning}",
-                        "--skip-git-repo-check",
-                        "--output-last-message",
-                        str(output_path),
-                        prompt,
-                    ],
+                    [*command, "--output-last-message", str(output_path), prompt],
                     stdin=subprocess.PIPE,
                     stdout=stdout_handle,
                     stderr=stderr_handle,
@@ -13072,11 +13218,19 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         settings = runtime_settings()
         topic_id = normalize_topic_id(payload)
         book_md5 = normalize_book_md5(payload)
+        model_catalog = codex_model_presets(settings)
         return {
             "ok": True,
             "message": "已读取插件设置。",
             "pluginVersion": CURRENT_PLUGIN_VERSION,
             "settings": settings,
+            "effectiveModel": effective_codex_cli_model(settings) if settings.get("aiBackend") in {"auto", "codex_cli"} else settings["model"],
+            "modelPresets": model_catalog["presets"],
+            "modelPresetSource": model_catalog["source"],
+            "modelPresetError": model_catalog["error"],
+            "effectiveServiceTier": effective_service_tier(settings),
+            "effectiveReasoningEffort": effective_reasoning_effort(settings),
+            "reasoningEfforts": sorted(REASONING_EFFORTS),
             **ai_status_fields(settings),
             **mn_api_status_fields(settings),
             "goal": active_goal(),
@@ -13090,6 +13244,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         settings = save_runtime_settings(settings_payload if isinstance(settings_payload, dict) else {})
         topic_id = normalize_topic_id(payload)
         book_md5 = normalize_book_md5(payload)
+        model_catalog = codex_model_presets(settings)
         return {
             "ok": True,
             "message": "插件设置已保存。",
@@ -13099,6 +13254,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 f"权限：{settings['permission']}\n"
                 f"模型：{settings['model']}\n"
                 f"速度：{settings['speed']}\n"
+                f"推理强度：{settings['reasoningEffort']}\n"
                 f"默认上下文：{settings['defaultContextScope']}\n"
                 f"AI 后端：{ai_backend_label(settings['aiBackend'])}\n"
                 f"MN API：{mn_api_status_fields(settings)['mn_api_backend_label']}\n"
@@ -13109,6 +13265,13 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 f"自定义按钮：{len(settings.get('customButtons') or [])}"
             ),
             "settings": settings,
+            "effectiveModel": effective_codex_cli_model(settings) if settings.get("aiBackend") in {"auto", "codex_cli"} else settings["model"],
+            "modelPresets": model_catalog["presets"],
+            "modelPresetSource": model_catalog["source"],
+            "modelPresetError": model_catalog["error"],
+            "effectiveServiceTier": effective_service_tier(settings),
+            "effectiveReasoningEffort": effective_reasoning_effort(settings),
+            "reasoningEfforts": sorted(REASONING_EFFORTS),
             **ai_status_fields(settings),
             **mn_api_status_fields(settings),
             "goal": active_goal(),

@@ -8,6 +8,17 @@
     contextScopeInitialized: false,
     lastPromptFromSelection: '',
     settings: {},
+    effectiveModel: '',
+    effectiveServiceTier: '',
+    effectiveReasoningEffort: '',
+    modelPresets: [
+      {id: 'gpt-5.6-sol', label: 'GPT-5.6 SOL'},
+      {id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra'},
+      {id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna'},
+      {id: 'gpt-5.5', label: 'GPT-5.5'},
+      {id: 'gpt-5.4', label: 'GPT-5.4'},
+      {id: 'gpt-5.4-mini', label: 'GPT-5.4 mini'}
+    ],
     customButtons: [],
     goal: {},
     files: [],
@@ -373,6 +384,23 @@
     'contextLine',
     'readinessPanel',
     'mnApiStatusLine',
+    'modelPresetSelect',
+    'modelPresetButtonGroup',
+    'modelInput',
+    'applyModelInputButton',
+    'aiProfileStatusLine',
+    'speedChoiceGroup',
+    'speedCodexConfigButton',
+    'speedPriorityButton',
+    'reasoningEffortSelect',
+    'reasoningEffortChoiceGroup',
+    'reasoningEffortCodexConfigButton',
+    'reasoningEffortLowButton',
+    'reasoningEffortMediumButton',
+    'reasoningEffortHighButton',
+    'reasoningEffortXhighButton',
+    'reasoningEffortMaxButton',
+    'reasoningEffortUltraButton',
     'mnApiBackendSelect',
     'mnUrlApiSecretInput',
     'clearMnUrlApiSecretButton',
@@ -7282,12 +7310,21 @@
     if (hasRealAi) {
       panel.className = 'readiness-panel ready';
       line.textContent = '真实 AI 后端已发现';
+      var speedText = settings.speed || state.settings.speed || '未设置';
+      if (speedText === 'codex_config' && state.effectiveServiceTier && state.effectiveServiceTier !== 'codex_config') {
+        speedText += '（实际：' + state.effectiveServiceTier + '）';
+      }
+      var reasoningText = settings.reasoningEffort || state.settings.reasoningEffort || '未设置';
+      if (reasoningText === 'codex_config' && state.effectiveReasoningEffort && state.effectiveReasoningEffort !== 'codex_config') {
+        reasoningText += '（实际：' + state.effectiveReasoningEffort + '）';
+      }
       detail.textContent =
         'AI 后端：' + (backendLabels[backend] || backend) +
         ' / Codex CLI：' + (state.codexCliAvailable ? '已发现' : '未发现') +
         ' / OpenAI：' + (state.openaiConfigured ? '已配置' : '未配置') +
-        ' / 模型：' + (settings.model || state.settings.model || '未设置') +
-        ' / 速度：' + (settings.speed || state.settings.speed || '未设置') +
+        ' / 模型：' + (state.effectiveModel || settings.model || state.settings.model || '未设置') +
+        ' / 速度：' + speedText +
+        ' / 推理：' + reasoningText +
         ' / 代理：' + ((settings.proxyUrl || state.settings.proxyUrl) ? '已配置' : '未配置') +
         ' / 生成仍取决于 CLI 登录、代理和网络';
     } else if (backend === 'local') {
@@ -9488,6 +9525,10 @@
   function renderControls(result) {
     result = result || {};
     state.settings = result.settings || state.settings || {};
+    state.modelPresets = normalizeModelPresets(result.modelPresets || state.modelPresets);
+    state.effectiveModel = result.effectiveModel || state.effectiveModel || state.settings.model || '';
+    state.effectiveServiceTier = result.effectiveServiceTier || state.effectiveServiceTier || '';
+    state.effectiveReasoningEffort = result.effectiveReasoningEffort || state.effectiveReasoningEffort || '';
     if (result.pluginVersion) state.pluginVersion = String(result.pluginVersion || '');
     state.customButtons = cleanCustomButtons(state.settings.customButtons || state.customButtons || []);
     state.goal = result.goalOneShot ? {} : (result.goal || state.goal || {});
@@ -9513,8 +9554,9 @@
     setValue('permissionSelect', state.settings.permission || 'notes');
     renderMnApiStatus(result);
     renderWorkflowWorkspace();
-    setValue('modelInput', state.settings.model || 'gpt-5.5');
-    setValue('speedSelect', state.settings.speed || 'fast');
+    renderModelSelector(state.settings.model || 'gpt-5.6-sol');
+    renderSpeedSelector(state.settings.speed || 'codex_config');
+    renderReasoningEffortSelector(state.settings.reasoningEffort || 'codex_config');
     setValue('proxyUrlInput', state.settings.proxyUrl || '');
     setValue('codexCliPathInput', state.settings.codexCliPath || state.codexCliPath || '');
     setValue('defaultContextScopeSelect', state.settings.defaultContextScope || 'auto');
@@ -9616,6 +9658,189 @@
     return roots;
   }
 
+  function normalizeModelPresets(raw) {
+    if (!raw || !raw.length) return state.modelPresets || [];
+    var seen = {};
+    var presets = [];
+    for (var i = 0; i < raw.length; i++) {
+      var item = raw[i] || {};
+      var id = String(item.id || '').replace(/^\s+|\s+$/g, '');
+      if (!id || seen[id]) continue;
+      seen[id] = true;
+      presets.push({
+        id: id,
+        label: String(item.label || id),
+        note: String(item.note || '')
+      });
+    }
+    return presets.length ? presets : (state.modelPresets || []);
+  }
+
+  function renderSpeedSelector(speed) {
+    var current = String(speed || 'codex_config').replace(/^\s+|\s+$/g, '') || 'codex_config';
+    if (current === 'fast') current = 'priority';
+    if (['codex_config', 'priority'].indexOf(current) < 0) current = 'codex_config';
+    setValue('speedSelect', current);
+    var group = byId('speedChoiceGroup');
+    if (!group) return;
+    var buttons = group.querySelectorAll ? group.querySelectorAll('[data-speed-choice]') : [];
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute('data-speed-choice') === current;
+      buttons[i].className = 'choice-button' + (active ? ' active' : '');
+      buttons[i].setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+
+  function updateSpeedChoice(speed) {
+    var value = String(speed || 'codex_config').replace(/^\s+|\s+$/g, '') || 'codex_config';
+    if (value === 'fast') value = 'priority';
+    renderSpeedSelector(value);
+    saveAiProfilePatch({speed: value}, '速度已保存：' + value);
+  }
+
+  function renderReasoningEffortSelector(reasoningEffort) {
+    var current = String(reasoningEffort || 'codex_config').replace(/^\s+|\s+$/g, '') || 'codex_config';
+    if (current === 'fast') current = 'medium';
+    if (current === 'balanced') current = 'medium';
+    if (current === 'deep') current = 'high';
+    if (['codex_config', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].indexOf(current) < 0) current = 'codex_config';
+    setValue('reasoningEffortSelect', current);
+    var group = byId('reasoningEffortChoiceGroup');
+    if (!group) return;
+    var buttons = group.querySelectorAll ? group.querySelectorAll('[data-reasoning-effort-choice]') : [];
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute('data-reasoning-effort-choice') === current;
+      buttons[i].className = 'choice-button' + (active ? ' active' : '');
+      buttons[i].setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+
+  function updateReasoningEffortChoice(reasoningEffort) {
+    var value = String(reasoningEffort || 'codex_config').replace(/^\s+|\s+$/g, '') || 'codex_config';
+    renderReasoningEffortSelector(value);
+    saveAiProfilePatch({reasoningEffort: value}, '推理强度已保存：' + value);
+  }
+
+  function renderModelSelector(model) {
+    var hidden = byId('modelPresetSelect');
+    var group = byId('modelPresetButtonGroup');
+    var input = byId('modelInput');
+    var current = String(model || 'gpt-5.6-sol').replace(/^\s+|\s+$/g, '') || 'gpt-5.6-sol';
+    if (input) input.value = current;
+    var presets = normalizeModelPresets(state.modelPresets);
+    var matched = false;
+    if (group) group.innerHTML = '';
+    for (var i = 0; i < presets.length; i++) {
+      var preset = presets[i] || {};
+      if (preset.id === current) matched = true;
+      if (group) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'choice-button model-choice-button' + (preset.id === current ? ' active' : '');
+        button.setAttribute('data-model-preset', preset.id);
+        button.setAttribute('aria-pressed', preset.id === current ? 'true' : 'false');
+        button.textContent = preset.label || preset.id;
+        if (preset.note) button.title = preset.note;
+        button.addEventListener('click', function(ev) {
+          var target = ev.currentTarget || ev.target;
+          updateModelInputFromPreset(target && target.getAttribute ? target.getAttribute('data-model-preset') : '');
+          releaseButtonFocus(target);
+        });
+        group.appendChild(button);
+      }
+    }
+    if (group) {
+      var custom = document.createElement('button');
+      custom.type = 'button';
+      custom.className = 'choice-button model-choice-button' + (!matched ? ' active' : '');
+      custom.setAttribute('data-model-preset', 'custom');
+      custom.setAttribute('aria-pressed', !matched ? 'true' : 'false');
+      custom.textContent = '自定义';
+      custom.addEventListener('click', function(ev) {
+        updateModelInputFromPreset('custom');
+        releaseButtonFocus(ev.currentTarget || ev.target);
+      });
+      group.appendChild(custom);
+    }
+    if (hidden) hidden.value = matched ? current : 'custom';
+  }
+
+  function updateModelInputFromPreset(value) {
+    var preset = String(value || getValue('modelPresetSelect') || '').replace(/^\s+|\s+$/g, '');
+    if (!preset || preset === 'custom') {
+      setValue('modelPresetSelect', 'custom');
+      syncModelPresetFromInput();
+      setText('aiProfileStatusLine', '自定义模型：填写模型 ID 后点“应用模型”。');
+      var input = byId('modelInput');
+      if (input) input.focus();
+      return;
+    }
+    setValue('modelInput', preset);
+    renderModelSelector(preset);
+    saveAiProfilePatch({model: preset}, '模型已保存：' + preset);
+  }
+
+  function syncModelPresetFromInput() {
+    var model = getValue('modelInput').replace(/^\s+|\s+$/g, '');
+    var hidden = byId('modelPresetSelect');
+    var found = false;
+    var presets = normalizeModelPresets(state.modelPresets);
+    for (var i = 0; i < presets.length; i++) {
+      if (presets[i].id === model) {
+        found = true;
+        break;
+      }
+    }
+    if (hidden) hidden.value = found ? model : 'custom';
+    var group = byId('modelPresetButtonGroup');
+    if (!group || !group.querySelectorAll) return;
+    var buttons = group.querySelectorAll('[data-model-preset]');
+    for (var j = 0; j < buttons.length; j++) {
+      var value = buttons[j].getAttribute('data-model-preset');
+      var active = found ? value === model : value === 'custom';
+      buttons[j].className = 'choice-button model-choice-button' + (active ? ' active' : '');
+      buttons[j].setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+
+  function currentModelValue() {
+    var model = getValue('modelInput').replace(/^\s+|\s+$/g, '');
+    var preset = getValue('modelPresetSelect');
+    if (!model && preset && preset !== 'custom') return preset;
+    return model;
+  }
+
+  function saveAiProfilePatch(settingsPatch, successText) {
+    setText('aiProfileStatusLine', '正在保存模型/速度/推理设置...');
+    postCompanion('settings_update', {settings: settingsPatch || {}}, function(result) {
+      renderControls(result || {});
+      if (!result || !result.ok) {
+        setText('aiProfileStatusLine', '模型/速度/推理保存失败。');
+        addFailureMessage('模型/速度/推理保存失败', result);
+        return;
+      }
+      var settings = result.settings || state.settings || {};
+      var model = settings.model || currentModelValue() || '未设置';
+      var effective = result.effectiveModel || state.effectiveModel || model;
+      var speed = settings.speed || getValue('speedSelect') || '未设置';
+      var reasoningEffort = settings.reasoningEffort || getValue('reasoningEffortSelect') || '未设置';
+      var modelText = effective && effective !== model ? model + '（实际：' + effective + '）' : model;
+      var speedText = speed === 'codex_config' && result.effectiveServiceTier && result.effectiveServiceTier !== 'codex_config' ? speed + '（实际：' + result.effectiveServiceTier + '）' : speed;
+      var reasoningText = reasoningEffort === 'codex_config' && result.effectiveReasoningEffort && result.effectiveReasoningEffort !== 'codex_config' ? reasoningEffort + '（实际：' + result.effectiveReasoningEffort + '）' : reasoningEffort;
+      setText('aiProfileStatusLine', (successText || '模型/速度/推理已保存') + '；当前：' + modelText + ' / ' + speedText + ' / ' + reasoningText);
+    }, {showReply: false});
+  }
+
+  function applyModelInput() {
+    var model = currentModelValue();
+    if (!model) {
+      setText('aiProfileStatusLine', '模型 ID 不能为空。');
+      return;
+    }
+    syncModelPresetFromInput();
+    saveAiProfilePatch({model: model}, '模型已保存：' + model);
+  }
+
   function renderFileSearchRoots(settings) {
     settings = settings || state.settings || {};
     var roots = settings.fileSearchRoots || [];
@@ -9710,8 +9935,9 @@
         aiBackend: getValue('aiBackendSelect'),
         mnApiBackend: getValue('mnApiBackendSelect'),
         permission: getValue('permissionSelect'),
-        model: getValue('modelInput'),
+        model: currentModelValue(),
         speed: getValue('speedSelect'),
+        reasoningEffort: getValue('reasoningEffortSelect'),
         codexCliPath: getValue('codexCliPathInput'),
         proxyUrl: getValue('proxyUrlInput'),
         defaultContextScope: getValue('defaultContextScopeSelect'),
@@ -10572,6 +10798,44 @@
     bindButton('verificationRepairPlanRecommendedButton', runVerificationRepairRecommended);
     bindButton('workflowRunInspectorCloseButton', closeWorkflowRunInspector);
     bindButton('configBackButton', closeConfigPage);
+    bindButton('applyModelInputButton', applyModelInput);
+    var speedChoiceGroup = byId('speedChoiceGroup');
+    if (speedChoiceGroup) {
+      speedChoiceGroup.addEventListener('click', function(ev) {
+        var target = ev.target;
+        while (target && target !== speedChoiceGroup && !(target.getAttribute && target.getAttribute('data-speed-choice'))) {
+          target = target.parentNode;
+        }
+        if (target && target.getAttribute) {
+          updateSpeedChoice(target.getAttribute('data-speed-choice'));
+          releaseButtonFocus(target);
+        }
+      });
+    }
+    var reasoningEffortChoiceGroup = byId('reasoningEffortChoiceGroup');
+    if (reasoningEffortChoiceGroup) {
+      reasoningEffortChoiceGroup.addEventListener('click', function(ev) {
+        var target = ev.target;
+        while (target && target !== reasoningEffortChoiceGroup && !(target.getAttribute && target.getAttribute('data-reasoning-effort-choice'))) {
+          target = target.parentNode;
+        }
+        if (target && target.getAttribute) {
+          updateReasoningEffortChoice(target.getAttribute('data-reasoning-effort-choice'));
+          releaseButtonFocus(target);
+        }
+      });
+    }
+    var modelInput = byId('modelInput');
+    if (modelInput) {
+      modelInput.addEventListener('input', syncModelPresetFromInput);
+      modelInput.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Enter') {
+          if (ev.preventDefault) ev.preventDefault();
+          applyModelInput();
+          releaseTextInputFocus('modelInput');
+        }
+      });
+    }
     bindButton('contextButton', function() {
       bridge('context', {});
     });

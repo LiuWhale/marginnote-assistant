@@ -50,6 +50,13 @@ class InstallScriptStaticTests(unittest.TestCase):
         self.assertNotIn('-x "$COMPANION_SOURCE/uninstall_companion.sh"', uninstall_root)
         self.assertIn('/bin/zsh "$COMPANION_SOURCE/uninstall_companion.sh"', uninstall_root)
 
+    def test_extension_install_targets_both_marginnote4_containers(self) -> None:
+        install_extension = (PROJECT_ROOT / "install_extension.sh").read_text(encoding="utf-8")
+
+        self.assertIn("QReader.MarginStudy.easy", install_extension)
+        self.assertIn("QReader.MarginStudyMac", install_extension)
+        self.assertIn("EXT_TARGETS", install_extension)
+
     def test_refresh_mn_runtime_command_collects_evidence_without_quitting_mn4(self) -> None:
         command = (PACKAGE_ROOT / "Refresh MN Runtime.command").read_text(encoding="utf-8")
         script = (PROJECT_ROOT / "refresh_mn_runtime.py").read_text(encoding="utf-8")

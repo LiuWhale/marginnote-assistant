@@ -43,19 +43,25 @@ class CompanionControlsTests(unittest.TestCase):
             ]:
                 self.assertIn(feature, companion.REQUIRED_NATIVE_HANDLER_FEATURES)
 
-    def test_default_ai_profile_is_gpt55_fast_with_medium_reasoning(self) -> None:
+    def test_default_ai_profile_is_codex_cli_gpt56_following_codex_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
 
             settings = companion.runtime_settings()
             status = companion.status_payload()
 
-            self.assertEqual(settings["model"], "gpt-5.5")
-            self.assertEqual(settings["speed"], "fast")
-            self.assertEqual(status["model"], "gpt-5.5")
-            self.assertEqual(status["speed"], "fast")
-            self.assertEqual(companion.CODEX_CLI_REASONING["fast"], "medium")
-            self.assertEqual(companion.CODEX_CLI_TIMEOUTS["fast"], 75)
+            self.assertEqual(settings["model"], "gpt-5.6-sol")
+            self.assertEqual(settings["speed"], "codex_config")
+            self.assertEqual(settings["reasoningEffort"], "codex_config")
+            self.assertEqual(status["model"], "gpt-5.6-sol")
+            self.assertIn("gpt-5.6-terra", [item["id"] for item in status["modelPresets"]])
+            self.assertIn("gpt-5.6-luna", [item["id"] for item in status["modelPresets"]])
+            self.assertEqual(status["speed"], "codex_config")
+            self.assertEqual(status["reasoningEffort"], "codex_config")
+            self.assertEqual(companion.CODEX_CLI_SERVICE_TIERS["codex_config"], "")
+            self.assertEqual(companion.CODEX_CLI_SERVICE_TIERS["priority"], "priority")
+            self.assertIn("xhigh", companion.REASONING_EFFORTS)
+            self.assertEqual(companion.CODEX_CLI_TIMEOUTS["codex_config"], 90)
 
     def test_chat_prompt_does_not_inherit_saved_goal_or_defense_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2867,15 +2873,16 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("自动拆分", result["reply"])
             self.assertIn("当前章节", result["goalQueue"][0]["prompt"])
 
-    def test_codex_cli_fast_mode_uses_gpt55_medium_fast_profile(self) -> None:
+    def test_codex_cli_service_tier_and_reasoning_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.save_runtime_settings(
                 {
-                    "speed": "fast",
+                    "speed": "priority",
+                    "reasoningEffort": "xhigh",
                     "aiBackend": "codex_cli",
                     "codexCliPath": "/tmp/codex",
-                    "model": "gpt-5.5",
+                    "model": "gpt-5.4",
                     "proxyUrl": "http://127.0.0.1:7890",
                 }
             )
@@ -2896,7 +2903,7 @@ class CompanionControlsTests(unittest.TestCase):
                     captured["stdout"] = kwargs.get("stdout")
                     captured["stderr"] = kwargs.get("stderr")
                     output_path = Path(args[args.index("--output-last-message") + 1])
-                    output_path.write_text("fast cli output", encoding="utf-8")
+                    output_path.write_text("priority xhigh cli output", encoding="utf-8")
 
                 def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
                     captured["timeout"] = timeout
@@ -2918,13 +2925,14 @@ class CompanionControlsTests(unittest.TestCase):
             finally:
                 companion.subprocess.Popen = old_popen
 
-            self.assertEqual(text, "fast cli output")
+            self.assertEqual(text, "priority xhigh cli output")
             self.assertEqual(backend, "codex-cli")
-            self.assertEqual(captured["timeout"], 75)
+            self.assertEqual(captured["timeout"], 90)
             self.assertEqual(captured["input"], "")
             self.assertIsNot(captured["stdout"], companion.subprocess.PIPE)
             self.assertIsNot(captured["stderr"], companion.subprocess.PIPE)
-            self.assertIn("model_reasoning_effort=medium", captured["args"])
+            self.assertIn("service_tier=priority", captured["args"])
+            self.assertIn("model_reasoning_effort=xhigh", captured["args"])
             self.assertNotIn("--enable", captured["args"])
             self.assertNotIn("--disable", captured["args"])
             self.assertNotIn("--ephemeral", captured["args"])
@@ -2932,7 +2940,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("--sandbox", captured["args"])
             self.assertIn("read-only", captured["args"])
             self.assertIn("-m", captured["args"])
-            self.assertIn("gpt-5.5", captured["args"])
+            self.assertIn("gpt-5.4", captured["args"])
             self.assertEqual(captured["env"]["CODEX_HOME"], str(companion.CODEX_LITE_HOME))
             self.assertEqual(captured["env"]["HOME"], str(companion.CODEX_LITE_HOME))
             self.assertEqual(captured["env"]["HTTP_PROXY"], "http://127.0.0.1:7890")
@@ -2942,6 +2950,220 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("127.0.0.1", captured["env"]["NO_PROXY"])
             self.assertIn("localhost", captured["env"]["NO_PROXY"])
             self.assertTrue((companion.CODEX_LITE_HOME / "auth.json").exists())
+
+    def test_model_presets_are_read_from_codex_cli_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings({"codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+
+            class FakeCompleted:
+                returncode = 0
+                stderr = ""
+                stdout = json.dumps(
+                    {
+                        "models": [
+                            {
+                                "slug": "gpt-5.6-sol",
+                                "display_name": "GPT-5.6 SOL",
+                                "default_reasoning_level": "medium",
+                                "additional_speed_tiers": ["fast"],
+                                "service_tiers": [{"id": "priority", "name": "Fast"}],
+                            },
+                            {"slug": "gpt-5.6-terra", "display_name": "GPT-5.6 Terra"},
+                            {"slug": "codex-auto-review", "display_name": "Codex Auto Review"},
+                        ]
+                    }
+                )
+
+            old_run = companion.subprocess.run
+            companion.subprocess.run = lambda *args, **kwargs: FakeCompleted()
+            try:
+                result = companion.handle_action({"action": "settings_get"})
+            finally:
+                companion.subprocess.run = old_run
+
+            self.assertEqual(result["modelPresetSource"], "codex-cli")
+            self.assertEqual([item["id"] for item in result["modelPresets"]], ["gpt-5.6-sol", "gpt-5.6-terra"])
+            self.assertIn("service tier: Fast", result["modelPresets"][0]["note"])
+            self.assertNotIn("speed: fast", result["modelPresets"][0]["note"])
+
+    def test_codex_cli_auto_selects_available_catalog_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings(
+                {
+                    "speed": "codex_config",
+                    "aiBackend": "codex_cli",
+                    "codexCliPath": "/tmp/codex",
+                    "model": "stale-model",
+                }
+            )
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+
+            class FakeCompleted:
+                returncode = 0
+                stderr = ""
+                stdout = json.dumps(
+                    {
+                        "models": [
+                            {"slug": "gpt-5.6-terra", "display_name": "GPT-5.6 Terra"},
+                            {"slug": "gpt-5.6-luna", "display_name": "GPT-5.6 Luna"},
+                        ]
+                    }
+                )
+
+            captured: dict[str, Any] = {}
+
+            class FakePopen:
+                pid = 4433
+                returncode = 0
+
+                def __init__(self, args: list[str], **kwargs: Any) -> None:
+                    captured["args"] = args
+                    output_path = Path(args[args.index("--output-last-message") + 1])
+                    output_path.write_text("catalog selected output", encoding="utf-8")
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_run = companion.subprocess.run
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.run = lambda *args, **kwargs: FakeCompleted()
+            companion.subprocess.Popen = lambda args, **kwargs: FakePopen(args, **kwargs)
+            try:
+                status = companion.status_payload()
+                text, backend = companion.call_codex_cli({"prompt": "ping"}, "chat")
+            finally:
+                companion.subprocess.run = old_run
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual(status["effectiveModel"], "gpt-5.6-terra")
+            self.assertEqual(text, "catalog selected output")
+            self.assertEqual(backend, "codex-cli")
+            self.assertIn("gpt-5.6-terra", captured["args"])
+            self.assertNotIn("stale-model", captured["args"])
+
+    def test_codex_config_speed_does_not_override_cli_reasoning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings(
+                {
+                    "speed": "codex_config",
+                    "reasoningEffort": "codex_config",
+                    "aiBackend": "codex_cli",
+                    "codexCliPath": "/tmp/codex",
+                    "model": "gpt-5.6-sol",
+                }
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.joinpath(".codex").mkdir(parents=True)
+            fake_home.joinpath(".codex/auth.json").write_text('{"token":"test"}', encoding="utf-8")
+            fake_home.joinpath(".codex/config.toml").write_text('model_reasoning_effort = "xhigh"\n', encoding="utf-8")
+            companion.HOME = fake_home
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            captured: dict[str, Any] = {}
+
+            class FakePopen:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, args: list[str], **kwargs: Any) -> None:
+                    captured["args"] = args
+                    output_path = Path(args[args.index("--output-last-message") + 1])
+                    output_path.write_text("config cli output", encoding="utf-8")
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    captured["timeout"] = timeout
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = lambda args, **kwargs: FakePopen(args, **kwargs)
+            try:
+                text, backend = companion.call_codex_cli({"prompt": "ping"}, "chat")
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual(text, "config cli output")
+            self.assertEqual(backend, "codex-cli")
+            self.assertEqual(captured["timeout"], 90)
+            self.assertNotIn("service_tier=priority", captured["args"])
+            self.assertNotIn("model_reasoning_effort=medium", captured["args"])
+            self.assertNotIn("model_reasoning_effort=high", captured["args"])
+            self.assertNotIn("model_reasoning_effort=xhigh", captured["args"])
+            self.assertTrue((companion.CODEX_LITE_HOME / "config.toml").exists())
+
+    def test_codex_config_status_reports_effective_cli_config_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            fake_home = Path(tmp) / "home"
+            fake_home.joinpath(".codex").mkdir(parents=True)
+            fake_home.joinpath(".codex/config.toml").write_text(
+                'model_reasoning_effort = "xhigh"\nservice_tier = "priority"\n',
+                encoding="utf-8",
+            )
+            companion.HOME = fake_home
+            companion.save_runtime_settings(
+                {
+                    "speed": "codex_config",
+                    "reasoningEffort": "codex_config",
+                    "aiBackend": "codex_cli",
+                }
+            )
+
+            status = companion.status_payload()
+
+            self.assertEqual(status["effectiveReasoningEffort"], "xhigh")
+            self.assertEqual(status["effectiveServiceTier"], "priority")
+
+    def test_openai_api_uses_selected_model_in_responses_payload(self) -> None:
+        old_key = os.environ.get("OPENAI_API_KEY")
+        try:
+            os.environ["OPENAI_API_KEY"] = "test-key"
+            with tempfile.TemporaryDirectory() as tmp:
+                companion = load_companion(Path(tmp))
+                companion.save_runtime_settings(
+                    {
+                        "speed": "fast",
+                        "aiBackend": "openai_api",
+                        "model": "gpt-5.4",
+                    }
+                )
+                captured: dict[str, Any] = {}
+
+                class FakeResponse:
+                    def __enter__(self) -> "FakeResponse":
+                        return self
+
+                    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+                        return None
+
+                    def read(self) -> bytes:
+                        return json.dumps({"output_text": "api output"}).encode("utf-8")
+
+                def fake_urlopen(req: Any, settings: dict[str, str], timeout: float) -> FakeResponse:
+                    captured["body"] = json.loads(req.data.decode("utf-8"))
+                    captured["timeout"] = timeout
+                    return FakeResponse()
+
+                companion.urlopen_with_proxy = fake_urlopen
+                text, backend = companion.call_openai({"prompt": "解释全文"}, "chat")
+
+                self.assertEqual(text, "api output")
+                self.assertEqual(backend, "openai:gpt-5.4")
+                self.assertEqual(captured["body"]["model"], "gpt-5.4")
+                self.assertEqual(captured["timeout"], 90)
+        finally:
+            if old_key is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = old_key
 
     def test_codex_cli_retries_transient_cloud_config_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3244,7 +3466,8 @@ class CompanionControlsTests(unittest.TestCase):
             )
             self.assertTrue(updated["ok"])
             self.assertEqual(updated["settings"]["permission"], "read_only")
-            self.assertEqual(updated["settings"]["speed"], "fast")
+            self.assertEqual(updated["settings"]["speed"], "priority")
+            self.assertEqual(updated["settings"]["reasoningEffort"], "codex_config")
             self.assertEqual(updated["settings"]["proxyUrl"], "http://127.0.0.1:7890")
             self.assertEqual(updated["settings"]["aiBackend"], "codex_cli")
             self.assertIn("代理：已配置", updated["reply"])
@@ -3320,6 +3543,8 @@ class CompanionControlsTests(unittest.TestCase):
             settings_result = companion.handle_action({"action": "settings_get"})
             self.assertTrue(settings_result["ok"])
             self.assertEqual(settings_result["settings"]["model"], "gpt-5.2")
+            self.assertIn("gpt-5.6-sol", [item["id"] for item in settings_result["modelPresets"]])
+            self.assertIn("gpt-5.6-terra", [item["id"] for item in settings_result["modelPresets"]])
             self.assertEqual(settings_result["settings"]["proxyUrl"], "http://127.0.0.1:7890")
             self.assertEqual(settings_result["settings"]["aiBackend"], "codex_cli")
             self.assertEqual(settings_result["goal"]["title"], "读懂 KNOWS")

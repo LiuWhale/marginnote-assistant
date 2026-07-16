@@ -116,10 +116,13 @@ Uninstall Codex Companion.command
 推荐配置：
 
 - `AI 后端`: `auto`
-- `模型`: `gpt-5.5`
-- `速度`: `fast`
+- `模型`: `gpt-5.6-sol`
+- `速度`: `codex_config`
+- `推理强度`: `codex_config`
 - `Codex CLI`: 如果本机已经安装并登录 Codex CLI，优先用它。
 - `OpenAI Key`: 如果不用 Codex CLI，可以填写 OpenAI API Key。
+
+模型控件会优先读取本机 `codex debug models` 返回的当前可用模型目录；读取失败时才回退到内置预设。速度和推理强度是两个独立设置：速度只控制 Codex CLI 服务档位，默认 `codex_config` 表示跟随 `~/.codex/config.toml`；手动选择 `Fast` 时只会显式传入 `service_tier=priority`。推理强度单独控制 `model_reasoning_effort`，可选 `low`、`medium`、`high`、`xhigh`、`max`、`ultra`；默认 `codex_config` 表示使用 Codex CLI 自己的配置。
 
 后端含义：
 
@@ -324,20 +327,20 @@ python3 ui_functional_acceptance.py --document-title "任意文档 UI 验收.pdf
 构建 release zip：
 
 ```bash
-python3 package_release.py 0.4.42
+python3 package_release.py 0.4.47
 ```
 
 Smoke test：
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.42-latest-dist.zip --mnaddon release/CodexCompanion-0.4.42-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.42-latest-dist.zip --mnaddon release/CodexCompanion-0.4.42-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.47-latest-dist.zip --mnaddon release/CodexCompanion-0.4.47-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.47-latest-dist.zip --mnaddon release/CodexCompanion-0.4.47-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance：
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.42-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.47-latest-dist.zip --json
 ```
 
 Release acceptance 可能因为机器相关证据不足而阻塞，例如原生高亮证据、签名/公证证据、跨机器安装证据。这些是发布证据检查，不代表源码打包失败。

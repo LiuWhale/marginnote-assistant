@@ -17,13 +17,20 @@ def load_runtime_config():
 
 
 class RuntimeConfigTests(unittest.TestCase):
-    def test_default_profile_is_gpt55_fast_codex_ready(self) -> None:
+    def test_default_profile_is_codex_cli_gpt56_following_codex_config(self) -> None:
         config = load_runtime_config()
 
-        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["model"], "gpt-5.5")
-        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["speed"], "fast")
-        self.assertEqual(config.CODEX_CLI_REASONING["fast"], "medium")
-        self.assertEqual(config.CODEX_CLI_TIMEOUTS["fast"], 75)
+        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["model"], "gpt-5.6-sol")
+        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["speed"], "codex_config")
+        self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["reasoningEffort"], "codex_config")
+        self.assertEqual(config.CODEX_CLI_SERVICE_TIERS["codex_config"], "")
+        self.assertEqual(config.CODEX_CLI_SERVICE_TIERS["priority"], "priority")
+        self.assertIn("xhigh", config.REASONING_EFFORTS)
+        self.assertIn("ultra", config.REASONING_EFFORTS)
+        self.assertEqual(config.CODEX_CLI_TIMEOUTS["codex_config"], 90)
+        self.assertEqual(config.MODEL_PRESETS[0]["id"], "gpt-5.6-sol")
+        self.assertIn("gpt-5.6-terra", [item["id"] for item in config.MODEL_PRESETS])
+        self.assertIn("gpt-5.6-luna", [item["id"] for item in config.MODEL_PRESETS])
 
     def test_sanitizes_model_proxy_context_and_custom_buttons(self) -> None:
         config = load_runtime_config()
@@ -31,7 +38,15 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["githubRepo"], "LiuWhale/marginnote-assistant")
         self.assertEqual(config.DEFAULT_RUNTIME_SETTINGS["mnApiBackend"], "auto")
         self.assertEqual(config.sanitize_model("bad model name", "fallback-model"), "fallback-model")
-        self.assertEqual(config.sanitize_model("gpt-5.5", "fallback-model"), "gpt-5.5")
+        self.assertEqual(config.sanitize_model("gpt-5.6", "fallback-model"), "gpt-5.6-sol")
+        self.assertEqual(config.sanitize_model("gpt-5.6-sol", "fallback-model"), "gpt-5.6-sol")
+        self.assertEqual(config.sanitize_model("gpt-5.6-terra", "fallback-model"), "gpt-5.6-terra")
+        self.assertEqual(config.sanitize_model("gpt-5.6-luna", "fallback-model"), "gpt-5.6-luna")
+        self.assertEqual(config.sanitize_speed("priority"), "priority")
+        self.assertEqual(config.sanitize_speed("deep"), "codex_config")
+        self.assertEqual(config.sanitize_reasoning_effort("xhigh"), "xhigh")
+        self.assertEqual(config.sanitize_reasoning_effort("deep"), "high")
+        self.assertEqual(config.sanitize_reasoning_effort("unknown"), "codex_config")
         self.assertEqual(config.sanitize_proxy_url("ftp://127.0.0.1:7890"), "")
         self.assertEqual(config.sanitize_proxy_url("http://127.0.0.1:7890"), "http://127.0.0.1:7890")
         self.assertEqual(config.sanitize_github_repo("LiuWhale/marginnote-assistant"), "LiuWhale/marginnote-assistant")

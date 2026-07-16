@@ -435,6 +435,15 @@ BUTTON_COVERAGE_INTERACTION_BUTTONS = [
     "commandPaneToggleButton",
     "configBackButton",
     "contextScopeAutoButton",
+    "speedCodexConfigButton",
+    "speedPriorityButton",
+    "reasoningEffortCodexConfigButton",
+    "reasoningEffortLowButton",
+    "reasoningEffortMediumButton",
+    "reasoningEffortHighButton",
+    "reasoningEffortXhighButton",
+    "reasoningEffortMaxButton",
+    "reasoningEffortUltraButton",
     "conversationHistoryAllButton",
     "conversationHistoryCloseButton",
     "conversationHistoryObjectButton",
@@ -476,6 +485,7 @@ BUTTON_COVERAGE_DYNAMIC_BUTTONS = [
 ]
 
 BUTTON_COVERAGE_FORM_OR_DESTRUCTIVE_BUTTONS = [
+    "applyModelInputButton",
     "clearMnUrlApiSecretButton",
     "clearOpenAIKeyButton",
     "logsClearButton",
@@ -2306,7 +2316,7 @@ def browser_base_response_for_action(action: str) -> dict[str, Any]:
                 "defaultContextScope": "document",
                 "aiBackend": "auto",
                 "speed": "fast",
-                "model": "gpt-5.5",
+                "model": "gpt-5.6",
             },
         }
     if action == "update_check":

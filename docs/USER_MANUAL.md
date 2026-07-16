@@ -1,6 +1,6 @@
 # Codex Companion 产品手册
 
-适用版本：`0.4.42`
+适用版本：`0.4.47`
 更新时间：2026-06-27
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
@@ -173,15 +173,18 @@ WebView 顶部提供 `对话 / 工具` 双模式切换。默认进入 `对话`�
 当前默认模型配置是：
 
 ```text
-model = gpt-5.5
-speed = fast
+model = gpt-5.6-sol
+speed = codex_config
+reasoning_effort = codex_config
 ```
 
-在 Codex CLI 后端下，`fast` 档会启用 fast profile，同时使用中等推理深度，目标是兼顾速度和基本推理质量。`balanced` 和 `deep` 会提高超时和输出预算，适合长资料、完整精读和复杂重组。
+在 Codex CLI 后端下，速度和推理强度是两个独立概念。`速度 = codex_config` 表示跟随本机 `~/.codex/config.toml` 的 `service_tier`；手动选择 `Fast` 时，插件只显式传入 `service_tier=priority`。`推理强度 = codex_config` 表示跟随本机 `model_reasoning_effort`；手动选择 `low`、`medium`、`high`、`xhigh`、`max` 或 `ultra` 时，插件才显式传入 `model_reasoning_effort=<所选值>`。速度不会再隐式改推理强度。
 
 如果没有可用 Codex CLI，也没有 OpenAI Key，生成型动作会明确失败，不会用本地模板冒充 AI 输出。此时仍可使用权限检查、运行态采证、PDF 缓存、导出标注副本等本地工具。
 
 OpenAI Key 可在设置页填写，也可点 `清除Key` 删除本地保存的 key。Key 写入本地 `.env`，不会回显到面板；清除时只发送清除指令，不会把输入框里的临时 key 再发给后端。
+
+设置页的模型配置分为“模型预设”和“模型 ID”。插件会优先调用 `codex debug models` 读取当前 Codex CLI 版本和账号实际可用的模型目录；如果保存的模型 ID 已经过期或当前目录不可用，Codex CLI 调用前会自动选择目录中的第一个可用模型。OpenAI API 后端仍会使用你在模型 ID 中保存的值。
 
 设置页的 readiness 卡片现在使用“真实 AI 后端已发现”这类措辞：它表示发现了 Codex CLI 或 OpenAI Key，但真实生成仍取决于 Codex 登录、账号/模型权限、代理和网络。不要把“已发现 CLI”理解成“已经成功调用模型”。
 
@@ -498,12 +501,12 @@ Error: timed out waiting for cloud config bundle after 15s
 
 ### 生成脑图很慢
 
-脑图生成比普通问答慢，因为它要让模型组织层级、拆节点、保留上下文，还要进入草稿和写入流程。长 PDF、完整精读、`deep` 档或网络代理都会增加耗时。
+脑图生成比普通问答慢，因为它要让模型组织层级、拆节点、保留上下文，还要进入草稿和写入流程。长 PDF、完整精读、较高推理强度或网络代理都会增加耗时。
 
 想要更快：
 
 - 先对选区或当前章节生成，而不是整篇。
-- 使用 `fast`。
+- 速度选 `Fast`，或把推理强度调低到 `medium` / `low`。
 - 让 prompt 明确“节点短小，每层不超过 N 个”。
 
 ### 发送按钮跑很久，不知道是否在工作
@@ -561,7 +564,7 @@ OpenAI Key 写在：
 
 ## 21. 当前预览版限制
 
-截至 2026-07-07，`v0.4.42` 是当前公开预览版发布候选；本轮目标是修复 Companion 长时间运行后的内存膨胀和日志堆积问题，并完成 GitHub Release、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.42 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
+截至 2026-07-07，`v0.4.47` 是当前公开预览版发布候选；本轮目标是修复 Companion 长时间运行后的内存膨胀和日志堆积问题，并完成 GitHub Release、release zip smoke、`.mnaddon` smoke、install dry-run 和本机 0.4.47 安装替换；MN4 运行态需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
 
 - MarginNote 原生可见高亮仍缺活跃 PDF 选区下的完整证据。
 - `release_sha256_manifest` 已覆盖 zip、`.mnaddon` 和 `.pkg` 并通过；当前阻塞不再来自 artifact hash manifest。
@@ -569,7 +572,7 @@ OpenAI Key 写在：
 - 还缺第二用户或第二机器的结构化安装验收。
 - 还缺同一文档完整按钮/工作流验收 PASS evidence。
 
-这些限制不影响使用 `v0.4.42` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
+这些限制不影响使用 `v0.4.47` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
 
 ## 22. 给用户的最短使用路径
 

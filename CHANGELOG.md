@@ -6,6 +6,47 @@ All notable changes to Codex Companion are documented here.
 
 No unreleased changes.
 
+## 0.4.47 - 2026-07-16
+
+### Changed
+
+- Re-enabled GPT-5.6 model presets after upgrading the local Codex CLI to a version whose model catalog includes `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+- Settings now reads the live Codex CLI model catalog with `codex debug models`; stale saved model IDs are automatically replaced by the first currently available CLI model during Codex CLI calls.
+- Split speed and reasoning into separate settings. Speed now only controls the Codex CLI service tier (`codex_config` or `service_tier=priority`), while reasoning effort separately controls `model_reasoning_effort` (`codex_config`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`).
+
+## 0.4.46 - 2026-07-16
+
+### Fixed
+
+- Removed unavailable `gpt-5.6*` model presets from the Settings UI after verifying the local Codex CLI model catalog only exposes `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `codex-auto-review`.
+- Migrated saved legacy `gpt-5.6*` selections to supported local Codex CLI models so previously selected invalid models no longer cause `codex-cli-error` runs.
+- Installed the MarginNote extension into both `QReader.MarginStudy.easy` and `QReader.MarginStudyMac` containers, covering both current MN4 container layouts.
+
+## 0.4.45 - 2026-07-16
+
+### Fixed
+
+- Made Settings model and speed choices save immediately after button clicks, with a visible status line for success or failure.
+- Added an Apply Model button and Enter-to-apply behavior for custom model IDs, so custom choices become active without relying on the global Save Settings button.
+
+## 0.4.44 - 2026-07-16
+
+### Fixed
+
+- Replaced the speed and model preset native dropdowns with button-based controls in Settings, avoiding MarginNote WebView focus/dropdown failures.
+- Kept the saved settings contract unchanged: the button state still writes the same `speed` and `model` values used by Codex CLI and OpenAI API calls.
+
+## 0.4.43 - 2026-07-16
+
+### Changed
+
+- Updated the default AI model from `gpt-5.5` to `gpt-5.6`.
+- Replaced the settings-page model text field with a preset selector plus custom model ID field, covering the then-planned `gpt-5.6` family and legacy `gpt-5.5`.
+
+### Fixed
+
+- Added backend and UI regression coverage proving the saved model ID is the value passed to Codex CLI `--model` and the OpenAI Responses API `model` field.
+
 ## 0.4.42 - 2026-07-07
 
 ### Fixed

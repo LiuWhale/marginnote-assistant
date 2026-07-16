@@ -1262,8 +1262,20 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="clearMnUrlApiSecretButton"',
             'id="codexCliPathInput"',
             'id="openaiApiKeyInput"',
+            'id="modelPresetSelect"',
+            'id="modelPresetButtonGroup"',
             'id="modelInput"',
+            'id="applyModelInputButton"',
+            'id="aiProfileStatusLine"',
             'id="speedSelect"',
+            'id="speedChoiceGroup"',
+            'id="speedCodexConfigButton"',
+            'id="speedPriorityButton"',
+            'id="reasoningEffortSelect"',
+            'id="reasoningEffortChoiceGroup"',
+            'id="reasoningEffortCodexConfigButton"',
+            'id="reasoningEffortXhighButton"',
+            'id="reasoningEffortUltraButton"',
             'id="proxyUrlInput"',
             'id="defaultContextScopeSelect"',
             'id="permissionSelect"',
@@ -1277,6 +1289,20 @@ class WebControlsStaticTests(unittest.TestCase):
             "openConfigPage",
             "closeConfigPage",
             "renderSettingsContextMeta",
+            "renderSpeedSelector",
+            "updateSpeedChoice",
+            "renderReasoningEffortSelector",
+            "updateReasoningEffortChoice",
+            "renderModelSelector",
+            "updateModelInputFromPreset",
+            "syncModelPresetFromInput",
+            "saveAiProfilePatch",
+            "applyModelInput",
+            "choice-button-grid",
+            "模型会自动读取 Codex CLI 当前可用列表",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
             "renderMnApiStatus",
             "checkForUpdates",
             "installUpdate",
@@ -1289,6 +1315,12 @@ class WebControlsStaticTests(unittest.TestCase):
             "overflow: auto;",
         ]:
             self.assertIn(marker, self.html + self.js + self.css)
+
+        self.assertIn("saveAiProfilePatch({speed: value}", self.js)
+        self.assertIn("saveAiProfilePatch({reasoningEffort: value}", self.js)
+        self.assertIn("saveAiProfilePatch({model: preset}", self.js)
+        self.assertIn("saveAiProfilePatch({model: model}", self.js)
+        self.assertIn("postCompanion('settings_update'", self.js)
 
         config_html = self.html.split('<section id="configPage"', 1)[1]
         for marker in [

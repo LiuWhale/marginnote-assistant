@@ -802,16 +802,35 @@
             <option value="codex_cli">Codex CLI</option>
             <option value="openai_api">OpenAI API</option>
           </select></label>
-          <label><span>速度</span><select id="speedSelect">
-            <option value="fast">fast</option>
-            <option value="balanced">balanced</option>
-            <option value="deep">deep</option>
-          </select></label>
-          <label><span>模型</span><input id="modelInput" type="text" placeholder="gpt-5.5"></label>
+          <div class="config-choice-field"><span>速度</span><input id="speedSelect" type="hidden" value="codex_config">
+            <div id="speedChoiceGroup" class="choice-button-row" role="group" aria-label="速度">
+              <button id="speedCodexConfigButton" class="choice-button" data-speed-choice="codex_config" type="button">Codex配置</button>
+              <button id="speedPriorityButton" class="choice-button" data-speed-choice="priority" type="button">Fast</button>
+            </div>
+          </div>
+          <div class="config-choice-field"><span>推理强度</span><input id="reasoningEffortSelect" type="hidden" value="codex_config">
+            <div id="reasoningEffortChoiceGroup" class="choice-button-row reasoning-choice-row" role="group" aria-label="推理强度">
+              <button id="reasoningEffortCodexConfigButton" class="choice-button" data-reasoning-effort-choice="codex_config" type="button">Codex配置</button>
+              <button id="reasoningEffortLowButton" class="choice-button" data-reasoning-effort-choice="low" type="button">low</button>
+              <button id="reasoningEffortMediumButton" class="choice-button" data-reasoning-effort-choice="medium" type="button">medium</button>
+              <button id="reasoningEffortHighButton" class="choice-button" data-reasoning-effort-choice="high" type="button">high</button>
+              <button id="reasoningEffortXhighButton" class="choice-button" data-reasoning-effort-choice="xhigh" type="button">xhigh</button>
+              <button id="reasoningEffortMaxButton" class="choice-button" data-reasoning-effort-choice="max" type="button">max</button>
+              <button id="reasoningEffortUltraButton" class="choice-button" data-reasoning-effort-choice="ultra" type="button">ultra</button>
+            </div>
+          </div>
+          <div class="config-choice-field model-choice-field"><span>模型预设</span><input id="modelPresetSelect" type="hidden" value="gpt-5.6-sol">
+            <div id="modelPresetButtonGroup" class="choice-button-grid" role="group" aria-label="模型预设"></div>
+          </div>
+          <div class="model-id-field">
+            <label><span>模型 ID</span><input id="modelInput" type="text" placeholder="gpt-5.6-sol"></label>
+            <button id="applyModelInputButton" class="small-button model-apply-button" type="button">应用模型</button>
+          </div>
           <label><span>Codex CLI 路径</span><input id="codexCliPathInput" type="text" placeholder="自动发现"></label>
           <label><span>代理</span><input id="proxyUrlInput" type="text" placeholder="http://127.0.0.1:7890"></label>
           <label><span>OpenAI Key</span><input id="openaiApiKeyInput" type="password" placeholder="保存后不会回显"></label>
         </div>
+        <div id="aiProfileStatusLine" class="settings-page-note">模型会自动读取 Codex CLI 当前可用列表；速度是服务档位，推理强度单独设置；选 Codex配置时跟随 ~/.codex/config.toml。</div>
         <div class="config-actions">
           <button id="saveSettingsButton" class="small-button primary" type="button">保存设置</button>
           <button id="aiBackendProbeButton" class="small-button" type="button">AI 试连</button>

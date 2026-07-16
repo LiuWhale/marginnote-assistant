@@ -124,7 +124,13 @@ def main() -> int:
     parser.add_argument("--prompt", default="", help="Prompt text passed to the plugin action.")
     parser.add_argument("--selection-text", default="", help="Text excerpt used by export_annotated_pdf for locating highlights.")
     parser.add_argument("--model", default="", help="Model name for settings_update.")
-    parser.add_argument("--speed", default="", choices=["", "fast", "balanced", "deep"], help="Speed preset for settings_update.")
+    parser.add_argument("--speed", default="", choices=["", "codex_config", "priority", "fast"], help="Codex service speed preset for settings_update.")
+    parser.add_argument(
+        "--reasoning-effort",
+        default="",
+        choices=["", "codex_config", "low", "medium", "high", "xhigh", "max", "ultra", "fast", "balanced", "deep"],
+        help="Codex reasoning effort for settings_update.",
+    )
     parser.add_argument("--permission", default="", choices=["", "read_only", "notes", "full"], help="Permission preset for settings_update.")
     parser.add_argument("--ai-backend", default="", choices=["", "auto", "codex_cli", "openai_api", "local"], help="AI backend for settings_update.")
     parser.add_argument("--codex-cli-path", default="", help="Explicit codex executable path for settings_update.")
@@ -171,6 +177,7 @@ def main() -> int:
             for key, value in {
                 "model": args.model,
                 "speed": args.speed,
+                "reasoningEffort": args.reasoning_effort,
                 "permission": args.permission,
                 "aiBackend": args.ai_backend,
                 "codexCliPath": args.codex_cli_path,

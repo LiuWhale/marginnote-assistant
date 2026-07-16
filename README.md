@@ -116,10 +116,13 @@ Open settings from the gear button in the plugin panel.
 Recommended settings:
 
 - `AI Backend`: `auto`
-- `Model`: `gpt-5.5`
-- `Speed`: `fast`
+- `Model`: `gpt-5.6-sol`
+- `Speed`: `codex_config`
+- `Reasoning effort`: `codex_config`
 - `Codex CLI`: preferred when the local Codex CLI is installed and logged in.
 - `OpenAI Key`: use this when you want direct OpenAI API calls instead of Codex CLI.
+
+The model control reads the current model catalog from `codex debug models` when Codex CLI is available, then falls back to built-in presets if that command fails. If a saved model is no longer in the live Codex CLI catalog, Codex Companion automatically uses the first available catalog model for Codex CLI calls. Speed and reasoning are separate controls: speed only controls the Codex CLI service tier, and `codex_config` follows `~/.codex/config.toml`; choosing `Fast` passes `service_tier=priority`. Reasoning effort controls `model_reasoning_effort` separately with `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`; `codex_config` leaves the Codex CLI's own config in charge.
 
 Backend modes:
 
@@ -324,20 +327,20 @@ The browser action gate records `buttonActionDeltas`, so repeated-action control
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.42
+python3 package_release.py 0.4.47
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.42-latest-dist.zip --mnaddon release/CodexCompanion-0.4.42-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.42-latest-dist.zip --mnaddon release/CodexCompanion-0.4.42-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.47-latest-dist.zip --mnaddon release/CodexCompanion-0.4.47-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.47-latest-dist.zip --mnaddon release/CodexCompanion-0.4.47-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.42-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.47-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

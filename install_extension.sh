@@ -7,7 +7,10 @@ if [[ -d "$SOURCE_DIR/extension/codex.mn.assistant" ]]; then
 else
   EXT_SOURCE="$SOURCE_DIR/../extension/codex.mn.assistant"
 fi
-EXT_TARGET="$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+EXT_TARGETS=(
+  "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
+  "$HOME/Library/Containers/QReader.MarginStudyMac/Data/Library/MarginNote Extensions/codex.mn.assistant"
+)
 DRY_RUN="${CODEX_MN_DRY_RUN:-0}"
 
 if [[ ! -d "$EXT_SOURCE" ]]; then
@@ -17,12 +20,16 @@ if [[ ! -d "$EXT_SOURCE" ]]; then
 fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
-  echo "Dry-run: would install MN4 extension from $EXT_SOURCE to $EXT_TARGET"
+  for EXT_TARGET in "${EXT_TARGETS[@]}"; do
+    echo "Dry-run: would install MN4 extension from $EXT_SOURCE to $EXT_TARGET"
+  done
   exit 0
 fi
 
-mkdir -p "$(dirname "$EXT_TARGET")" "$EXT_TARGET"
-/usr/bin/rsync -a --delete "$EXT_SOURCE/" "$EXT_TARGET/"
+for EXT_TARGET in "${EXT_TARGETS[@]}"; do
+  mkdir -p "$(dirname "$EXT_TARGET")" "$EXT_TARGET"
+  /usr/bin/rsync -a --delete "$EXT_SOURCE/" "$EXT_TARGET/"
+  echo "Installed MN4 extension to $EXT_TARGET"
+done
 
-echo "Installed MN4 extension to $EXT_TARGET"
 echo "Restart MarginNote 4 to load the extension."

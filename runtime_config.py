@@ -6,11 +6,23 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = "gpt-5.6-sol"
+MODEL_PRESETS = [
+    {"id": "gpt-5.6-sol", "label": "GPT-5.6 SOL", "note": "frontier capability"},
+    {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "note": "balanced capability and cost"},
+    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "note": "efficient high-volume work"},
+    {"id": "gpt-5.5", "label": "GPT-5.5", "note": "previous default"},
+    {"id": "gpt-5.4", "label": "GPT-5.4", "note": "stable fallback"},
+    {"id": "gpt-5.4-mini", "label": "GPT-5.4 mini", "note": "fast fallback"},
+]
+MODEL_ALIASES = {
+    "gpt-5.6": DEFAULT_MODEL,
+}
 DEFAULT_RUNTIME_SETTINGS = {
     "permission": "notes",
     "model": DEFAULT_MODEL,
-    "speed": "fast",
+    "speed": "codex_config",
+    "reasoningEffort": "codex_config",
     "proxyUrl": "",
     "aiBackend": "auto",
     "mnApiBackend": "auto",
@@ -29,16 +41,19 @@ AI_BACKEND_LABELS = {
     "local": "本地工具/诊断",
 }
 SPEED_MAX_OUTPUT_TOKENS = {
-    "fast": 900,
-    "balanced": 1800,
-    "deep": 3200,
+    "codex_config": 1200,
+    "priority": 1200,
 }
 CODEX_CLI_TIMEOUTS = {
-    "fast": 75,
-    "balanced": 90,
-    "deep": 120,
+    "codex_config": 90,
+    "priority": 90,
 }
-CODEX_CLI_REASONING = {
+CODEX_CLI_SERVICE_TIERS = {
+    "codex_config": "",
+    "priority": "priority",
+}
+REASONING_EFFORTS = {"codex_config", "low", "medium", "high", "xhigh", "max", "ultra"}
+LEGACY_REASONING_ALIASES = {
     "fast": "medium",
     "balanced": "medium",
     "deep": "high",
@@ -80,13 +95,26 @@ def sanitize_permission(value: Any) -> str:
 
 def sanitize_speed(value: Any) -> str:
     text = str(value or "").strip()
+    if text == "fast":
+        return "priority"
     if text in SPEED_MAX_OUTPUT_TOKENS:
         return text
     return DEFAULT_RUNTIME_SETTINGS["speed"]
 
 
+def sanitize_reasoning_effort(value: Any) -> str:
+    text = str(value or "").strip()
+    if text in LEGACY_REASONING_ALIASES:
+        return LEGACY_REASONING_ALIASES[text]
+    if text in REASONING_EFFORTS:
+        return text
+    return DEFAULT_RUNTIME_SETTINGS["reasoningEffort"]
+
+
 def sanitize_model(value: Any, fallback_model: str = DEFAULT_MODEL) -> str:
     text = str(value or "").strip()
+    if text in MODEL_ALIASES:
+        return MODEL_ALIASES[text]
     if not text:
         return fallback_model
     if not re.match(r"^[A-Za-z0-9._:-]{2,80}$", text):
