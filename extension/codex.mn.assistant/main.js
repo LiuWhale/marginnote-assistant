@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.42';
+  var PluginVersion = '0.4.48';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -2663,6 +2663,25 @@ JSB.newAddon = function(mainPath) {
     return node;
   };
 
+  CodexAssistantAddon.prototype.serializeMindmapNotebookRoots = function(ctx, maxDepth, stats) {
+    var root = {
+      noteId: 'notebook-root',
+      title: documentTitleFromDocumentObject(ctx.document) || documentTitleFromNotebookObject(ctx.notebook) || '当前 notebook',
+      body: '',
+      children: []
+    };
+    stats.nodes += 1;
+    var roots = valueOf(ctx.notebook, 'notes');
+    if (countOf(roots) === 0) roots = valueOf(ctx.document, 'notes');
+    var total = countOf(roots);
+    for (var i = 0; i < total && i < 80; i++) {
+      var childTree = this.serializeMindmapNode(objectAt(roots, i), 1, maxDepth, stats);
+      if (childTree) root.children.push(childTree);
+    }
+    if (total > 80) stats.truncated += total - 80;
+    return root;
+  };
+
   CodexAssistantAddon.prototype.readMindmapTree = function(command) {
     var ctx = this.resolveNotebookAndDocument();
     var requestedNoteId = safeString(valueOf(command, 'selectedNoteId') || '');
@@ -2678,21 +2697,23 @@ JSB.newAddon = function(mainPath) {
       resolvedNoteId: noteId,
       source: safeString(valueOf(command, 'source') || 'native-queue')
     });
-    if (!ctx || !note) {
+    if (!ctx) {
       this.postEvent('mindmapTreeReadUnavailable', {
         nativeAction: 'read_mindmap_tree',
-        reason: ctx ? 'missing-selected-note' : (this.lastResolveError || 'missing-context'),
+        reason: this.lastResolveError || 'missing-context',
         requestedNoteId: requestedNoteId,
         requestedTitle: requestedTitle
       });
       return;
     }
     var stats = {nodes: 0, truncated: 0};
-    var tree = this.serializeMindmapNode(note, 0, 4, stats);
+    var tree = note
+      ? this.serializeMindmapNode(note, 0, 4, stats)
+      : this.serializeMindmapNotebookRoots(ctx, 4, stats);
     this.postEvent('mindmapTreeReadFinished', {
       nativeAction: 'read_mindmap_tree',
-      selectedNoteId: noteId,
-      selectedNoteTitle: safeString(valueOf(note, 'noteTitle') || requestedTitle),
+      selectedNoteId: noteId || 'notebook-root',
+      selectedNoteTitle: note ? safeString(valueOf(note, 'noteTitle') || requestedTitle) : tree.title,
       nodeCount: stats.nodes,
       truncatedCount: stats.truncated,
       currentMindmap: tree

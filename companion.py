@@ -45,6 +45,7 @@ import workflow_builder
 import workflow_engine
 import update_manager
 from runtime_config import (
+    CODEX_CLI_LONG_TASK_TIMEOUT,
     CODEX_CLI_SERVICE_TIERS,
     CODEX_CLI_TIMEOUTS,
     CONTEXT_SCOPE_ALIASES,
@@ -103,7 +104,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.47"
+CURRENT_PLUGIN_VERSION = "0.4.48"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -198,6 +199,7 @@ KNOWLEDGE_INDEX_REQUEST_RE = re.compile(
     re.I,
 )
 DOCUMENT_CONTEXT_MAX_CHARS = 7000
+FULL_DOCUMENT_CONTEXT_MAX_CHARS = 220000
 PDF_TEXT_CHUNK_MAX_CHARS = 1400
 PDF_TEXT_CHUNK_OVERLAP_CHARS = 160
 PDF_TEXT_MAX_CHUNKS = 1200
@@ -3028,6 +3030,39 @@ def cached_pdf_for_book(book_md5: str) -> Path | None:
     return None
 
 
+def pdf_title_keys(raw_values: list[str]) -> list[str]:
+    values = list(raw_values)
+    values.extend(pdf_filename_candidates(raw_values))
+    keys: list[str] = []
+    for value in values:
+        key = normalize_pdf_title_key(value)
+        if len(key) >= 4 and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def pdf_path_matches_payload_title(path: Path, payload: dict[str, Any], book_md5: str = "") -> bool:
+    expected = pdf_title_keys(payload_pdf_name_values(payload))
+    if not expected:
+        return True
+    names = [path.name]
+    cache_key = pdf_cache_key(book_md5)
+    if cache_key:
+        stripped = path.name
+        while stripped.startswith(f"{cache_key}-"):
+            stripped = stripped[len(cache_key) + 1 :]
+        if stripped != path.name:
+            names.append(stripped)
+    actual = pdf_title_keys(names)
+    return any(
+        expected_key == actual_key
+        or expected_key in actual_key
+        or actual_key in expected_key
+        for expected_key in expected
+        for actual_key in actual
+    )
+
+
 def pdf_cache_access_status(book_md5: str) -> dict[str, Any]:
     key = pdf_cache_key(book_md5)
     if not key:
@@ -5402,7 +5437,7 @@ def release_evidence_guide(blockers: list[dict[str, Any]]) -> list[dict[str, str
             "build_signed_package",
             "构建 Developer ID 签名 pkg",
             shell_open_command(ROOT / "Build Signed Package.command"),
-            "生成/更新 release/CodexCompanion-0.4.47-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
+            f"生成/更新 release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest.pkg；随后重新运行 python3 release_acceptance.py --json",
             "需要 Keychain 里有 Developer ID Installer 证书；没有证书时此步骤只能保持阻塞。",
             "signed_pkg",
         )
@@ -10167,6 +10202,33 @@ def native_api_capability_reply_lines(matrix: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def native_api_compatibility(caps: dict[str, Any]) -> dict[str, str]:
+    reported = str(caps.get("pluginVersion") or "").strip()
+    if not caps.get("available") or not reported:
+        return {
+            "status": "unknown",
+            "reportedVersion": reported,
+            "expectedVersion": CURRENT_PLUGIN_VERSION,
+            "message": "MarginNote 尚未上报当前扩展版本。",
+        }
+    if reported == CURRENT_PLUGIN_VERSION:
+        return {
+            "status": "current",
+            "reportedVersion": reported,
+            "expectedVersion": CURRENT_PLUGIN_VERSION,
+            "message": f"MarginNote 扩展已加载当前版本 {CURRENT_PLUGIN_VERSION}。",
+        }
+    return {
+        "status": "stale",
+        "reportedVersion": reported,
+        "expectedVersion": CURRENT_PLUGIN_VERSION,
+        "message": (
+            f"MarginNote 当前加载的是扩展 {reported}，Companion 是 {CURRENT_PLUGIN_VERSION}。"
+            "请重新安装扩展并完全退出后重开 MarginNote。"
+        ),
+    }
+
+
 def status_payload() -> dict[str, Any]:
     load_env_file()
     settings = runtime_settings()
@@ -10176,6 +10238,7 @@ def status_payload() -> dict[str, Any]:
     mn_api_status = mn_api_status_fields(settings)
     model_catalog = codex_model_presets(settings)
     effective_model = effective_codex_cli_model(settings) if settings.get("aiBackend") in {"auto", "codex_cli"} else settings["model"]
+    api_capabilities = latest_native_api_capabilities()
     return {
         "ok": True,
         "message": "Codex MarginNote Companion is running.",
@@ -10201,7 +10264,8 @@ def status_payload() -> dict[str, Any]:
         "queue": queue_status_payload(),
         "run": active_run_status(),
         "mnRuntime": mn4_runtime_status(),
-        "nativeApiCapabilities": latest_native_api_capabilities(),
+        "nativeApiCapabilities": api_capabilities,
+        "nativeCompatibility": native_api_compatibility(api_capabilities),
         "mindmapTreeCache": latest_mindmap_tree_cache_status(),
         "mindmapDiffApply": latest_mindmap_diff_apply_status(),
         "aiEditTransactions": transaction_manager.latest_summary(limit=8),
@@ -10804,9 +10868,15 @@ def resolve_pdf_source(payload: dict[str, Any], book_md5: str) -> tuple[Path | N
                 return candidate, None
             explicit_error = f"传入的 PDF 路径不可用：{candidate}"
             break
+    mismatched_sources: list[Path] = []
     cached = cached_pdf_for_book(book_md5)
     if cached:
-        return cached, None
+        record = pdf_cache_index().get(pdf_cache_key(book_md5))
+        source_pdf = Path(str(record.get("sourcePdf") or "")) if isinstance(record, dict) else None
+        title_source = source_pdf if source_pdf and source_pdf.name else cached
+        if pdf_path_matches_payload_title(title_source, payload, book_md5):
+            return cached, None
+        mismatched_sources.append(title_source)
 
     payload_names = payload_pdf_name_values(payload)
     if payload_names:
@@ -10816,16 +10886,22 @@ def resolve_pdf_source(payload: dict[str, Any], book_md5: str) -> tuple[Path | N
 
     db_source, db_error = resolve_pdf_source_from_mn_database(book_md5)
     if db_source:
-        return db_source, None
+        if pdf_path_matches_payload_title(db_source, payload, book_md5):
+            return db_source, None
+        mismatched_sources.append(db_source)
     known = KNOWN_PDF_PATHS.get(book_md5)
     if known and known.is_file():
-        return known, None
+        if pdf_path_matches_payload_title(known, payload, book_md5):
+            return known, None
+        mismatched_sources.append(known)
     if known:
         return None, f"已知文档路径不存在：{known}"
 
     single_configured_pdf = configured_single_pdf_file()
     if single_configured_pdf:
-        return single_configured_pdf, None
+        if pdf_path_matches_payload_title(single_configured_pdf, payload, book_md5):
+            return single_configured_pdf, None
+        mismatched_sources.append(single_configured_pdf)
 
     selection_text = selection_text_for_pdf_discovery(payload)
     if selection_text:
@@ -10835,6 +10911,13 @@ def resolve_pdf_source(payload: dict[str, Any], book_md5: str) -> tuple[Path | N
 
     if explicit_error:
         return None, explicit_error
+    if mismatched_sources:
+        current_title = str(payload.get("documentTitle") or payload.get("documentFileName") or "当前文档").strip()
+        stale_name = mismatched_sources[0].name
+        return None, (
+            f"检测到跨文档缓存不一致：当前文档是“{current_title}”，"
+            f"但旧标识指向“{stale_name}”。已拒绝读取旧缓存；请刷新当前上下文或重新缓存当前文档。"
+        )
     return None, unresolved_pdf_source_message(db_error or "")
 
 
@@ -11902,6 +11985,58 @@ def score_document_chunk(chunk: dict[str, Any], terms: list[str]) -> float:
     return score
 
 
+def full_document_context_from_cache(
+    record: dict[str, Any],
+    max_chars: int = FULL_DOCUMENT_CONTEXT_MAX_CHARS,
+) -> str:
+    chunks = record.get("chunks")
+    if not isinstance(chunks, list) or not chunks:
+        return ""
+    ordered = sorted(
+        (item for item in chunks if isinstance(item, dict)),
+        key=lambda item: (int(item.get("page") or 0), int(item.get("start") or 0)),
+    )
+    body: list[str] = []
+    used = 0
+    truncated = False
+    last_page = 0
+    last_end_by_page: dict[int, int] = {}
+    content_limit = max(1000, int(max_chars) - 240)
+    for chunk in ordered:
+        page = int(chunk.get("page") or 0)
+        start = int(chunk.get("start") or 0)
+        raw_text = str(chunk.get("text") or "")
+        previous_end = last_end_by_page.get(page, 0)
+        if start < previous_end:
+            raw_text = raw_text[previous_end - start :]
+        text = normalize_pdf_text(raw_text)
+        end = int(chunk.get("end") or (start + len(str(chunk.get("text") or ""))))
+        last_end_by_page[page] = max(previous_end, end)
+        if not text:
+            continue
+        prefix = f"\n[第{page}页]\n" if page != last_page else "\n"
+        block = prefix + text
+        if used + len(block) > content_limit:
+            remaining = content_limit - used
+            if remaining > len(prefix) + 200:
+                body.append(prefix + text[: remaining - len(prefix)].rstrip())
+            truncated = True
+            break
+        body.append(block)
+        used += len(block)
+        last_page = page
+    if not body:
+        return ""
+    if truncated:
+        header = (
+            "当前文档全文（因输入长度限制截断）：\n"
+            "说明：内容按原页序排列；末尾超出本次模型输入上限的部分未包含。"
+        )
+    else:
+        header = "当前文档完整全文：\n说明：以下内容来自当前 PDF 全文缓存，并按原页序排列。"
+    return header + "".join(body)
+
+
 def retrieved_document_context_from_cache(record: dict[str, Any], query: str, max_chars: int = DOCUMENT_CONTEXT_MAX_CHARS) -> str:
     chunks = record.get("chunks")
     if not isinstance(chunks, list) or not chunks:
@@ -11969,7 +12104,16 @@ def document_context_for_model(
     record, error_message = ensure_pdf_text_cache(payload)
     if not record:
         return {"ok": False, "text": "", "error": error_message or "无法读取当前文档全文。"}
-    text = retrieved_document_context_from_cache(record, query, max_chars=max_chars)
+    use_full_document = (
+        truthy_payload_flag(payload.get("_fullDocumentContext"))
+        or normalize_context_scope(payload) == "document"
+        or bool(DOCUMENT_SCOPE_REQUEST_RE.search(str(query or "")))
+    )
+    if use_full_document:
+        full_limit = FULL_DOCUMENT_CONTEXT_MAX_CHARS if max_chars == DOCUMENT_CONTEXT_MAX_CHARS else max_chars
+        text = full_document_context_from_cache(record, max_chars=full_limit)
+    else:
+        text = retrieved_document_context_from_cache(record, query, max_chars=max_chars)
     if not text:
         return {"ok": False, "text": "", "error": "当前 PDF 已读取，但没有抽取到可用文本。"}
     return {
@@ -11998,7 +12142,10 @@ def build_model_input(payload: dict[str, Any], task: str) -> str:
         document_query = repair_pdf_extracted_math_text(str(payload.get("prompt") or "")).strip()
         if not document_query:
             document_query = combined_user_request(payload) if requested_scope != "document" else ""
-        document_context = document_context_for_model(payload, document_query)
+        document_payload = payload
+        if task in {"generate_full_reading", "generate_mindmap"}:
+            document_payload = {**payload, "_fullDocumentContext": True}
+        document_context = document_context_for_model(document_payload, document_query)
         if document_context.get("text"):
             context_blocks.append(str(document_context.get("text") or ""))
         else:
@@ -12104,6 +12251,21 @@ def format_codex_cli_failure(detail: str, settings: dict[str, str], retried: boo
     return f"Codex CLI 调用失败或无输出：{detail}"
 
 
+def codex_cli_timeout_seconds(
+    speed: str,
+    task: str,
+    payload: dict[str, Any] | None = None,
+) -> int:
+    if task in {"generate_mindmap", "generate_full_reading"}:
+        return CODEX_CLI_LONG_TASK_TIMEOUT
+    if payload and (
+        normalize_context_scope(payload) == "document"
+        or prompt_requests_document_scope(payload, task)
+    ):
+        return CODEX_CLI_LONG_TASK_TIMEOUT
+    return CODEX_CLI_TIMEOUTS[speed]
+
+
 def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]:
     settings = runtime_settings()
     cli = codex_cli_status(settings)
@@ -12118,7 +12280,7 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
         + build_model_input(payload, task)
     )
     speed = sanitize_speed(settings.get("speed"))
-    timeout = CODEX_CLI_TIMEOUTS[speed]
+    timeout = codex_cli_timeout_seconds(speed, task, payload)
     service_tier = CODEX_CLI_SERVICE_TIERS[speed]
     reasoning = sanitize_reasoning_effort(settings.get("reasoningEffort"))
     model = effective_codex_cli_model(settings)

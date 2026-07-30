@@ -586,6 +586,44 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("Figure 2", context)
             self.assertNotIn("Figure 1", context)
 
+    def test_full_document_request_supplies_all_cached_pages_to_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            record = {
+                "sourcePdf": "/tmp/paper.pdf",
+                "pageCount": 10,
+                "chunkCount": 10,
+                "chunks": [
+                    {
+                        "page": page,
+                        "start": 0,
+                        "end": 32,
+                        "text": f"page {page} unique content",
+                    }
+                    for page in range(1, 11)
+                ],
+            }
+            old = companion.ensure_pdf_text_cache
+            companion.ensure_pdf_text_cache = lambda payload: (record, None)
+            try:
+                prompt = companion.build_model_input(
+                    {
+                        "contextScope": "auto",
+                        "prompt": "你能看到全文吗",
+                        "bookmd5": "BOOK1",
+                    },
+                    "chat",
+                )
+            finally:
+                companion.ensure_pdf_text_cache = old
+
+            self.assertIn("当前文档完整全文", prompt)
+            self.assertIn("[第1页]", prompt)
+            self.assertIn("page 1 unique content", prompt)
+            self.assertIn("[第10页]", prompt)
+            self.assertIn("page 10 unique content", prompt)
+            self.assertNotIn("不是完整逐字全文", prompt)
+
     def test_generate_card_prompt_is_neutral_without_defense_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -2927,7 +2965,7 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertEqual(text, "priority xhigh cli output")
             self.assertEqual(backend, "codex-cli")
-            self.assertEqual(captured["timeout"], 90)
+            self.assertEqual(captured["timeout"], 600)
             self.assertEqual(captured["input"], "")
             self.assertIsNot(captured["stdout"], companion.subprocess.PIPE)
             self.assertIsNot(captured["stderr"], companion.subprocess.PIPE)
@@ -2950,6 +2988,72 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("127.0.0.1", captured["env"]["NO_PROXY"])
             self.assertIn("localhost", captured["env"]["NO_PROXY"])
             self.assertTrue((companion.CODEX_LITE_HOME / "auth.json").exists())
+
+    def test_codex_cli_uses_long_timeout_for_ultra_full_document_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings(
+                {
+                    "speed": "priority",
+                    "reasoningEffort": "ultra",
+                    "aiBackend": "codex_cli",
+                    "codexCliPath": "/tmp/codex",
+                    "model": "gpt-5.6-sol",
+                }
+            )
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            captured: dict[str, Any] = {}
+
+            class FakePopen:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, args: list[str], **kwargs: Any) -> None:
+                    output_path = Path(args[args.index("--output-last-message") + 1])
+                    output_path.write_text("mindmap output", encoding="utf-8")
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    captured["timeout"] = timeout
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = lambda args, **kwargs: FakePopen(args, **kwargs)
+            try:
+                text, backend = companion.call_codex_cli({"prompt": "生成脑图"}, "generate_mindmap")
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual(text, "mindmap output")
+            self.assertEqual(backend, "codex-cli")
+            self.assertGreaterEqual(captured["timeout"], 600)
+            self.assertGreaterEqual(
+                companion.codex_cli_timeout_seconds("priority", "generate_full_reading"),
+                600,
+            )
+
+    def test_codex_cli_uses_long_timeout_for_full_document_chat_requests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            self.assertGreaterEqual(
+                companion.codex_cli_timeout_seconds(
+                    "priority",
+                    "chat",
+                    {"prompt": "详细解释全文", "contextScope": "auto"},
+                ),
+                600,
+            )
+            self.assertEqual(
+                companion.codex_cli_timeout_seconds(
+                    "priority",
+                    "chat",
+                    {"prompt": "Figure 2 做什么", "contextScope": "auto"},
+                ),
+                90,
+            )
 
     def test_model_presets_are_read_from_codex_cli_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3121,6 +3225,17 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertEqual(status["effectiveReasoningEffort"], "xhigh")
             self.assertEqual(status["effectiveServiceTier"], "priority")
+
+    def test_status_reports_stale_native_plugin_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.latest_native_api_capabilities = lambda: {"available": True, "pluginVersion": "0.4.42"}
+
+            status = companion.status_payload()
+
+            self.assertEqual(status["nativeCompatibility"]["status"], "stale")
+            self.assertIn("0.4.42", status["nativeCompatibility"]["message"])
+            self.assertIn(companion.CURRENT_PLUGIN_VERSION, status["nativeCompatibility"]["message"])
 
     def test_openai_api_uses_selected_model_in_responses_payload(self) -> None:
         old_key = os.environ.get("OPENAI_API_KEY")
@@ -7225,6 +7340,47 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(companion.poll_commands("TOPIC1", "BOOK1")["pending"], 0)
+
+    def test_pdf_resolution_rejects_stale_cache_when_current_title_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            file_root = Path(tmp) / "managed-files"
+            file_root.mkdir()
+            stale = file_root / "Lei 等 2026. RL-100.pdf"
+            current = file_root / "Zhao 等 2023. Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware.pdf"
+            stale.write_bytes(b"%PDF-1.4\nstale\n")
+            current.write_bytes(b"%PDF-1.4\ncurrent\n")
+            cached_copy = companion.PDF_CACHE_DIR / "BOOK1-RL-100.pdf"
+            cached_copy.parent.mkdir(parents=True, exist_ok=True)
+            cached_copy.write_bytes(stale.read_bytes())
+            companion.save_pdf_cache_index(
+                {
+                    "BOOK1": {
+                        "path": str(cached_copy),
+                        "sourcePdf": str(stale),
+                    }
+                }
+            )
+            companion.DB_PATH = Path(tmp) / "missing.sqlite"
+            companion.MN_DOC_ROOTS = []
+            companion.MN_DOC_CACHE_ROOTS = []
+            companion.ONEDRIVE_PDF_ROOTS = []
+            companion.cloud_storage_pdf_roots = lambda: []
+            companion.save_runtime_settings({"fileSearchRoots": [str(file_root)]})
+
+            resolved, error = companion.resolve_pdf_source(
+                {
+                    "bookmd5": "BOOK1",
+                    "documentTitle": (
+                        "Zhao 等 2023. Learning Fine-Grained Bimanual Manipulation "
+                        "with Low-Cost Hardware #1"
+                    ),
+                },
+                "BOOK1",
+            )
+
+            self.assertEqual(resolved, current)
+            self.assertIsNone(error)
 
     def test_request_pdf_cache_queues_document_title_candidates_without_pdf_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

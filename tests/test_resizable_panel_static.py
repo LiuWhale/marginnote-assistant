@@ -743,6 +743,8 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("read_mindmap_tree", self.main)
         self.assertIn("readMindmapTree", self.main)
         self.assertIn("mindmapTreeReadRequested", self.main)
+        self.assertIn("serializeMindmapNotebookRoots", self.main)
+        self.assertIn("notebook-root", self.main)
 
         native_body = self.main.split("CodexAssistantAddon.prototype.handleNativeQueueCommand", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.ackCommands", 1

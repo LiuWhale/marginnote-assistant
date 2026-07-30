@@ -48,6 +48,7 @@ CODEX_CLI_TIMEOUTS = {
     "codex_config": 90,
     "priority": 90,
 }
+CODEX_CLI_LONG_TASK_TIMEOUT = 600
 CODEX_CLI_SERVICE_TIERS = {
     "codex_config": "",
     "priority": "priority",

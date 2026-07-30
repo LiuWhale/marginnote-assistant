@@ -6,6 +6,16 @@ All notable changes to Codex Companion are documented here.
 
 No unreleased changes.
 
+## 0.4.48 - 2026-07-30
+
+### Fixed
+
+- Full-document chat, document reading, and mind-map generation now send the ordered cached PDF text to the AI backend instead of silently reducing the request to a short retrieval excerpt. Inputs that exceed the explicit 220,000-character ceiling are marked as truncated.
+- Full-document and mind-map Codex CLI jobs now use a 600-second timeout, while ordinary chat keeps its shorter speed-specific timeout.
+- PDF resolution now validates the current document title before reusing cached, database, configured, or known paths. A stale path from another paper is rejected instead of being analyzed as the current document.
+- Mind-map tree reads can now serialize the current notebook roots when there is no selected root note, so a valid notebook is no longer reported as unreadable solely because a note was not selected.
+- Companion status now reports whether the native MarginNote extension version matches the running Companion version and gives a restart instruction when MarginNote is still holding an older extension in memory.
+
 ## 0.4.47 - 2026-07-16
 
 ### Changed
