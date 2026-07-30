@@ -148,7 +148,7 @@ WebView 顶部提供 `对话 / 工具` 双模式切换。默认进入 `对话`�
 - 对象区有 `Object Graph` 面板，会按当前 objectId 把相关历史对话、workflow run、AI 编辑事务、外部自动化请求、诊断证据、已索引的知识实体、最近一次 MN 原生脑图树缓存和用户手工维护关系连成节点。图谱里的 `知识` 节点来自 Knowledge Index，可能是卡片、脑图节点或摘录，并保留 noteId、页码、quote 和支持/包含等关系；图谱里的 `MN节点` 来自当前脑图树缓存，保留 noteId、层级、path 和父子 `contains` 关系；图谱里的手工关系来自本地 `manual_relation`，可通过对象区的“添加关系”把当前 `MNObject` 连到另一个对象 ID。保存或删除手工关系会形成 `object_graph_manual_relation` 账本事件，并保留 `manualRelation` 证据。切换文档、选区或节点后，图谱会按新对象重新读取；点图谱节点可以进入历史对话、workflow、事务、Operation Ledger 证据详情、知识检索、请求 MarginNote 读取某个 MN 节点子树，或删除手工关系。
 - 对象区还有 `对象活动` 面板，会按当前 objectId 汇总最近历史对话、workflow run、AI 编辑事务、手工对象关系事件和诊断日志。它更像时间线；图谱用于看关系，活动用于看最近发生了什么。活动条目右侧的按钮可以直接打开历史对话、查看 workflow、查看 AI 编辑事务、打开手工关系账本证据，或把日志详情展开到对话区。
 - 对象区还提供 `Operation Ledger` 面板。它不是普通日志，而是按当前 objectId 聚合 workflow run、AI 编辑事务、外部自动化请求和手工对象关系事件；`类型`、`状态` 和 `关键词` 控件会一起传给 `operation_ledger_list`，可用来只看工作流、事务、外部请求、手工关系，或只看 `saved`、`deleted`、`failed`、`pass` 等状态。每条账本项都有 `ledgerId`，点开后会在对象区打开证据详情面板，查看来源 ID、状态、对象、摘要、operation plan、dry-run/apply path、原生命令、原生事件线、原生执行、回滚/残留、workflow 确认/阻断状态、external callback evidence 和手工关系证据，不需要回到聊天消息里找审计信息。现在账本详情还会带 `codex.mn.verificationReport.v1`：`PASS` 表示当前证据证明通过，`FAIL` 表示发现缺失或失败，`UNKNOWN` 表示缺少足够原生 probe，不能把日志成功当成真实证明。当前是第一阶段可筛选证据账本，后续会继续把更多 MN 原生存在性检测和逐节点 verify 并入同一账本。
-- `对话`：保留聊天历史、输入框和发送按钮。Enter 和点击发送都可提交；如果当前已有任务在执行，新请求会自动排队。
+- `对话`：保留聊天历史、输入框和发送按钮。Enter 和点击发送都可提交；如果当前已有任务在执行，新请求会自动排队。每条完整 Codex 回答下方都有 `复制`，复制内容是原始 Markdown；进度、错误和系统提示不显示复制按钮。历史页恢复的回答也使用同一复制方式。
 - `操作`：集中显示目标脑图、当前脑图树缓存、Operation Compiler、Verification Center、Mindmap Studio、最新脑图 Diff 编辑台、Agent 操作计划、下一步动作、执行验证和事务中心。Operation Compiler 会把当前意图先编译成 `operationPlan` 和 `verificationPlan`，显示计划步骤、写入数量、验证状态，以及 schema、上下文、权限、native capability dry-run、确认点和回滚检查；出现阻断时，这里会先告诉你为什么不能把回答当成真实 MN 编辑，并把写入链路或确认类下一步按钮变灰，只保留只读检索等安全动作。阻断面板还会显示第一阶段修复动作，例如刷新 MN 能力、打开设置或缓存当前 PDF。Verification Center 会按当前 `MNObject` 读取 `verification_report_list`，汇总 Operation Ledger、Source Registry 和 Skill Runtime 的 `PASS`、`FAIL`、`UNKNOWN` 报告，并把非 `PASS` 报告中的可执行动作汇总成 `verificationRepairPlan`，在面板中显示 `执行推荐修复` 主按钮和详细动作列表；没有安全推荐动作时主按钮会禁用。看到 `UNKNOWN` 表示缺少足够原生 probe，不代表已经失败，也不能当成真实通过。如果事务报告因为 `native_probe_missing` 处于 `UNKNOWN`，可点 `执行推荐修复` 或报告里的 `检查真实对象`，它会把 `request_mn_object_existence_probe` 放进 MN4 原生队列，让插件按 noteId 检查真实对象是否存在；MN4 回写 probe 结果后，该报告会重新计算，真实对象存在则变为 `PASS`，缺失则变为 `FAIL`。Mindmap Studio 不是回答下方按钮的别名，它是第一阶段脑图对象操作台：点击 `读取现有脑图` 可以刷新真实脑图树，点击 `预览 Diff` 会按当前回答或输入生成变更预览，点击 `应用所选` 会应用当前选中的 Diff，点击 `验证事务` 会刷新最近事务证据，点击 `回滚事务` 会请求 MN4 删除本次事务新增节点并返回残留结果。生成脑图后，即使聊天滚动到别处，最近一次 Diff 的新增/更新/合并/移动/建议删除统计仍会留在这里；接受或拒绝 AI 编辑后，最近事务的回滚状态、事务对象、创建 noteId 和残留 noteId 也会留在这里。局部脑图 Diff apply 也会进入事务中心，显示本次 transactionId、created/applied noteId、失败数和逐操作验证摘要；生成成功后先等待确认，你可以直接点 `保留`，也可以点 `回滚` 删除本次新增节点，或点 `验证/证据` 查看事务报告。如果 Diff 里包含删除建议，普通接受不会直接删除旧卡片；事务中心会另外显示 `删除 / 忽略`，需要你二次确认后才删除目标 noteId。
 - `知识`：显示 Knowledge Graph 状态，包括当前索引范围、实体类型统计、关系统计和显式检索入口。你可以直接输入关键词检索当前授权范围内的索引命中，结果会显示实体、摘要、来源和页码线索；它不会默认扫描或注入全库。
 - `工作流`：显示 Workflow Runtime、Workflow Builder Board、External Automation Gateway 和 Skill Runtime / Skill Marketplace 的当前状态。这里会列出可用工作流模板、最近 workflow run、本地技能包，以及 `codex.mn.workflowBuilderBoard.v1` 四列板：任务候选、运行中、等待确认和证据。点击候选卡片可按当前对象启动工作流，生成类步骤进入队列，写入类步骤仍需要确认；点击 run 卡片或最近 run 右侧的 `查看` 会打开 Run Inspector，显示每一步的状态、queueId、确认要求、提醒/阻断状态和下一步动作；可恢复的失败/阻断 direct 或 queueable 步骤会显示 `重试`，重试后会重新入队并刷新检查器。写入/确认步骤不会显示重试按钮，仍然必须走接受或拒绝。技能包不再等同于自定义 prompt：写入或删除技能必须通过 manifest 校验，声明 `requiresConfirmation`、`dryRun`、`rollback` 和 `acceptance`；无效技能会被禁用，有效技能可先生成 dry-run-first 操作计划，再记录 `codex.mn.skillRun.v1`。外部脚本、快捷指令或其他本地 Agent 可以 POST 到 `/external/workflow/start` 创建 workflow run；Companion 会记录 requestId、caller、权限、对象引用、callback 和执行结果，仍然沿用同一套权限与确认点。外部系统也可以 POST 到 `/external/callback/success` 或 `/external/callback/error`，把执行结果写回同一个 request ledger。
@@ -282,6 +282,10 @@ AI 编辑操作面板里的 `加入复习队列` 会把本次草稿卡登记到�
 
 如果你说“补到当前脑图”“合并到现在的脑图”“挂到这个节点下”，必须先在 MarginNote 里选中目标脑图节点。若没有选中节点，插件会直接停止并提示你先选中节点，不会偷偷新建一棵脑图，也不会把脑图退化成一段文字。
 
+回答下方的 `生成脑图树` 使用另一条安全路径。插件会先读取当前文档的脑图树，把回答标题和内容与现有节点做匹配：只有语义证据足够且节点仍可验证时，才把新分支挂到该节点；置信度不足时统一挂到当前文档根。当前脑图基线还没有缓存时，插件会先请求 MarginNote 读取脑图，不会在不知道现有结构的情况下直接生成并写入。
+
+这条自动挂接路径只允许新增节点。与现有节点同名的生成节点会被去重，其未重复子节点会继续保留；插件不会修改已有节点标题、正文和父子关系。真正写入前，MarginNote 原生端还会按 `noteId` 和节点标题再次验证父节点；如果节点已被删除、改名或切换，写入会停止并提示刷新，而不会退回到当前选区或其他脑图。
+
 ## 11. 完整精读
 
 完整精读适合处理一篇论文、一章书或一份长资料。它通常会生成：
@@ -375,6 +379,7 @@ AI 编辑操作面板里的 `加入复习队列` 会把本次草稿卡登记到�
 历史页按当前 notebook/book 保存会话。你可以：
 
 - 查看当前资料的历史问答
+- 点击每条已完成回答下方的 `复制`，复制原始 Markdown
 - 按当前 `MNObject` 过滤对象相关会话，例如只看某个 PDF 选区、卡片或当前文档对应的历史
 - 清空当前资料的历史
 

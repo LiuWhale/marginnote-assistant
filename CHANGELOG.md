@@ -4,7 +4,20 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
-No unreleased changes.
+### Added
+
+- Added a `复制` button to every completed Codex answer, including restored history. It copies the original Markdown and falls back to the WebView-compatible copy command when the modern clipboard API is unavailable.
+- Added reply-derived mind-map attachment metadata and a deterministic attachment planner that evaluates the current mind-map tree before writing.
+
+### Changed
+
+- The answer-level `生成脑图树` action now reads the current mind-map baseline, chooses a semantically compatible parent when confidence is sufficient, and otherwise falls back to the current document root.
+- Reply-derived mind-map plans are create-only: exact duplicate headings are pruned, unique children are promoted, and existing nodes are never renamed, moved, merged, or overwritten.
+- Queued answer-level mind-map requests now preserve their reply source metadata through the Companion queue.
+
+### Fixed
+
+- The native MarginNote writer now revalidates the chosen parent by both note ID and title immediately before writing. A missing or changed parent blocks the write and requests a fresh tree instead of attaching to an unrelated location.
 
 ## 0.4.48 - 2026-07-30
 

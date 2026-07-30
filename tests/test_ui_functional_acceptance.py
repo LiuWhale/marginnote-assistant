@@ -888,6 +888,7 @@ class UiFunctionalAcceptanceTests(unittest.TestCase):
         passing = module.check_browser_write_action_stub_result(
             {
                 "clicked": {
+                    "replyCopyButton": True,
                     "replyMindmapTreeButton": True,
                     "aiEditRejectButton": True,
                     "aiEditAcceptButton": True,
@@ -915,6 +916,8 @@ class UiFunctionalAcceptanceTests(unittest.TestCase):
                     "accept_ai_edit_transaction",
                     "reject_ai_edit_transaction",
                 ],
+                "copiedReplyMarkdown": "## 核心问题\n- 方法路线\n- 验证证据",
+                "expectedReplyMarkdown": "## 核心问题\n- 方法路线\n- 验证证据",
                 "connectionFailureVisible": False,
                 "finalUiState": {
                     "settingsHidden": True,

@@ -393,6 +393,7 @@ BROWSER_ACTION_REQUIRED_BRIDGE_ACTIONS = [
 ]
 
 BROWSER_WRITE_REQUIRED_CLICK_TARGETS = [
+    "replyCopyButton",
     "replyMindmapTreeButton",
     "aiEditRejectButton",
     "aiEditAcceptButton",
@@ -655,7 +656,7 @@ def check_button_coverage(root: Path) -> dict[str, Any]:
     for values in categories.values():
         classified.update(values)
     unclassified = sorted(button_ids - classified)
-    stale_classified = sorted(classified - button_ids - {"replyMindmapTreeButton", "aiEditRejectButton", "aiEditAcceptButton", "aiEditReviewQueueButton", "transactionVerifyButton", "transactionEvidenceButton", "transactionProbeButton"})
+    stale_classified = sorted(classified - button_ids - {"replyCopyButton", "replyMindmapTreeButton", "aiEditRejectButton", "aiEditAcceptButton", "aiEditReviewQueueButton", "transactionVerifyButton", "transactionEvidenceButton", "transactionProbeButton"})
     problems = [f"unclassified button #{item}" for item in unclassified]
     if stale_classified:
         problems.append("button coverage lists reference missing static buttons: " + ", ".join(stale_classified))
@@ -1097,6 +1098,8 @@ def check_browser_write_action_stub_result(result: dict[str, Any]) -> dict[str, 
     for action in BROWSER_WRITE_REQUIRED_BRIDGE_ACTIONS:
         if action not in bridge_action_set:
             problems.append(f"missing native bridge action: {action}")
+    if result.get("copiedReplyMarkdown") != result.get("expectedReplyMarkdown"):
+        problems.append("reply copy did not preserve the original Markdown")
     if result.get("connectionFailureVisible") is True:
         problems.append("connection failure message appeared while using write stub backend")
     if not final_ui:
@@ -3268,6 +3271,26 @@ BROWSER_WRITE_ACTION_STUB_CLICK_SCRIPT = r"""
   };
   const click = (key, id) => clickElement(key, byId(id || key));
   const clickSelector = (key, selector) => clickElement(key, document.querySelector(selector));
+  const expectedReplyMarkdown = '## 核心问题\n- 方法路线\n- 验证证据';
+  window.__codexCopiedReplyMarkdown = '';
+  try {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: text => {
+          window.__codexCopiedReplyMarkdown = String(text || '');
+          return Promise.resolve();
+        }
+      }
+    });
+  } catch (clipboardStubError) {
+    document.execCommand = command => {
+      if (command !== 'copy') return false;
+      const active = document.activeElement;
+      window.__codexCopiedReplyMarkdown = active && active.value ? String(active.value) : '';
+      return true;
+    };
+  }
   if (window.CodexPanel && typeof window.CodexPanel.setContext === 'function') {
     window.CodexPanel.setContext({
       topicid: 'stub-topic',
@@ -3278,8 +3301,11 @@ BROWSER_WRITE_ACTION_STUB_CLICK_SCRIPT = r"""
     });
   }
   if (window.CodexPanel && typeof window.CodexPanel.setReply === 'function') {
-    window.CodexPanel.setReply({text: '任意文档回答：核心问题、方法路线、验证证据。'});
+    window.CodexPanel.setReply({text: expectedReplyMarkdown});
   }
+  await waitForSelector('.reply-copy-button');
+  await clickSelector('replyCopyButton', '.reply-copy-button');
+  await waitFor(() => window.__codexCopiedReplyMarkdown === expectedReplyMarkdown);
   await waitForSelector('.reply-mindmap-tree-button');
   await clickSelector('replyMindmapTreeButton', '.reply-mindmap-tree-button');
   await waitForAction('generate_mindmap');
@@ -3418,6 +3444,8 @@ BROWSER_WRITE_ACTION_STUB_CLICK_SCRIPT = r"""
     bridgeActions: bridgeCalls().map(call => call.path),
     requestCount: calls().length,
     bridgeRequestCount: bridgeCalls().length,
+    copiedReplyMarkdown: window.__codexCopiedReplyMarkdown,
+    expectedReplyMarkdown: expectedReplyMarkdown,
     connectionFailureVisible: /Companion 未运行|无法连接 127\.0\.0\.1:48761/.test(historyText + '\n' + statusText),
     statusText: statusText,
     finalUiState: finalUiState
