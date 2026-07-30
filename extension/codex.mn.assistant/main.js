@@ -3915,7 +3915,49 @@ JSB.newAddon = function(mainPath) {
     var targetMode = String(valueOf(writeTarget, 'mode') || '');
     var targetSelectedNoteId = String(valueOf(writeTarget, 'selectedNoteId') || '');
     var wantsMergeIntoSelected = !!valueOf(tree, 'mergeIntoSelected') || targetMode === 'merge_children_into_selected_node';
+    var wantsVerifiedParent = targetMode === 'verified_parent_node';
+    var targetParentNoteId = String(valueOf(writeTarget, 'parentNoteId') || '');
+    var targetParentNoteTitle = String(valueOf(writeTarget, 'parentNoteTitle') || '');
     var wantsDocumentRoot = targetMode === 'document_root';
+    var verifiedParent = wantsVerifiedParent && targetParentNoteId
+      ? findNoteById(ctx.notebook, targetParentNoteId)
+      : null;
+    if (wantsVerifiedParent && !verifiedParent) {
+      var missingVerifiedParent = '自动选择的脑图父节点已不存在，请刷新当前脑图后重新生成。';
+      if (this.panel) this.panel.setStatus(missingVerifiedParent);
+      try {
+        Application.sharedInstance().showHUD(missingVerifiedParent, ctx.controller ? ctx.controller.view : this.window, 3);
+      } catch (verifiedParentHudErr) {}
+      this.postEvent('createMindmapFailed', {
+        reason: 'verified-parent-missing',
+        expectedNoteId: targetParentNoteId,
+        expectedTitle: targetParentNoteTitle,
+        title: rootTitle,
+        topicid: ctx.topicId,
+        requestedMode: 'verified_parent_node'
+      });
+      return;
+    }
+    var verifiedParentTitle = verifiedParent
+      ? safeString(valueOf(verifiedParent, 'noteTitle') || valueOf(verifiedParent, 'title') || '')
+      : '';
+    if (wantsVerifiedParent && targetParentNoteTitle && verifiedParentTitle !== targetParentNoteTitle) {
+      var changedVerifiedParent = '自动选择的脑图父节点已发生变化，请刷新当前脑图后重新生成。';
+      if (this.panel) this.panel.setStatus(changedVerifiedParent);
+      try {
+        Application.sharedInstance().showHUD(changedVerifiedParent, ctx.controller ? ctx.controller.view : this.window, 3);
+      } catch (changedParentHudErr) {}
+      this.postEvent('createMindmapFailed', {
+        reason: 'verified-parent-title-mismatch',
+        expectedNoteId: targetParentNoteId,
+        expectedTitle: targetParentNoteTitle,
+        actualTitle: verifiedParentTitle,
+        title: rootTitle,
+        topicid: ctx.topicId,
+        requestedMode: 'verified_parent_node'
+      });
+      return;
+    }
     if (wantsMergeIntoSelected && selected && targetSelectedNoteId && noteIdentifier(selected) !== targetSelectedNoteId) {
       var mismatchMessage = '目标脑图节点已变化，请重新选择目标脑图后再生成。';
       if (this.panel) this.panel.setStatus(mismatchMessage);
@@ -3947,6 +3989,7 @@ JSB.newAddon = function(mainPath) {
       return;
     }
     var mergeIntoSelected = wantsMergeIntoSelected && !!selected;
+    var mergeIntoVerifiedParent = wantsVerifiedParent && !!verifiedParent;
     var createdNodes = [];
     var rootDedupeStats = {scanned: 0, markerMatches: 0, titleMatches: 0};
     var existingRoot = rootCodexId ? findExistingCodexNote(ctx.notebook, rootCodexId, rootTitle, rootDedupeStats) : null;
@@ -3974,6 +4017,14 @@ JSB.newAddon = function(mainPath) {
       return note;
     }
 
+    function mergeChildrenIntoParent(parent) {
+      var children = toArray(valueOf(tree, 'children'));
+      for (var i = 0; i < children.length; i++) {
+        var child = makeNode(children[i], parent);
+        if (!rootNote && child) rootNote = child;
+      }
+    }
+
     function mergeChildrenIntoSelected() {
       var children = toArray(valueOf(tree, 'children'));
       for (var i = 0; i < children.length; i++) {
@@ -3993,17 +4044,21 @@ JSB.newAddon = function(mainPath) {
 
     var mergeIntoDocumentRoot = wantsDocumentRoot && !!existingRoot;
     UndoManager.sharedInstance().undoGrouping('Codex Create Mindmap', ctx.topicId, function() {
-      if (mergeIntoSelected) mergeChildrenIntoSelected();
+      if (mergeIntoVerifiedParent) mergeChildrenIntoParent(verifiedParent);
+      else if (mergeIntoSelected) mergeChildrenIntoSelected();
       else if (mergeIntoDocumentRoot) appendChildrenToDocumentRoot(existingRoot);
       else if (wantsDocumentRoot) rootNote = makeNode(tree, null);
       else rootNote = makeNode(tree, selected);
     });
     Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
+    var completedMode = mergeIntoVerifiedParent
+      ? 'mergeIntoVerifiedParent'
+      : (mergeIntoDocumentRoot ? 'mergeIntoDocumentRoot' : 'createRoot');
     this.postEvent('createMindmapFinished', {
       created: rootNote ? true : false,
       createdCount: createdNodes.length,
       topicid: ctx.topicId,
-      mode: mergeIntoSelected ? 'mergeIntoSelected' : (mergeIntoDocumentRoot ? 'mergeIntoDocumentRoot' : 'createRoot')
+      mode: mergeIntoSelected ? 'mergeIntoSelected' : completedMode
     });
     if (rootNote && ctx.controller.focusNoteInMindMapById) {
       NSTimer.scheduledTimerWithTimeInterval(0.3, false, function() {

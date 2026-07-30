@@ -151,6 +151,23 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertNotIn("removeChild", delete_body)
         self.assertIn("Application.sharedInstance().refreshAfterDBChanged", reject_body)
 
+    def test_reply_mindmap_resolves_verified_parent_without_overwriting_existing_nodes(self) -> None:
+        create_mindmap_body = self.main.split(
+            "CodexAssistantAddon.prototype.createMindmap", 1
+        )[1].split("\n\n  return CodexAssistantAddon;", 1)[0]
+
+        for marker in [
+            "verified_parent_node",
+            "findNoteById(ctx.notebook, targetParentNoteId)",
+            "verified-parent-missing",
+            "verified-parent-title-mismatch",
+            "mergeIntoVerifiedParent",
+        ]:
+            self.assertIn(marker, create_mindmap_body)
+        self.assertNotIn("verifiedParent.noteTitle =", create_mindmap_body)
+        self.assertNotIn("verifiedParent.title =", create_mindmap_body)
+        self.assertNotIn("verifiedParent.addChild(existingRoot)", create_mindmap_body)
+
     def test_visible_ui_is_margin_note_style_knowledge_workspace(self) -> None:
         for required in [
             'id="aiChatShell"',
