@@ -7280,6 +7280,8 @@ class CompanionControlsTests(unittest.TestCase):
                     "topicid": "T1",
                     "bookmd5": "B1",
                     "source": "unittest",
+                    "replyDerivedMindmap": True,
+                    "sourceAnswerMarkdown": "Figure 2 的核心解释。",
                 }
             )
             self.assertTrue(result["ok"])
@@ -7289,6 +7291,8 @@ class CompanionControlsTests(unittest.TestCase):
             command = queued["commands"][0]
             self.assertEqual(command["rawAction"], "chat")
             self.assertEqual(command["prompt"], "排队解释 Figure 2")
+            self.assertTrue(command["replyDerivedMindmap"])
+            self.assertEqual(command["sourceAnswerMarkdown"], "Figure 2 的核心解释。")
             self.assertNotIn("cards", command)
 
             goal_result = companion.enqueue_command(

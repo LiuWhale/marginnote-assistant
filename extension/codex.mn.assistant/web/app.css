@@ -6656,12 +6656,41 @@ input[type="file"] {
   text-overflow: ellipsis;
 }
 
+.reply-completed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.reply-copy-button {
+  min-width: 64px;
+  flex: 0 0 auto;
+}
+
+.reply-copy-button[data-copy-state="success"] {
+  border-color: #9bcfbd;
+  background: #edf8f3;
+  color: var(--accent-strong);
+}
+
+.reply-copy-button[data-copy-state="error"] {
+  border-color: #f0aaa2;
+  background: #fff3f1;
+  color: #a43629;
+}
+
 .reply-mindmap-actions {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 7px;
   margin-top: 9px;
+}
+
+.reply-completed-actions .reply-mindmap-actions {
+  margin-top: 0;
 }
 
 .reply-mindmap-tree-button {

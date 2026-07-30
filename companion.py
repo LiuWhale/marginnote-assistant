@@ -4210,6 +4210,10 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
                 "source": str(payload.get("source") or "queued-raw-action"),
                 "message": str(payload.get("message") or f"queued raw action: {action}"),
             }
+            if "replyDerivedMindmap" in payload:
+                command["replyDerivedMindmap"] = truthy_payload_flag(payload.get("replyDerivedMindmap"))
+            if payload.get("sourceAnswerMarkdown"):
+                command["sourceAnswerMarkdown"] = str(payload.get("sourceAnswerMarkdown") or "")
         else:
             return {"ok": False, "message": f"unsupported queue action: {action or '(empty)'}"}
     if not is_valid_queue_command(command):

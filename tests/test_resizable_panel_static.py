@@ -357,7 +357,52 @@ class ResizablePanelContractTest(unittest.TestCase):
             "\n  function sendAction", 1
         )[0]
         self.assertIn("if (isActiveRun())", execute_body)
-        self.assertIn("enqueueAction(action, prompt)", execute_body)
+        self.assertIn("enqueueAction(action, prompt, extraPayload)", execute_body)
+
+    def test_completed_answers_have_markdown_copy_with_clipboard_fallback(self) -> None:
+        clipboard_body = self.app.split("function writeTextToClipboard", 1)[1].split(
+            "\n  function buildReplyCopyButton", 1
+        )[0]
+        copy_button_body = self.app.split("function buildReplyCopyButton", 1)[1].split(
+            "\n  function addCompletedAssistantReply", 1
+        )[0]
+
+        self.assertIn("navigator.clipboard.writeText", clipboard_body)
+        self.assertIn("document.execCommand('copy')", clipboard_body)
+        self.assertIn("writeTextToClipboard(replyText", copy_button_body)
+        self.assertIn("data-copy-state", copy_button_body)
+        self.assertIn("已复制", copy_button_body)
+        self.assertIn(".reply-copy-button", self.css)
+        self.assertIn(".reply-completed-actions", self.css)
+
+    def test_history_assistant_answers_use_completed_reply_renderer(self) -> None:
+        history_body = self.app.split("function renderHistoryItems", 1)[1].split(
+            "\n  function renderNewConversationMessage", 1
+        )[0]
+
+        self.assertIn("addMessage('user'", history_body)
+        self.assertIn("addCompletedAssistantReply", history_body)
+
+    def test_reply_mindmap_source_metadata_survives_direct_and_queued_execution(self) -> None:
+        next_action_body = self.app.split("function runAgentNextAction", 1)[1].split(
+            "\n  function buildReplyAgentActions", 1
+        )[0]
+        enqueue_body = self.app.split("function enqueueAction", 1)[1].split(
+            "\n  function enqueueGoalQueue", 1
+        )[0]
+        queued_body = self.app.split("function runQueuedCommand", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        draft_body = self.app.split("function requestDraftAction", 1)[1].split(
+            "\n  function stagePromptAction", 1
+        )[0]
+
+        self.assertIn("replyDerivedMindmap: true", next_action_body)
+        self.assertIn("sourceAnswerMarkdown", next_action_body)
+        self.assertIn("extraPayload", enqueue_body)
+        self.assertIn("replyDerivedMindmap", queued_body)
+        self.assertIn("sourceAnswerMarkdown", queued_body)
+        self.assertIn("Object.assign({}, extraPayload", draft_body)
 
     def test_goal_control_is_first_action_group_not_mixed_with_tools(self) -> None:
         for removed in [

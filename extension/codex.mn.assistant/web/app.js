@@ -715,12 +715,79 @@
     return addMessageWithExtra(role, text, null);
   }
 
-  function addAssistantReplyWithActions(text) {
-    var replyText = String(text || '');
-    state.latestAssistantReply = replyText;
-    return addMessageWithExtra('assistant', replyText, function(article) {
-      article.appendChild(buildReplyAgentActions(replyText));
+  function writeTextToClipboard(text, done) {
+    text = String(text || '');
+    done = typeof done === 'function' ? done : function() {};
+
+    function fallbackCopy() {
+      var textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'readonly');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      var ok = false;
+      try {
+        ok = document.execCommand('copy');
+      } catch (err) {
+        ok = false;
+      }
+      document.body.removeChild(textarea);
+      done(ok);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        done(true);
+      }).catch(fallbackCopy);
+      return;
+    }
+    fallbackCopy();
+  }
+
+  function buildReplyCopyButton(replyText) {
+    replyText = String(replyText || '');
+    var button = document.createElement('button');
+    button.className = 'small-button reply-copy-button';
+    button.type = 'button';
+    button.textContent = '复制';
+    button.title = '复制回答 Markdown';
+    button.setAttribute('aria-label', '复制回答 Markdown');
+    button.setAttribute('data-copy-state', 'idle');
+    button.addEventListener('click', function(ev) {
+      releaseButtonFocus(ev.currentTarget);
+      button.disabled = true;
+      button.setAttribute('data-copy-state', 'copying');
+      writeTextToClipboard(replyText, function(ok) {
+        button.disabled = false;
+        button.textContent = ok ? '已复制' : '复制失败';
+        button.setAttribute('data-copy-state', ok ? 'success' : 'error');
+        window.setTimeout(function() {
+          button.textContent = '复制';
+          button.setAttribute('data-copy-state', 'idle');
+        }, 1500);
+      });
     });
+    return button;
+  }
+
+  function addCompletedAssistantReply(text, includeMindmapActions) {
+    var replyText = String(text || '');
+    if (includeMindmapActions) state.latestAssistantReply = replyText;
+    return addMessageWithExtra('assistant', replyText, function(article) {
+      var actions = document.createElement('div');
+      actions.className = 'reply-completed-actions';
+      actions.appendChild(buildReplyCopyButton(replyText));
+      if (includeMindmapActions) actions.appendChild(buildReplyAgentActions(replyText));
+      article.appendChild(actions);
+    });
+  }
+
+  function addAssistantReplyWithActions(text) {
+    return addCompletedAssistantReply(text, true);
   }
 
   function buildReplyMindmapPrompt(replyText) {
@@ -1662,7 +1729,15 @@
     var action = String(item.action || '');
     var label = item.label || actionLabel(action);
     if (actionId === 'create_card_tree' || action === 'generate_mindmap') {
-      executeAction('generate_mindmap', buildReplyMindmapPrompt(replyText), label || '生成脑图树');
+      executeAction(
+        'generate_mindmap',
+        buildReplyMindmapPrompt(replyText),
+        label || '生成脑图树',
+        {
+          replyDerivedMindmap: true,
+          sourceAnswerMarkdown: String(replyText || '')
+        }
+      );
       return;
     }
     if (action === 'operation_plan_preview') {
@@ -1763,13 +1838,18 @@
       return;
     }
     if (item.kind === 'enqueue') {
-      enqueueAction(item.action, item.prompt || '');
+      enqueueAction(item.action, item.prompt || '', item.extraPayload || {});
       return;
     }
     if (item.kind === 'stop_then_run') {
       stopCurrent();
       window.setTimeout(function() {
-        executeAction(item.action, item.prompt || '', item.userText || item.title || actionLabel(item.action));
+        executeAction(
+          item.action,
+          item.prompt || '',
+          item.userText || item.title || actionLabel(item.action),
+          item.extraPayload || {}
+        );
       }, 350);
       return;
     }
@@ -1777,7 +1857,12 @@
       stopCurrent();
       return;
     }
-    executeAction(item.action, item.prompt || '', item.userText || item.title || actionLabel(item.action));
+    executeAction(
+      item.action,
+      item.prompt || '',
+      item.userText || item.title || actionLabel(item.action),
+      item.extraPayload || {}
+    );
   }
 
   function addGuideMessage(title, items) {
@@ -1845,7 +1930,8 @@
     }
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
-      addMessage(item.role === 'user' ? 'user' : 'assistant', item.content || '');
+      if (item.role === 'user') addMessage('user', item.content || '');
+      else addCompletedAssistantReply(item.content || '', false);
     }
   }
 
@@ -6823,6 +6909,10 @@
     var rawAction = command.rawAction || command.action || '';
     var queueId = command._queue_id || '';
     var prompt = command.prompt || '';
+    var extraPayload = {
+      replyDerivedMindmap: !!command.replyDerivedMindmap,
+      sourceAnswerMarkdown: command.sourceAnswerMarkdown || ''
+    };
     if (command.contextScope) {
       setContextScope(command.contextScope);
     }
@@ -6839,7 +6929,7 @@
       return;
     }
     if (isWriteAction(rawAction)) {
-      requestDraftAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId);
+      requestDraftAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId, extraPayload);
       return;
     }
     requestTextAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId);
@@ -7510,32 +7600,7 @@
       addMessage('assistant', prefix + label + '\n\n' + detail);
     }
 
-    function fallbackCopy() {
-      var textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.setAttribute('readonly', 'readonly');
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      var ok = false;
-      try {
-        ok = document.execCommand('copy');
-      } catch (err) {
-        ok = false;
-      }
-      document.body.removeChild(textarea);
-      report(ok);
-    }
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        report(true);
-      }).catch(fallbackCopy);
-      return;
-    }
-    fallbackCopy();
+    writeTextToClipboard(text, report);
   }
 
   function releaseEvidenceCommandDetail(item) {
@@ -9097,15 +9162,24 @@
     finishProgress(formatProgressText(progressElapsedSeconds(), false));
   }
 
-  function enqueueAction(action, prompt) {
-    postCompanionPath('/marginnote/enqueue', action, {
+  function enqueueAction(action, prompt, extraPayload) {
+    extraPayload = extraPayload || {};
+    var enqueuePayload = Object.assign({}, extraPayload, {
       prompt: prompt,
       _queue_raw: true,
       message: 'queued from web panel'
-    }, function(result) {
+    });
+    postCompanionPath('/marginnote/enqueue', action, enqueuePayload, function(result) {
       if (result && result.ok) {
         addGuideMessage('已自动加入队列：' + actionLabel(action) + '。上一个任务结束后会自动执行。', [
-          {title: '停止当前并直接执行', kind: 'stop_then_run', action: action, prompt: prompt, userText: actionLabel(action)},
+          {
+            title: '停止当前并直接执行',
+            kind: 'stop_then_run',
+            action: action,
+            prompt: prompt,
+            userText: actionLabel(action),
+            extraPayload: extraPayload
+          },
           {title: '查看队列状态', kind: 'queue_status'}
         ]);
       } else {
@@ -9193,8 +9267,9 @@
     });
   }
 
-  function requestDraftAction(action, prompt, userText, queueId) {
+  function requestDraftAction(action, prompt, userText, queueId, extraPayload) {
     state.currentQueueId = queueId || '';
+    extraPayload = extraPayload || {};
     if (!ensureMindmapTargetReady(action)) {
       ackQueueAndContinue(queueId);
       return;
@@ -9206,7 +9281,12 @@
     window.CodexPanel.setStatus({text: '正在生成草稿：' + actionLabel(action)});
     var requestId = newRequestId();
     startProgress(action, '正在生成草稿', '正在把当前上下文发送给 Companion，并等待卡片/脑图草稿。', requestId);
-    postCompanion(action, {prompt: prompt, _web_run_owner: true, _request_id: requestId}, function(result) {
+    var requestPayload = Object.assign({}, extraPayload, {
+      prompt: prompt,
+      _web_run_owner: true,
+      _request_id: requestId
+    });
+    postCompanion(action, requestPayload, function(result) {
       if (!result || !result.ok) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
@@ -9317,9 +9397,10 @@
     executeAction(action, prompt || '', label || actionLabel(action));
   }
 
-  function executeAction(action, prompt, userText) {
+  function executeAction(action, prompt, userText, extraPayload) {
     prompt = prompt || '';
     userText = userText || prompt || state.lastPromptFromSelection || '';
+    extraPayload = extraPayload || {};
     var unavailable = actionUnavailableReason(action, prompt);
     if (unavailable) {
       addMessage('assistant', unavailable);
@@ -9329,7 +9410,7 @@
     if (isActiveRun()) {
       addMessage('user', '[已排队] ' + (userText || actionLabel(action)));
       window.CodexPanel.setStatus({text: '当前任务运行中，已把“' + actionLabel(action) + '”加入队列'});
-      enqueueAction(action, prompt);
+      enqueueAction(action, prompt, extraPayload);
       return true;
     }
     if (action === 'request_native_highlight_selection') {
@@ -9337,7 +9418,7 @@
       return true;
     }
     if (isWriteAction(action)) {
-      requestDraftAction(action, prompt, userText || '[' + action + '] 当前内容');
+      requestDraftAction(action, prompt, userText || '[' + action + '] 当前内容', '', extraPayload);
       return true;
     }
     if (action === 'chat' || action === 'explain_selection') {
