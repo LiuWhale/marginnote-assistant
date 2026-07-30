@@ -32,6 +32,7 @@ import external_gateway
 import knowledge_console
 import knowledge_index
 import marginnote_api_adapter
+import mindmap_attachment
 import notebook_runbook
 import object_intake
 import object_kernel
@@ -530,6 +531,11 @@ def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
         edit_text = draft_edit_text(cards, str(draft.get("reply") or ""))
     mn_object = draft.get("mnObject") if isinstance(draft.get("mnObject"), dict) else {}
     card_factory = draft.get("cardFactory") if isinstance(draft.get("cardFactory"), dict) else {}
+    mindmap_attachment_summary = (
+        draft.get("mindmapAttachment")
+        if isinstance(draft.get("mindmapAttachment"), dict)
+        else {}
+    )
     if not card_factory and cards:
         first_source = cards[0].get("source") if isinstance(cards[0], dict) and isinstance(cards[0].get("source"), dict) else {}
         card_factory = card_factory_summary([card for card in cards if isinstance(card, dict)], first_source)
@@ -545,6 +551,7 @@ def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
         "has_mindmap": bool(mindmap),
         "mindmap_title": str(mindmap.get("title") or "") if mindmap else "",
         "write_target": write_target_label,
+        "mindmap_attachment": mindmap_attachment_summary,
         "operation_manifest": operation_manifest,
         "mn_object": mn_object,
         "created_at": str(draft.get("created_at") or ""),
@@ -688,6 +695,21 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "cards": cards,
         "mindmap": mindmap,
         "writeTarget": write_target,
+        "mindmapAttachment": (
+            draft_payload.get("mindmapAttachment")
+            if isinstance(draft_payload.get("mindmapAttachment"), dict)
+            else {}
+        ),
+        "mindmapDiff": (
+            draft_payload.get("mindmapDiff")
+            if isinstance(draft_payload.get("mindmapDiff"), dict)
+            else {}
+        ),
+        "mindmapDiffOperationPlan": (
+            draft_payload.get("mindmapDiffOperationPlan")
+            if isinstance(draft_payload.get("mindmapDiffOperationPlan"), dict)
+            else {}
+        ),
         "mnObject": mn_object,
         "cardFactory": draft_payload.get("cardFactory") if isinstance(draft_payload.get("cardFactory"), dict) else {},
         "operationManifest": draft_operation_manifest(cards, mindmap, write_target, topic_id, book_md5),
@@ -815,6 +837,13 @@ def update_draft(payload: dict[str, Any]) -> dict[str, Any]:
     if edit_text:
         draft["editText"] = edit_text
         draft["reply"] = edit_text
+    if isinstance(draft.get("mindmapAttachment"), dict) and draft.get("mindmapAttachment"):
+        create_only = mindmap_attachment.build_create_only_diff(
+            draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else {},
+            draft.get("writeTarget") if isinstance(draft.get("writeTarget"), dict) else {},
+        )
+        draft["mindmapDiff"] = create_only["mindmapDiff"]
+        draft["mindmapDiffOperationPlan"] = create_only["mindmapDiffOperationPlan"]
     draft["operationManifest"] = draft_operation_manifest(
         draft.get("cards") if isinstance(draft.get("cards"), list) else [],
         draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None,
@@ -13186,11 +13215,35 @@ def model_reply_mindmap_tree(payload: dict[str, Any], reply: str) -> dict[str, A
     return tree
 
 
+def is_reply_derived_mindmap_request(payload: dict[str, Any]) -> bool:
+    return truthy_payload_flag(payload.get("replyDerivedMindmap"))
+
+
 def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
     text = selection_or_prompt(payload)
     stopped = stopped_response_if_needed("generate_mindmap")
     if stopped:
         return stopped
+    reply_derived = is_reply_derived_mindmap_request(payload)
+    current_mindmap: dict[str, Any] = {}
+    if reply_derived:
+        tree_cache = read_latest_mindmap_tree(
+            normalize_topic_id(payload),
+            normalize_book_md5(payload),
+        )
+        current_mindmap = _payload_mindmap(tree_cache.get("currentMindmap"))
+        if not current_mindmap:
+            refresh = request_mindmap_tree({**payload, "source": "reply-derived-mindmap"})
+            return {
+                "ok": False,
+                "message": "正在读取当前脑图，请读取完成后再次点击“生成脑图树”。",
+                "reply": (
+                    "为了避免覆盖或把回答挂到错误脑图，Codex Companion 需要先读取当前脑图。"
+                    "已请求 MarginNote 刷新脑图树；读取完成后再次点击“生成脑图树”。"
+                ),
+                "mindmapRefreshRequired": True,
+                "mindmapRefresh": refresh,
+            }
     if is_mindmap_append_request(payload) and not has_selected_node_context(payload):
         message = "请先在 MarginNote 脑图里选中一个脑图节点，再执行“补到当前脑图/合并脑图”。"
         append_history(payload, text, message)
@@ -13217,7 +13270,43 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
             "backend": backend,
         }
     tree = model_reply_mindmap_tree(payload, reply)
+    attachment: dict[str, Any] = {}
+    create_only: dict[str, Any] = {}
+    if reply_derived:
+        planned = mindmap_attachment.plan_reply_attachment(
+            tree,
+            current_mindmap,
+            str(payload.get("selectedNoteId") or ""),
+            document_root_mindmap_target(payload),
+        )
+        tree = planned["tree"]
+        write_target = planned["writeTarget"]
+        tree["writeTarget"] = write_target
+        tree["mergeIntoSelected"] = False
+        if write_target.get("mode") == "document_root":
+            tree["title"] = str(write_target.get("rootTitle") or tree.get("title") or "Codex 脑图")
+            tree["codexId"] = str(write_target.get("codexId") or "")
+        else:
+            tree.pop("codexId", None)
+        attachment = {
+            **planned["routing"],
+            "duplicateCount": int(planned.get("duplicateCount") or 0),
+            "duplicates": planned.get("duplicates") if isinstance(planned.get("duplicates"), list) else [],
+        }
+        create_only = mindmap_attachment.build_create_only_diff(tree, write_target)
     stats = tree.get("stats") if isinstance(tree.get("stats"), dict) else mindmap_tree_stats(tree.get("children") or [])
+    if reply_derived:
+        stats = mindmap_tree_stats(tree.get("children") or [])
+        tree["stats"] = stats
+        if int(stats.get("nodeCount") or 0) <= 0:
+            message = "回答中的脑图节点已存在，没有需要新增的节点。"
+            append_history(payload, text, message)
+            return {
+                "ok": False,
+                "message": message,
+                "reply": message,
+                "mindmapAttachment": attachment,
+            }
     append_history(payload, text, reply)
     mode = "追加脑图分支" if is_mindmap_append_request(payload) else "脑图分支"
     result = {
@@ -13228,6 +13317,10 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
         "mindmap": tree,
         "mindmapStats": stats,
     }
+    if reply_derived:
+        result["mindmapAttachment"] = attachment
+        result["mindmapDiff"] = create_only["mindmapDiff"]
+        result["mindmapDiffOperationPlan"] = create_only["mindmapDiffOperationPlan"]
     if isinstance(tree.get("writeTarget"), dict):
         result["writeTarget"] = tree["writeTarget"]
     return with_mn_object(payload, result)

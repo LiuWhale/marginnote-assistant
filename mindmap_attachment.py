@@ -267,3 +267,117 @@ def plan_reply_attachment(
             ],
         },
     }
+
+
+def build_create_only_diff(
+    proposed_tree: dict[str, Any],
+    write_target: dict[str, Any],
+) -> dict[str, Any]:
+    operations: list[dict[str, Any]] = []
+    diff_operations: list[dict[str, Any]] = []
+    target_parent_ref = {
+        "noteId": str(write_target.get("parentNoteId") or ""),
+        "title": str(write_target.get("parentNoteTitle") or write_target.get("rootTitle") or ""),
+        "codexId": str(write_target.get("codexId") or ""),
+    }
+
+    def walk(children: list[Any], parent_path: str) -> None:
+        for index, child in enumerate(children, start=1):
+            if not isinstance(child, dict):
+                continue
+            path = f"{parent_path}.{index}" if parent_path else str(index)
+            title = str(child.get("title") or "Codex 节点").strip() or "Codex 节点"
+            body = str(child.get("body") or "").strip()
+            parent_ref = target_parent_ref if not parent_path else {"proposedPath": parent_path}
+            diff_operations.append(
+                {
+                    "op": "create",
+                    "title": title,
+                    "shortBody": body[:220],
+                    "proposedPath": path,
+                    "existingPath": "",
+                    "duplicateOf": "",
+                    "targetParent": str(write_target.get("label") or ""),
+                    "targetParentRef": parent_ref,
+                    "currentRef": {},
+                    "proposedRef": {
+                        "codexId": str(child.get("codexId") or ""),
+                        "proposedPath": path,
+                    },
+                    "confidence": float(write_target.get("confidence") or 1.0),
+                    "reason": "reply-derived-create-only",
+                    "rollback": {
+                        "type": "delete_created_note",
+                        "requiresTransactionLedger": True,
+                    },
+                }
+            )
+            operations.append(
+                {
+                    "opId": f"reply-mindmap:{len(operations) + 1}",
+                    "op": "create_mindmap_node",
+                    "diffOp": "create",
+                    "mutation": "create",
+                    "kind": "mindmap",
+                    "title": title,
+                    "bodyPreview": body[:220],
+                    "proposedPath": path,
+                    "existingPath": "",
+                    "targetParent": str(write_target.get("label") or ""),
+                    "targetParentRef": parent_ref,
+                    "currentRef": {},
+                    "proposedRef": {
+                        "codexId": str(child.get("codexId") or ""),
+                        "proposedPath": path,
+                    },
+                    "source": {},
+                    "requires": ["nativeMindmap"],
+                    "rollback": {
+                        "type": "delete_created_note",
+                        "requiresTransactionLedger": True,
+                    },
+                    "selected": True,
+                    "selectionState": "included",
+                    "confirmationRequired": False,
+                    "confirmationType": "",
+                }
+            )
+            nested = child.get("children") if isinstance(child.get("children"), list) else []
+            walk(nested, path)
+
+    children = proposed_tree.get("children") if isinstance(proposed_tree.get("children"), list) else []
+    walk(children, "")
+    diff = {
+        "schema": "codex.mn.mindmapDiff.v1",
+        "status": "ready" if operations else "empty",
+        "mode": "reply-derived-create-only",
+        "target": copy.deepcopy(write_target),
+        "summary": {
+            "proposedCount": len(operations),
+            "currentCount": 0,
+            "createCount": len(operations),
+            "updateCount": 0,
+            "mergeCount": 0,
+            "moveCount": 0,
+            "deleteSuggestCount": 0,
+            "duplicateCount": 0,
+        },
+        "operations": diff_operations,
+        "duplicates": [],
+    }
+    plan = {
+        "schema": "codex.mn.mindmapDiffOperationPlan.v1",
+        "status": "ready" if operations else "empty",
+        "mode": "reply-derived-create-only",
+        "operationCount": len(operations),
+        "operations": operations,
+        "skipped": [],
+        "requiredCapabilities": ["nativeMindmap"] if operations else [],
+        "plannedMutations": ["create"] if operations else [],
+        "applyBoundary": {
+            "localApplyStatus": "ready" if operations else "empty",
+            "currentApplyPath": "draft_tree_write",
+            "createOnly": True,
+        },
+    }
+    return {"mindmapDiff": diff, "mindmapDiffOperationPlan": plan}

@@ -2426,6 +2426,144 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["writeTarget"]["selectedNoteId"], "note-7")
             self.assertEqual(result["mindmap"]["writeTarget"]["selectedNoteTitle"], "已有脑图根")
 
+    def test_reply_derived_mindmap_uses_cached_tree_and_verified_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.generate_reply = lambda payload, task: (
+                "## Patch Mask\n解释 attention patch mask。\n### 风险区域\n定位危险动作区域。",
+                "codex-cli",
+            )
+            companion.write_json_file(
+                companion.mindmap_tree_cache_path("T1", "B1"),
+                {
+                    "schema": "codex.mn.mindmapTreeCache.v1",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "currentMindmap": {
+                        "noteId": "notebook-root",
+                        "title": "Paper.pdf",
+                        "body": "",
+                        "children": [
+                            {
+                                "noteId": "N-root",
+                                "title": "Paper · Codex 脑图",
+                                "body": "",
+                                "children": [
+                                    {
+                                        "noteId": "N-attention",
+                                        "title": "注意力引导安全过滤",
+                                        "body": "attention map、patch mask 和危险动作识别。",
+                                        "children": [],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据上面的回答创建结构化脑图树",
+                    "replyDerivedMindmap": True,
+                    "sourceAnswerMarkdown": "解释 attention patch mask。",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Paper.pdf",
+                    "selectedNoteId": "N-attention",
+                    "selectedNoteTitle": "注意力引导安全过滤",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["writeTarget"]["mode"], "verified_parent_node")
+            self.assertEqual(result["writeTarget"]["parentNoteId"], "N-attention")
+            self.assertEqual(result["mindmap"]["writeTarget"]["parentNoteId"], "N-attention")
+            self.assertEqual(result["mindmapAttachment"]["reason"], "compatible-selected-node")
+            self.assertFalse(result["mindmapAttachment"]["fallback"])
+
+    def test_reply_derived_mindmap_diff_is_create_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.generate_reply = lambda payload, task: (
+                "## 注意力引导安全过滤\n重复已有标题。\n"
+                "## 新的验证边界\n只补充证据边界。\n"
+                "### 局限条件\n说明失败条件。",
+                "codex-cli",
+            )
+            companion.write_json_file(
+                companion.mindmap_tree_cache_path("T1", "B1"),
+                {
+                    "schema": "codex.mn.mindmapTreeCache.v1",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "currentMindmap": {
+                        "noteId": "N-root",
+                        "title": "Paper · Codex 脑图",
+                        "body": "",
+                        "children": [
+                            {
+                                "noteId": "N-attention",
+                                "title": "注意力引导安全过滤",
+                                "body": "attention filter",
+                                "children": [],
+                            }
+                        ],
+                    },
+                },
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据回答创建脑图",
+                    "replyDerivedMindmap": True,
+                    "sourceAnswerMarkdown": "新增验证边界和局限条件。",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Paper.pdf",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            operations = result["mindmapDiffOperationPlan"]["operations"]
+            self.assertTrue(operations)
+            self.assertEqual({item["mutation"] for item in operations}, {"create"})
+            self.assertEqual({item["op"] for item in operations}, {"create_mindmap_node"})
+            self.assertNotIn("注意力引导安全过滤", [item["title"] for item in operations])
+            self.assertGreaterEqual(result["mindmapAttachment"]["duplicateCount"], 1)
+
+    def test_reply_derived_mindmap_without_tree_requests_refresh_and_does_not_generate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            calls: list[str] = []
+            refreshes: list[dict[str, Any]] = []
+
+            def fake_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                calls.append(task)
+                return "## 不应生成\n缺少脑图基线。", "codex-cli"
+
+            companion.generate_reply = fake_generate_reply
+            companion.request_mindmap_tree = lambda payload: (
+                refreshes.append(dict(payload))
+                or {"ok": True, "message": "已请求读取脑图。"}
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据回答创建脑图",
+                    "replyDerivedMindmap": True,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Paper.pdf",
+                }
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["mindmapRefreshRequired"])
+            self.assertEqual(calls, [])
+            self.assertEqual(len(refreshes), 1)
+            self.assertEqual(refreshes[0]["source"], "reply-derived-mindmap")
+
     def test_generated_cards_and_mindmaps_return_mn_object_for_draft_transactions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
