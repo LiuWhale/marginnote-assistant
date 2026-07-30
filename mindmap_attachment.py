@@ -1,0 +1,269 @@
+from __future__ import annotations
+
+import copy
+import re
+import unicodedata
+from typing import Any
+
+
+ROUTING_SCHEMA = "codex.mn.replyMindmapAttachment.v1"
+DEFAULT_CONFIDENCE_THRESHOLD = 0.34
+SELECTED_COMPATIBILITY_THRESHOLD = 0.20
+_GENERIC_TERMS = {
+    "codex",
+    "mindmap",
+    "map",
+    "answer",
+    "reply",
+    "topic",
+    "node",
+    "paper",
+    "回答",
+    "脑图",
+    "节点",
+    "主题",
+    "内容",
+    "说明",
+    "文档",
+    "论文",
+}
+
+
+def _normalized_text(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    text = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
+    text = re.sub(r"[`*_#>\[\](){}|/\\:：,，.。;；!?！？\-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _title_key(value: Any) -> str:
+    return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", _normalized_text(value))
+
+
+def _terms(value: Any) -> set[str]:
+    text = _normalized_text(value)
+    terms = {
+        token
+        for token in re.findall(r"[a-z0-9]+", text)
+        if len(token) >= 2 and token not in _GENERIC_TERMS
+    }
+    for sequence in re.findall(r"[\u3400-\u9fff]+", text):
+        if sequence not in _GENERIC_TERMS and len(sequence) >= 2:
+            terms.add(sequence)
+        for width in (2, 3):
+            for index in range(max(0, len(sequence) - width + 1)):
+                token = sequence[index : index + width]
+                if token not in _GENERIC_TERMS:
+                    terms.add(token)
+    return terms
+
+
+def _tree_text(node: Any) -> str:
+    parts: list[str] = []
+
+    def walk(item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        parts.append(str(item.get("title") or ""))
+        parts.append(str(item.get("body") or ""))
+        children = item.get("children") if isinstance(item.get("children"), list) else []
+        for child in children:
+            walk(child)
+
+    walk(node)
+    return "\n".join(parts)
+
+
+def flatten_current_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+
+    def walk(node: Any, depth: int, path: str) -> None:
+        if not isinstance(node, dict):
+            return
+        note_id = str(node.get("noteId") or node.get("id") or "").strip()
+        title = str(node.get("title") or node.get("name") or "").strip()
+        if note_id and note_id != "notebook-root":
+            nodes.append(
+                {
+                    "noteId": note_id,
+                    "title": title,
+                    "body": str(node.get("body") or ""),
+                    "depth": depth,
+                    "path": path,
+                }
+            )
+        children = node.get("children") if isinstance(node.get("children"), list) else []
+        for index, child in enumerate(children, start=1):
+            walk(child, depth + 1, f"{path}.{index}" if path else str(index))
+
+    walk(tree, 0, "1")
+    return nodes
+
+
+def _coverage(query_terms: set[str], candidate_terms: set[str]) -> float:
+    if not query_terms or not candidate_terms:
+        return 0.0
+    overlap = query_terms & candidate_terms
+    if not overlap:
+        return 0.0
+    return len(overlap) / max(1, min(len(query_terms), len(candidate_terms)))
+
+
+def _candidate_score(query_terms: set[str], candidate: dict[str, Any]) -> float:
+    title_terms = _terms(candidate.get("title"))
+    body_terms = _terms(candidate.get("body"))
+    title_score = _coverage(query_terms, title_terms)
+    body_score = _coverage(query_terms, body_terms)
+    depth = max(0, int(candidate.get("depth") or 0))
+    specificity = min(depth, 4) * 0.015 if title_score or body_score else 0.0
+    corroboration = 0.08 if title_score and body_score else 0.0
+    return min(1.0, title_score * 0.72 + body_score * 0.72 + specificity + corroboration)
+
+
+def rank_candidates(
+    candidates: list[dict[str, Any]],
+    query_terms: set[str],
+    selected_note_id: str,
+) -> list[dict[str, Any]]:
+    selected_note_id = str(selected_note_id or "").strip()
+    ranked: list[dict[str, Any]] = []
+    for candidate in candidates:
+        base_score = _candidate_score(query_terms, candidate)
+        selected_compatible = (
+            candidate.get("noteId") == selected_note_id
+            and base_score >= SELECTED_COMPATIBILITY_THRESHOLD
+        )
+        score = min(1.0, base_score + (0.16 if selected_compatible else 0.0))
+        ranked.append(
+            {
+                **candidate,
+                "baseScore": round(base_score, 4),
+                "score": round(score, 4),
+                "selectedCompatible": selected_compatible,
+            }
+        )
+    ranked.sort(
+        key=lambda item: (
+            bool(item.get("selectedCompatible")),
+            float(item.get("score") or 0.0),
+            int(item.get("depth") or 0),
+            str(item.get("title") or ""),
+        ),
+        reverse=True,
+    )
+    return ranked
+
+
+def _prune_duplicate_children(
+    children: list[Any],
+    existing_keys: set[str],
+    proposed_keys: set[str],
+    duplicates: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        cloned = {key: copy.deepcopy(value) for key, value in child.items() if key != "children"}
+        title = str(cloned.get("title") or "").strip()
+        key = _title_key(title)
+        nested = child.get("children") if isinstance(child.get("children"), list) else []
+        pruned_nested = _prune_duplicate_children(nested, existing_keys, proposed_keys, duplicates)
+        reason = ""
+        if key and key in existing_keys:
+            reason = "existing-title"
+        elif key and key in proposed_keys:
+            reason = "repeated-proposed-title"
+        if reason:
+            duplicates.append({"title": title, "reason": reason})
+            output.extend(pruned_nested)
+            continue
+        if key:
+            proposed_keys.add(key)
+        cloned["children"] = pruned_nested
+        output.append(cloned)
+    return output
+
+
+def prune_duplicate_proposed_nodes(
+    proposed_tree: dict[str, Any],
+    current_nodes: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    tree = copy.deepcopy(proposed_tree) if isinstance(proposed_tree, dict) else {}
+    existing_keys = {
+        key
+        for key in (_title_key(item.get("title")) for item in current_nodes)
+        if key
+    }
+    duplicates: list[dict[str, str]] = []
+    children = tree.get("children") if isinstance(tree.get("children"), list) else []
+    tree["children"] = _prune_duplicate_children(children, existing_keys, set(), duplicates)
+    return tree, duplicates
+
+
+def _verified_parent_target(candidate: dict[str, Any], reason: str) -> dict[str, Any]:
+    title = str(candidate.get("title") or "").strip()
+    confidence = float(candidate.get("score") or 0.0)
+    return {
+        "mode": "verified_parent_node",
+        "operation": "append_reply_subtree",
+        "label": f"自动接入：{title}" if title else "自动接入已有脑图节点",
+        "parentNoteId": str(candidate.get("noteId") or ""),
+        "parentNoteTitle": title,
+        "confidence": round(confidence, 4),
+        "reason": reason,
+    }
+
+
+def plan_reply_attachment(
+    proposed_tree: dict[str, Any],
+    current_tree: dict[str, Any],
+    selected_note_id: str,
+    document_root_target: dict[str, Any],
+    confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+) -> dict[str, Any]:
+    candidates = flatten_current_nodes(current_tree)
+    query_terms = _terms(_tree_text(proposed_tree))
+    ranked = rank_candidates(candidates, query_terms, selected_note_id)
+    selected = next(
+        (item for item in ranked if item.get("selectedCompatible")),
+        None,
+    )
+    best = selected or (ranked[0] if ranked else None)
+    fallback = not best or float(best.get("score") or 0.0) < confidence_threshold
+    if fallback:
+        write_target = copy.deepcopy(document_root_target)
+        write_target["confidence"] = round(float(best.get("score") or 0.0) if best else 0.0, 4)
+        write_target["reason"] = "low-confidence-document-root-fallback"
+        reason = "low-confidence-document-root-fallback"
+    else:
+        reason = "compatible-selected-node" if best.get("selectedCompatible") else "best-semantic-match"
+        write_target = _verified_parent_target(best, reason)
+
+    pruned_tree, duplicates = prune_duplicate_proposed_nodes(proposed_tree, candidates)
+    confidence = float(write_target.get("confidence") or 0.0)
+    return {
+        "schema": ROUTING_SCHEMA,
+        "tree": pruned_tree,
+        "writeTarget": write_target,
+        "duplicateCount": len(duplicates),
+        "duplicates": duplicates,
+        "routing": {
+            "schema": ROUTING_SCHEMA,
+            "reason": reason,
+            "fallback": fallback,
+            "confidence": round(confidence, 4),
+            "parentNoteId": str(write_target.get("parentNoteId") or ""),
+            "parentNoteTitle": str(write_target.get("parentNoteTitle") or write_target.get("rootTitle") or ""),
+            "candidateCount": len(ranked),
+            "topCandidates": [
+                {
+                    "noteId": str(item.get("noteId") or ""),
+                    "title": str(item.get("title") or ""),
+                    "score": float(item.get("score") or 0.0),
+                    "selectedCompatible": bool(item.get("selectedCompatible")),
+                }
+                for item in ranked[:5]
+            ],
+        },
+    }
