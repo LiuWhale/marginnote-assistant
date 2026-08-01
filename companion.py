@@ -105,7 +105,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.51"
+CURRENT_PLUGIN_VERSION = "0.4.52"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -358,6 +358,9 @@ NATIVE_QUEUE_ACTIONS = {
     "scan_mn_objects",
     "probe_mn_object_existence",
     "apply_mindmap_diff_operations",
+}
+WEB_BUSY_PASSTHROUGH_NATIVE_ACTIONS = {
+    "read_mindmap_tree",
 }
 
 diagnostic_log.configure(DIAGNOSTIC_LOG_PATH, max_lines=DIAGNOSTIC_LOG_MAX_LINES)
@@ -6781,6 +6784,21 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
             command["_queue_id"] = str(record.get("id") or "")
             commands.append(command)
     if web_busy_status().get("busy"):
+        passthrough_commands = [
+            command
+            for command in commands
+            if str(command.get("nativeAction") or "") in WEB_BUSY_PASSTHROUGH_NATIVE_ACTIONS
+        ]
+        if passthrough_commands:
+            return {
+                "ok": True,
+                "pending": len(commands),
+                "hasCommand": True,
+                "command": passthrough_commands[0],
+                "commands": passthrough_commands[:8],
+                "webBusy": True,
+                "deferredByWebBusy": len(commands) - len(passthrough_commands),
+            }
         return {
             "ok": True,
             "pending": len(commands),

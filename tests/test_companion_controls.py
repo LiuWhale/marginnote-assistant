@@ -9072,6 +9072,50 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(ready["pending"], 1)
             self.assertEqual(ready["commands"][0]["rawAction"], "chat")
 
+    def test_web_busy_lock_allows_dependent_mindmap_read_without_releasing_queued_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.enqueue_command(
+                {
+                    "action": "chat",
+                    "prompt": "等待当前脑图生成完成",
+                    "_queue_raw": True,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "unittest",
+                }
+            )
+            refresh = companion.request_mindmap_tree(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "reply-derived-mindmap",
+                    "wholeNotebook": True,
+                }
+            )
+            companion.handle_action({"action": "web_busy_update", "busy": True})
+
+            polled = companion.poll_commands("T1", "B1")
+
+            self.assertEqual(polled["pending"], 2)
+            self.assertTrue(polled["hasCommand"])
+            self.assertEqual(len(polled["commands"]), 1)
+            self.assertEqual(polled["commands"][0]["nativeAction"], "read_mindmap_tree")
+            self.assertEqual(polled["commands"][0]["mindmapReadRequestId"], refresh["queued"]["command"]["mindmapReadRequestId"])
+            self.assertEqual(polled["deferredByWebBusy"], 1)
+
+            companion.ack_commands(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "ids": [polled["commands"][0]["_queue_id"]],
+                }
+            )
+            still_blocked = companion.poll_commands("T1", "B1")
+            self.assertEqual(still_blocked["pending"], 1)
+            self.assertEqual(still_blocked["commands"], [])
+            self.assertEqual(still_blocked["blocked"], "web_busy")
+
     def test_web_panel_direct_generation_auto_queues_when_backend_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

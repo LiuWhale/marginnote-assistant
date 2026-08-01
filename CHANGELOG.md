@@ -4,6 +4,12 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.52 - 2026-08-01
+
+### Fixed
+
+- The first answer-level `生成脑图树` click no longer deadlocks against the Web busy lock. The active generation may now receive its read-only native `read_mindmap_tree` dependency while unrelated chat, generation, and write work remains queued.
+
 ## 0.4.51 - 2026-08-01
 
 ### Added
