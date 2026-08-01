@@ -37,7 +37,8 @@ def _normalized_text(value: Any) -> str:
 
 
 def _title_key(value: Any) -> str:
-    return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", _normalized_text(value))
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _terms(value: Any) -> set[str]:
@@ -56,6 +57,34 @@ def _terms(value: Any) -> set[str]:
                 if token not in _GENERIC_TERMS:
                     terms.add(token)
     return terms
+
+
+def _semantic_signals(value: Any) -> set[str]:
+    text = _normalized_text(value)
+    signals = {
+        token
+        for token in re.findall(r"[a-z0-9]+", text)
+        if len(token) >= 2 and token not in _GENERIC_TERMS
+    }
+    for sequence in re.findall(r"[\u3400-\u9fff]+", text):
+        if len(sequence) >= 2 and sequence not in _GENERIC_TERMS:
+            signals.add(sequence)
+    return signals
+
+
+def _semantic_overlap_count(query_signals: set[str], candidate_signals: set[str]) -> int:
+    matched_queries: set[str] = set()
+    for query in query_signals:
+        for candidate in candidate_signals:
+            if candidate == query:
+                matched_queries.add(query)
+                break
+            candidate_is_cjk = bool(re.fullmatch(r"[\u3400-\u9fff]+", candidate))
+            query_is_cjk = bool(re.fullmatch(r"[\u3400-\u9fff]+", query))
+            if candidate_is_cjk and query_is_cjk and (candidate in query or query in candidate):
+                matched_queries.add(query)
+                break
+    return len(matched_queries)
 
 
 def _tree_text(node: Any) -> str:
@@ -77,26 +106,28 @@ def _tree_text(node: Any) -> str:
 def flatten_current_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
 
-    def walk(node: Any, depth: int, path: str) -> None:
+    def walk(node: Any, depth: int, path: str, inherited_document_id: str) -> None:
         if not isinstance(node, dict):
             return
         note_id = str(node.get("noteId") or node.get("id") or "").strip()
         title = str(node.get("title") or node.get("name") or "").strip()
+        document_id = str(node.get("documentId") or inherited_document_id or "").strip()
         if note_id and note_id != "notebook-root":
             nodes.append(
                 {
                     "noteId": note_id,
                     "title": title,
                     "body": str(node.get("body") or ""),
+                    "documentId": document_id,
                     "depth": depth,
                     "path": path,
                 }
             )
         children = node.get("children") if isinstance(node.get("children"), list) else []
         for index, child in enumerate(children, start=1):
-            walk(child, depth + 1, f"{path}.{index}" if path else str(index))
+            walk(child, depth + 1, f"{path}.{index}" if path else str(index), document_id)
 
-    walk(tree, 0, "1")
+    walk(tree, 0, "1", str(tree.get("documentId") or ""))
     return nodes
 
 
@@ -109,9 +140,18 @@ def _coverage(query_terms: set[str], candidate_terms: set[str]) -> float:
     return len(overlap) / max(1, min(len(query_terms), len(candidate_terms)))
 
 
-def _candidate_score(query_terms: set[str], candidate: dict[str, Any]) -> float:
+def _candidate_score(
+    query_terms: set[str],
+    query_signals: set[str],
+    candidate: dict[str, Any],
+) -> float:
     title_terms = _terms(candidate.get("title"))
     body_terms = _terms(candidate.get("body"))
+    candidate_signals = _semantic_signals(
+        f"{candidate.get('title') or ''}\n{candidate.get('body') or ''}"
+    )
+    if _semantic_overlap_count(query_signals, candidate_signals) < 3:
+        return 0.0
     title_score = _coverage(query_terms, title_terms)
     body_score = _coverage(query_terms, body_terms)
     depth = max(0, int(candidate.get("depth") or 0))
@@ -123,12 +163,13 @@ def _candidate_score(query_terms: set[str], candidate: dict[str, Any]) -> float:
 def rank_candidates(
     candidates: list[dict[str, Any]],
     query_terms: set[str],
+    query_signals: set[str],
     selected_note_id: str,
 ) -> list[dict[str, Any]]:
     selected_note_id = str(selected_note_id or "").strip()
     ranked: list[dict[str, Any]] = []
     for candidate in candidates:
-        base_score = _candidate_score(query_terms, candidate)
+        base_score = _candidate_score(query_terms, query_signals, candidate)
         selected_compatible = (
             candidate.get("noteId") == selected_note_id
             and base_score >= SELECTED_COMPATIBILITY_THRESHOLD
@@ -210,6 +251,8 @@ def _verified_parent_target(candidate: dict[str, Any], reason: str) -> dict[str,
         "label": f"自动接入：{title}" if title else "自动接入已有脑图节点",
         "parentNoteId": str(candidate.get("noteId") or ""),
         "parentNoteTitle": title,
+        "parentEvidenceBody": str(candidate.get("body") or ""),
+        "parentDocumentId": str(candidate.get("documentId") or ""),
         "confidence": round(confidence, 4),
         "reason": reason,
     }
@@ -221,10 +264,20 @@ def plan_reply_attachment(
     selected_note_id: str,
     document_root_target: dict[str, Any],
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+    expected_document_id: str = "",
 ) -> dict[str, Any]:
     candidates = flatten_current_nodes(current_tree)
-    query_terms = _terms(_tree_text(proposed_tree))
-    ranked = rank_candidates(candidates, query_terms, selected_note_id)
+    expected_document_id = str(expected_document_id or "").strip()
+    if expected_document_id:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if str(candidate.get("documentId") or "") == expected_document_id
+        ]
+    query_text = _tree_text(proposed_tree)
+    query_terms = _terms(query_text)
+    query_signals = _semantic_signals(query_text)
+    ranked = rank_candidates(candidates, query_terms, query_signals, selected_note_id)
     selected = next(
         (item for item in ranked if item.get("selectedCompatible")),
         None,
@@ -232,10 +285,22 @@ def plan_reply_attachment(
     best = selected or (ranked[0] if ranked else None)
     fallback = not best or float(best.get("score") or 0.0) < confidence_threshold
     if fallback:
-        write_target = copy.deepcopy(document_root_target)
-        write_target["confidence"] = round(float(best.get("score") or 0.0) if best else 0.0, 4)
-        write_target["reason"] = "low-confidence-document-root-fallback"
-        reason = "low-confidence-document-root-fallback"
+        shallowest_depth = min((int(item.get("depth") or 0) for item in candidates), default=-1)
+        document_roots = [
+            item for item in candidates if int(item.get("depth") or 0) == shallowest_depth
+        ]
+        if expected_document_id and len(document_roots) == 1:
+            reason = "unique-current-document-root"
+            write_target = _verified_parent_target(
+                {**document_roots[0], "score": 1.0},
+                reason,
+            )
+            fallback = False
+        else:
+            write_target = copy.deepcopy(document_root_target)
+            write_target["confidence"] = round(float(best.get("score") or 0.0) if best else 0.0, 4)
+            write_target["reason"] = "low-confidence-document-root-fallback"
+            reason = "low-confidence-document-root-fallback"
     else:
         reason = "compatible-selected-node" if best.get("selectedCompatible") else "best-semantic-match"
         write_target = _verified_parent_target(best, reason)
@@ -267,6 +332,36 @@ def plan_reply_attachment(
             ],
         },
     }
+
+
+def tree_fingerprint(tree: dict[str, Any]) -> str:
+    segments: list[str] = []
+
+    def walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        children = node.get("children") if isinstance(node.get("children"), list) else []
+        segments.extend(
+            [
+                str(node.get("noteId") or node.get("id") or ""),
+                str(node.get("title") or node.get("name") or ""),
+                str(node.get("body") or ""),
+                str(node.get("documentId") or ""),
+                str(len(children)),
+            ]
+        )
+        for child in children:
+            walk(child)
+
+    walk(tree)
+    canonical = "\x1f".join(segments)
+    value = 0x811C9DC5
+    encoded = canonical.encode("utf-16-le", errors="surrogatepass")
+    for index in range(0, len(encoded), 2):
+        code_unit = encoded[index] | (encoded[index + 1] << 8)
+        value ^= code_unit
+        value = (value * 0x01000193) & 0xFFFFFFFF
+    return f"fnv1a32:{value:08x}"
 
 
 def build_create_only_diff(

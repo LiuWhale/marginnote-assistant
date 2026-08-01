@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import importlib.util
 import json
 import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,9 @@ class CompanionControlsTests(unittest.TestCase):
                 "native-mn-object-existence-probe-v1",
                 "native-mindmap-diff-apply-create-v1",
                 "native-mindmap-delete-suggestion-confirm-v1",
+                "draft-write-scope-binding-v1",
+                "mindmap-whole-notebook-snapshot-v2",
+                "mindmap-visible-surface-guard-v1",
             ]:
                 self.assertIn(feature, companion.REQUIRED_NATIVE_HANDLER_FEATURES)
 
@@ -215,6 +220,226 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertNotIn("全文内容没有被读取到", contents)
             self.assertNotIn("没有传入可解析的本地 PDF 路径", contents)
 
+    def test_history_preserves_full_assistant_markdown_but_bounds_model_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            assistant_markdown = "## 完整回答\n" + ("详细内容。" * 2500)
+
+            companion.append_history(payload, "请详细解释", assistant_markdown)
+
+            stored = companion.load_history(payload)
+            self.assertEqual(stored[-1]["content"], assistant_markdown)
+            model_history = companion.history_for_model(payload, "普通模型输入")
+            self.assertLessEqual(len(model_history[-1]["content"]), 5000)
+            self.assertTrue(model_history[-1]["content"].endswith("..."))
+
+    def test_history_preserves_all_entries_and_message_kinds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            for index in range(12):
+                companion.append_history(payload, f"question {index}", f"answer {index}")
+            companion.append_history(payload, "failed request", "backend failed", assistant_kind="error")
+
+            stored = companion.load_history(payload)
+
+            self.assertEqual(len(stored), 26)
+            self.assertEqual(stored[-1]["kind"], "error")
+            self.assertEqual(stored[-2]["kind"], "prompt")
+
+    def test_legacy_history_does_not_treat_explanatory_error_words_as_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            for answer in (
+                "下面解释常见错误以及修复方式。",
+                "实验没有失败，这个结果是有效的。",
+                "Timeout 参数控制等待时间。",
+                "Backend unavailable 表示后端暂时不可用，不代表本次分析失败。",
+            ):
+                self.assertEqual(
+                    companion.history_message_kind({}, "assistant", answer),
+                    "answer",
+                )
+            self.assertEqual(
+                companion.history_message_kind(
+                    {},
+                    "assistant",
+                    "真实 AI 后端不可用：当前没有可用的 Codex CLI。",
+                ),
+                "error",
+            )
+            for error in (
+                "请先在 MarginNote 脑图里选中一个节点，再执行当前节点动作。",
+                "回答中的脑图节点已存在，没有需要新增的节点。",
+                "未生成展开当前节点分支：缺少选中节点。",
+                "未生成重组当前节点分支：缺少选中节点。",
+            ):
+                self.assertEqual(
+                    companion.history_message_kind({}, "assistant", error),
+                    "error",
+                )
+
+    def test_reply_mindmap_cache_requires_current_native_snapshot_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {
+                "scope": "whole_notebook",
+                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "truncatedCount": 0,
+                "mindmapVisible": True,
+                "currentMindmap": {"noteId": "notebook-root", "children": []},
+            }
+
+            ready, reason = companion.reply_mindmap_cache_status(base)
+
+            self.assertFalse(ready)
+            self.assertEqual(reason, "untrusted-snapshot")
+            ready, reason = companion.reply_mindmap_cache_status(
+                {
+                    **base,
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                }
+            )
+            self.assertTrue(ready)
+            self.assertEqual(reason, "ready")
+
+    def test_mindmap_tree_cache_records_only_current_native_snapshot_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {
+                "event": "mindmapTreeReadFinished",
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "extra": {
+                    "mindmapReadRequestId": "READ-1",
+                    "scope": "whole_notebook",
+                    "currentMindmap": {"noteId": "notebook-root", "children": []},
+                },
+            }
+
+            legacy = companion.write_latest_mindmap_tree(base)["cache"]
+            current = companion.write_latest_mindmap_tree(
+                {
+                    **base,
+                    "extra": {
+                        **base["extra"],
+                        "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                        "mindmapVisible": True,
+                    },
+                }
+            )["cache"]
+
+            self.assertEqual(legacy["snapshotCapability"], "")
+            self.assertEqual(current["mindmapReadRequestId"], "READ-1")
+            self.assertEqual(
+                current["snapshotCapability"],
+                "mindmap-whole-notebook-snapshot-v2",
+            )
+
+    def test_request_draft_write_requires_current_native_scope_binding_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+
+            result = companion.request_draft_write(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draftId": saved["draft"]["id"],
+                }
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertIn("运行时", result["message"])
+            self.assertEqual(companion.queue_status_payload("T1", "B1")["pending"], 0)
+
+    def test_request_draft_write_accepts_current_native_scope_binding_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "pluginVersion": companion.CURRENT_PLUGIN_VERSION,
+                    "extra": {
+                        "handlerFeatures": ["draft-write-scope-binding-v1"],
+                    },
+                }
+            )
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+
+            result = companion.request_draft_write(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draftId": saved["draft"]["id"],
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(
+                result["queued"]["command"]["requiredHandlerFeature"],
+                "draft-write-scope-binding-v1",
+            )
+            self.assertEqual(
+                result["queued"]["command"]["nativeAction"],
+                "write_draft_scope_bound_v1",
+            )
+            self.assertEqual(
+                companion.history_message_kind(
+                    {},
+                    "assistant",
+                    "未生成完整精读：后端不可用。",
+                ),
+                "error",
+            )
+
+    def test_concurrent_history_appends_do_not_overwrite_each_other(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [
+                    pool.submit(companion.append_history, payload, f"question {index}", f"answer {index}")
+                    for index in range(20)
+                ]
+                for future in futures:
+                    future.result()
+
+            stored = companion.load_history(payload)
+            self.assertEqual(len(stored), 40)
+            self.assertEqual(
+                {item["content"] for item in stored if item["role"] == "user"},
+                {f"question {index}" for index in range(20)},
+            )
+
+    def test_chat_backend_failure_is_not_a_completed_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.generate_reply = lambda payload, task: ("backend unavailable", "codex-cli-error")
+
+            result = companion.chat({"topicid": "T1", "bookmd5": "B1", "prompt": "hello"})
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["backend"], "codex-cli-error")
+            self.assertEqual(companion.load_history({"topicid": "T1", "bookmd5": "B1"})[-1]["kind"], "error")
+
     def test_conversation_actions_create_list_load_and_delete_document_scoped_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -262,6 +487,28 @@ class CompanionControlsTests(unittest.TestCase):
             relisted = companion.handle_action({**base, "action": "conversation_list"})
             self.assertEqual(relisted["conversation_count"], 1)
             self.assertEqual(relisted["conversations"][0]["title"], "第二轮问题")
+
+    def test_conversations_with_same_bookmd5_are_isolated_by_current_document_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            common = {"topicid": "T1", "bookmd5": "SHARED", "source": "unittest"}
+            first = {**common, "contextDocumentKey": "T1|SHARED|/papers/a.pdf", "documentTitle": "A.pdf"}
+            second = {**common, "contextDocumentKey": "T1|SHARED|/papers/b.pdf", "documentTitle": "B.pdf"}
+
+            a = companion.handle_action({**first, "action": "conversation_new"})["conversation"]
+            b = companion.handle_action({**second, "action": "conversation_new"})["conversation"]
+            companion.append_history({**first, "conversationId": a["conversationId"]}, "A question", "A answer")
+            companion.append_history({**second, "conversationId": b["conversationId"]}, "B question", "B answer")
+
+            listed_a = companion.handle_action({**first, "action": "conversation_list"})
+            listed_b = companion.handle_action({**second, "action": "conversation_list"})
+
+            self.assertEqual([item["title"] for item in listed_a["conversations"]], ["A question"])
+            self.assertEqual([item["title"] for item in listed_b["conversations"]], ["B question"])
+            blocked = companion.handle_action(
+                {**second, "action": "conversation_load", "sessionId": listed_a["conversations"][0]["sessionId"]}
+            )
+            self.assertFalse(blocked["ok"])
 
     def test_conversation_history_is_filterable_by_mn_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1005,6 +1252,9 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "draft-write-scope-binding-v1",
+                            "mindmap-whole-notebook-snapshot-v2",
+                            "mindmap-visible-surface-guard-v1",
                         ],
                     },
                 },
@@ -1079,6 +1329,9 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "draft-write-scope-binding-v1",
+                            "mindmap-whole-notebook-snapshot-v2",
+                            "mindmap-visible-surface-guard-v1",
                         ],
                     },
                 },
@@ -1151,6 +1404,9 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "draft-write-scope-binding-v1",
+                            "mindmap-whole-notebook-snapshot-v2",
+                            "mindmap-visible-surface-guard-v1",
                         ],
                     },
                 },
@@ -1176,7 +1432,7 @@ class CompanionControlsTests(unittest.TestCase):
             (extension / "web").mkdir(parents=True)
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\ndraft-write-scope-binding-v1\nmindmap-whole-notebook-snapshot-v2\nmindmap-visible-surface-guard-v1\n",
                 encoding="utf-8",
             )
             for relative in ("CodexWebPanelController.js", "web/app.js", "web/index.html", "web/app.css"):
@@ -1231,7 +1487,10 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
-                ],
+                            "draft-write-scope-binding-v1",
+                            "mindmap-whole-notebook-snapshot-v2",
+                            "mindmap-visible-surface-guard-v1",
+                        ],
             )
 
     def test_status_payload_fails_closed_when_installed_handler_feature_source_is_missing(self) -> None:
@@ -1289,6 +1548,9 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "draft-write-scope-binding-v1",
+                            "mindmap-whole-notebook-snapshot-v2",
+                            "mindmap-visible-surface-guard-v1",
                 ],
             )
             self.assertEqual(
@@ -1312,6 +1574,9 @@ class CompanionControlsTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "draft-write-scope-binding-v1",
+                            "mindmap-whole-notebook-snapshot-v2",
+                            "mindmap-visible-surface-guard-v1",
                 ],
             )
             self.assertIn("native-handler-features", runtime["runtimeHandlerStaleActions"])
@@ -2327,6 +2592,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "topicid": "topic-1",
                     "bookmd5": "book-abc",
                     "documentTitle": "Ding 等 2025. Fast and Robust Visuomotor Riemannian Flow Matching Policy.pdf",
+                    "mindmapVisible": True,
                 }
             )
 
@@ -2340,6 +2606,162 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertRegex(result["mindmapTarget"]["target"]["codexId"], r"^mindmap-target:[a-f0-9]{16}$")
             self.assertIn("document_root", [item["value"] for item in result["mindmapTarget"]["options"]])
 
+    def test_mindmap_target_status_is_blocked_when_only_document_is_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.handle_action(
+                {
+                    "action": "mindmap_target_status",
+                    "topicid": "topic-1",
+                    "bookmd5": "book-abc",
+                    "documentTitle": "Paper.pdf",
+                    "mindmapVisible": False,
+                    "docMapSplitMode": 2,
+                }
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["mindmapTarget"]["state"], "blocked")
+            self.assertEqual(result["mindmapTarget"]["target"], {})
+            self.assertEqual(result["mindmapTarget"]["options"], [])
+            self.assertIn("未打开脑图", result["mindmapTarget"]["label"])
+
+    def test_reply_mindmap_refuses_model_generation_when_mindmap_is_not_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            calls: list[str] = []
+            companion.generate_reply = lambda payload, task: (
+                calls.append(task) or "## 不应生成",
+                "codex-cli",
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据回答创建脑图",
+                    "replyDerivedMindmap": True,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapVisible": False,
+                    "docMapSplitMode": 2,
+                }
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["mindmapRefreshReason"], "mindmap-not-open")
+            self.assertEqual(calls, [])
+            self.assertIn("没有打开脑图", result["message"])
+
+    def test_plain_mindmap_refuses_model_generation_when_only_document_is_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            calls: list[str] = []
+            companion.generate_reply = lambda payload, task: (
+                calls.append(task) or "## 不应生成",
+                "codex-cli",
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "生成当前材料脑图",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "mindmapVisible": False,
+                    "docMapSplitMode": 2,
+                }
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["mindmapRefreshReason"], "mindmap-not-open")
+            self.assertEqual(calls, [])
+
+    def test_unavailable_native_mindmap_read_invalidates_previous_tree_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            companion.append_event(
+                {
+                    "event": "mindmapTreeReadUnavailable",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "reason": "mindmap-not-open",
+                        "mindmapVisible": False,
+                        "studyMode": 2,
+                        "docMapSplitMode": 2,
+                    },
+                }
+            )
+            cache = companion.read_latest_mindmap_tree("T1", "B1")
+
+            self.assertFalse(cache["mindmapVisible"])
+            self.assertEqual(cache["mindmapUnavailableReason"], "mindmap-not-open")
+            self.assertEqual(cache["currentMindmap"], {})
+            self.assertEqual(companion.reply_mindmap_cache_status(cache), (False, "mindmap-not-open"))
+
+    def test_missing_mindmap_cache_is_not_treated_as_closed_mindmap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            self.assertEqual(companion.reply_mindmap_cache_status({}), (False, "missing"))
+
+    def test_mindmap_refresh_waits_for_snapshot_newer_than_the_read_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            now = time.time()
+            old_timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
+            request_timestamp = old_timestamp
+            new_timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
+            reads = 0
+
+            def fake_read(topic_id: str, book_md5: str) -> dict[str, Any]:
+                nonlocal reads
+                reads += 1
+                if reads == 1:
+                    return {
+                        "mindmapReadRequestId": "OLD-READ",
+                        "mindmapVisible": False,
+                        "mindmapUnavailableReason": "mindmap-not-open",
+                        "updatedAt": old_timestamp,
+                        "currentMindmap": {},
+                    }
+                return {
+                    "schema": "codex.mn.mindmapTreeCache.v1",
+                    "mindmapReadRequestId": "READ-1",
+                    "topicid": topic_id,
+                    "bookmd5": book_md5,
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": new_timestamp,
+                    "truncatedCount": 0,
+                    "currentMindmap": {
+                        "noteId": "notebook-root",
+                        "title": "I-JEPA",
+                        "children": [],
+                    },
+                }
+
+            companion.read_latest_mindmap_tree = fake_read
+            companion.time.sleep = lambda seconds: None
+
+            cache, reason = companion.wait_for_reply_mindmap_refresh(
+                {"topicid": "T1", "bookmd5": "B1"},
+                {
+                    "ok": True,
+                    "queued": {
+                        "id": "READ-1",
+                        "ts": request_timestamp,
+                        "command": {"mindmapReadRequestId": "READ-1"},
+                    },
+                },
+                attempts=2,
+            )
+
+            self.assertEqual(reason, "ready")
+            self.assertEqual(cache["updatedAt"], new_timestamp)
+            self.assertEqual(reads, 2)
+
     def test_mindmap_target_update_persists_document_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -2349,6 +2771,7 @@ class CompanionControlsTests(unittest.TestCase):
                 "topicid": "topic-1",
                 "bookmd5": "book-abc",
                 "documentTitle": "Paper.pdf",
+                "mindmapVisible": True,
             }
 
             updated = companion.handle_action(payload)
@@ -2374,6 +2797,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "topicid": "topic-1",
                     "bookmd5": "book-abc",
                     "documentTitle": "Paper.pdf",
+                    "mindmapVisible": True,
                 }
             )
 
@@ -2383,6 +2807,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "topicid": "topic-1",
                     "bookmd5": "book-abc",
                     "documentTitle": "Paper.pdf",
+                    "mindmapVisible": True,
                 }
             )
 
@@ -2411,6 +2836,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "bookmd5": "book-abc",
                     "selectedNoteId": "note-7",
                     "selectedNoteTitle": "已有脑图根",
+                    "mindmapVisible": True,
                     "mindmapTarget": {
                         "mode": "merge_children_into_selected_node",
                         "selectedNoteId": "note-7",
@@ -2439,6 +2865,11 @@ class CompanionControlsTests(unittest.TestCase):
                     "schema": "codex.mn.mindmapTreeCache.v1",
                     "topicid": "T1",
                     "bookmd5": "B1",
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "truncatedCount": 0,
                     "currentMindmap": {
                         "noteId": "notebook-root",
                         "title": "Paper.pdf",
@@ -2448,6 +2879,7 @@ class CompanionControlsTests(unittest.TestCase):
                                 "noteId": "N-root",
                                 "title": "Paper · Codex 脑图",
                                 "body": "",
+                                "documentId": "B1",
                                 "children": [
                                     {
                                         "noteId": "N-attention",
@@ -2497,10 +2929,16 @@ class CompanionControlsTests(unittest.TestCase):
                     "schema": "codex.mn.mindmapTreeCache.v1",
                     "topicid": "T1",
                     "bookmd5": "B1",
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "truncatedCount": 0,
                     "currentMindmap": {
                         "noteId": "N-root",
                         "title": "Paper · Codex 脑图",
                         "body": "",
+                        "documentId": "B1",
                         "children": [
                             {
                                 "noteId": "N-attention",
@@ -2563,6 +3001,337 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertEqual(len(refreshes), 1)
             self.assertEqual(refreshes[0]["source"], "reply-derived-mindmap")
+            self.assertTrue(refreshes[0]["wholeNotebook"])
+
+    def test_reply_derived_mindmap_auto_continues_after_native_tree_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            reads = 0
+
+            def fake_read(topic_id: str, book_md5: str) -> dict[str, Any]:
+                nonlocal reads
+                reads += 1
+                if reads == 1:
+                    return {}
+                return {
+                    "schema": "codex.mn.mindmapTreeCache.v1",
+                    "topicid": topic_id,
+                    "bookmd5": book_md5,
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "truncatedCount": 0,
+                    "currentMindmap": {
+                        "noteId": "notebook-root",
+                        "title": "I-JEPA",
+                        "body": "",
+                        "children": [],
+                    },
+                }
+
+            companion.read_latest_mindmap_tree = fake_read
+            companion.request_mindmap_tree = lambda payload: {
+                "ok": True,
+                "message": "已请求读取脑图。",
+                "queued": {"id": "READ-1"},
+            }
+            companion.time.sleep = lambda seconds: None
+            companion.generate_reply = lambda payload, task: ("## 方法\n### 表示预测\n预测目标表示。", "codex-cli")
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据回答创建脑图",
+                    "replyDerivedMindmap": True,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertGreaterEqual(reads, 2)
+            self.assertNotIn("mindmapRefreshRequired", result)
+            self.assertEqual(result["writeTarget"]["rootTitle"], "I-JEPA · Codex 脑图")
+
+    def test_reply_derived_mindmap_rejects_partial_truncated_or_stale_tree_cache(self) -> None:
+        cases = [
+            {
+                "scope": "selected_subtree",
+                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "truncatedCount": 0,
+                "expected": "partial-scope",
+            },
+            {
+                "scope": "whole_notebook",
+                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "truncatedCount": 3,
+                "expected": "truncated",
+            },
+            {
+                "scope": "whole_notebook",
+                "updatedAt": "2020-01-01T00:00:00+0000",
+                "truncatedCount": 0,
+                "expected": "stale",
+            },
+        ]
+        for case in cases:
+            with self.subTest(case=case["expected"]), tempfile.TemporaryDirectory() as tmp:
+                companion = load_companion(Path(tmp))
+                companion.write_json_file(
+                    companion.mindmap_tree_cache_path("T1", "B1"),
+                    {
+                        "schema": "codex.mn.mindmapTreeCache.v1",
+                        "topicid": "T1",
+                        "bookmd5": "B1",
+                        "scope": case["scope"],
+                        "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                        "mindmapVisible": True,
+                        "updatedAt": case["updatedAt"],
+                        "truncatedCount": case["truncatedCount"],
+                        "currentMindmap": {
+                            "noteId": "notebook-root",
+                            "title": "Paper.pdf",
+                            "children": [],
+                        },
+                    },
+                )
+                generated: list[str] = []
+                refreshes: list[dict[str, Any]] = []
+                companion.generate_reply = lambda payload, task: (
+                    generated.append(task) or "## 不应生成",
+                    "codex-cli",
+                )
+                companion.request_mindmap_tree = lambda payload: (
+                    refreshes.append(dict(payload))
+                    or {"ok": True, "message": "已请求读取脑图。"}
+                )
+
+                result = companion.generate_mindmap(
+                    {
+                        "prompt": "[create_card_tree] 根据回答创建脑图",
+                        "replyDerivedMindmap": True,
+                        "topicid": "T1",
+                        "bookmd5": "B1",
+                        "documentTitle": "Paper.pdf",
+                    }
+                )
+
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["mindmapRefreshReason"], case["expected"])
+                self.assertEqual(generated, [])
+                self.assertEqual(len(refreshes), 1)
+                self.assertTrue(refreshes[0]["wholeNotebook"])
+
+    def test_whole_notebook_mindmap_refresh_reaches_native_queue_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            result = companion.request_mindmap_tree(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "reply-derived-mindmap",
+                    "wholeNotebook": True,
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            command = companion.poll_commands("T1", "B1")["commands"][0]
+            self.assertTrue(command["wholeNotebook"])
+            self.assertEqual(command["scope"], "whole_notebook")
+            self.assertRegex(command["mindmapReadRequestId"], r"^[a-f0-9]{32}$")
+
+    def test_future_mindmap_cache_timestamp_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            future = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() + 3600))
+            ready, reason = companion.reply_mindmap_cache_status(
+                {
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": future,
+                    "truncatedCount": 0,
+                    "currentMindmap": {"noteId": "notebook-root", "children": []},
+                }
+            )
+
+            self.assertFalse(ready)
+            self.assertEqual(reason, "future")
+
+    def test_reply_mindmap_write_target_carries_full_tree_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.generate_reply = lambda payload, task: (
+                "## New Name\nGenerated branch.",
+                "codex-cli",
+            )
+            current = {
+                "noteId": "notebook-root",
+                "title": "Paper.pdf",
+                "body": "",
+                "documentId": "B1",
+                "children": [
+                    {
+                        "noteId": "N-root",
+                        "title": "Paper · Codex 脑图",
+                        "body": "",
+                        "children": [],
+                    }
+                ],
+            }
+            companion.write_json_file(
+                companion.mindmap_tree_cache_path("T1", "B1"),
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "truncatedCount": 0,
+                    "nodeCount": 2,
+                    "currentMindmap": current,
+                },
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] Create tree",
+                    "replyDerivedMindmap": True,
+                    "sourceAnswerMarkdown": "New Name",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Paper.pdf",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(
+                result["writeTarget"]["baselineFingerprint"],
+                companion.mindmap_attachment.tree_fingerprint(current),
+            )
+
+    def test_reply_mindmap_writes_into_unique_root_for_current_open_document(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.generate_reply = lambda payload, task: (
+                "## 新增主题\n与现有节点没有语义重合。",
+                "codex-cli",
+            )
+            companion.write_json_file(
+                companion.mindmap_tree_cache_path("T1", "B1"),
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "truncatedCount": 0,
+                    "nodeCount": 3,
+                    "currentMindmap": {
+                        "noteId": "notebook-root",
+                        "title": "I-JEPA",
+                        "documentId": "",
+                        "children": [
+                            {
+                                "noteId": "study-set-root",
+                                "title": "StudySet",
+                                "documentId": "B1_StudySet",
+                                "children": [],
+                            },
+                            {
+                                "noteId": "ijepa-root",
+                                "title": "I-JEPA",
+                                "body": "I-JEPA\n\n",
+                                "documentId": "B1",
+                                "children": [],
+                            },
+                        ],
+                    },
+                },
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据回答创建脑图",
+                    "replyDerivedMindmap": True,
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["writeTarget"]["mode"], "verified_parent_node")
+            self.assertEqual(result["writeTarget"]["parentNoteId"], "ijepa-root")
+            self.assertEqual(result["writeTarget"]["parentNoteTitle"], "I-JEPA")
+
+    def test_native_draft_write_is_always_transactional_and_scope_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "pluginVersion": companion.CURRENT_PLUGIN_VERSION,
+                    "extra": {"handlerFeatures": [companion.DRAFT_SCOPE_BINDING_FEATURE]},
+                }
+            )
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+            draft_id = saved["draft"]["id"]
+
+            result = companion.request_draft_write(
+                {"topicid": "T1", "bookmd5": "B1", "draftId": draft_id}
+            )
+
+            self.assertTrue(result["ok"], result)
+            command = companion.poll_commands("T1", "B1")["commands"][0]
+            self.assertTrue(command["aiEditOperation"])
+            self.assertEqual(command["expectedTopicId"], "T1")
+            self.assertEqual(command["expectedBookMd5"], "B1")
+
+    def test_native_draft_write_rejects_missing_or_mismatched_document_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            missing = companion.save_draft(
+                {"topicid": "T1", "draft": {"cards": [{"title": "A", "body": "B"}]}}
+            )
+
+            missing_result = companion.request_draft_write(
+                {"topicid": "T1", "bookmd5": "B1", "draftId": missing["draft"]["id"]}
+            )
+
+            self.assertFalse(missing_result["ok"])
+            self.assertIn("文档绑定", missing_result["message"])
+
+            missing_request_binding = companion.request_draft_write(
+                {"draftId": missing["draft"]["id"]}
+            )
+
+            self.assertFalse(missing_request_binding["ok"])
+            self.assertIn("显式", missing_request_binding["message"])
+
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+            mismatch_result = companion.request_draft_write(
+                {"topicid": "T1", "bookmd5": "B2", "draftId": saved["draft"]["id"]}
+            )
+
+            self.assertFalse(mismatch_result["ok"])
+            self.assertIn("不一致", mismatch_result["message"])
 
     def test_generated_cards_and_mindmaps_return_mn_object_for_draft_transactions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2592,6 +3361,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "selectedNoteTitle": "当前根节点",
                     "topicid": "T1",
                     "bookmd5": "B1",
+                    "mindmapVisible": True,
                 }
             )
 
@@ -2619,6 +3389,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "bookmd5": "generic-book",
                     "selectedNoteTitle": "KNOWS 当前脑图",
                     "selectedNoteId": "note-1",
+                    "mindmapVisible": True,
                 }
             )
 
@@ -7166,7 +7937,7 @@ class CompanionControlsTests(unittest.TestCase):
     def test_goal_run_is_one_shot_action_that_does_not_persist_active_goal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            companion.handle_action({"action": "settings_update", "settings": {"aiBackend": "local"}})
+            companion.generate_reply = lambda payload, task: ("目标执行结果", "codex-cli")
 
             result = companion.handle_action(
                 {
@@ -7455,6 +8226,38 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(status["pdfCache"]["path"], result["pdfCache"]["path"])
             self.assertIn("已就绪", status["pdfCache"]["label"])
 
+    def test_pdf_cache_separates_multiple_current_files_that_share_bookmd5(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            common = {"action": "cache_pdf_from_marginnote", "topicid": "TOPIC1", "bookmd5": "SHARED"}
+            first = {
+                **common,
+                "contextDocumentKey": "TOPIC1|SHARED|/papers/a.pdf",
+                "documentTitle": "A.pdf",
+                "fileName": "A.pdf",
+                "pdfPath": "/papers/a.pdf",
+                "pdfBase64": base64.b64encode(b"%PDF-1.4\nA document\n%%EOF\n").decode("ascii"),
+            }
+            second = {
+                **common,
+                "contextDocumentKey": "TOPIC1|SHARED|/papers/b.pdf",
+                "documentTitle": "B.pdf",
+                "fileName": "B.pdf",
+                "pdfPath": "/papers/b.pdf",
+                "pdfBase64": base64.b64encode(b"%PDF-1.4\nB document\n%%EOF\n").decode("ascii"),
+            }
+
+            result_a = companion.handle_action(first)
+            result_b = companion.handle_action(second)
+
+            self.assertTrue(result_a["ok"])
+            self.assertTrue(result_b["ok"])
+            self.assertNotEqual(result_a["pdfCache"]["path"], result_b["pdfCache"]["path"])
+            self.assertEqual(Path(result_a["pdfCache"]["path"]).read_bytes(), b"%PDF-1.4\nA document\n%%EOF\n")
+            self.assertEqual(Path(result_b["pdfCache"]["path"]).read_bytes(), b"%PDF-1.4\nB document\n%%EOF\n")
+            self.assertEqual(companion.pdf_cache_progress_for_payload(first)["path"], result_a["pdfCache"]["path"])
+            self.assertEqual(companion.pdf_cache_progress_for_payload(second)["path"], result_b["pdfCache"]["path"])
+
     def test_cache_pdf_success_clears_stale_native_cache_queue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -7522,6 +8325,35 @@ class CompanionControlsTests(unittest.TestCase):
             )
 
             self.assertEqual(resolved, current)
+            self.assertIsNone(error)
+
+    def test_pdf_title_matching_accepts_document_acronym_for_same_cached_paper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            source = Path(tmp) / (
+                "Assran et al. 2023. Self-Supervised Learning From Images With a "
+                "Joint-Embedding Predictive Architecture.pdf"
+            )
+            source.write_bytes(b"%PDF-1.4\nI-JEPA\n%%EOF\n")
+            cached_copy = companion.PDF_CACHE_DIR / "BOOK-IJEPA.pdf"
+            cached_copy.parent.mkdir(parents=True, exist_ok=True)
+            cached_copy.write_bytes(source.read_bytes())
+            companion.save_pdf_cache_index(
+                {
+                    "BOOK": {
+                        "bookmd5": "BOOK",
+                        "path": str(cached_copy),
+                        "sourcePdf": str(source),
+                        "documentTitle": source.name,
+                    }
+                }
+            )
+
+            payload = {"bookmd5": "BOOK", "documentTitle": "I-JEPA"}
+            self.assertTrue(companion.pdf_path_matches_payload_title(source, payload, "BOOK"))
+            resolved, error = companion.resolve_pdf_source(payload, "BOOK")
+
+            self.assertEqual(resolved, cached_copy)
             self.assertIsNone(error)
 
     def test_request_pdf_cache_queues_document_title_candidates_without_pdf_path(self) -> None:
@@ -7593,6 +8425,15 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            companion.append_event(
+                {
+                    "event": "nativeApiCapabilities",
+                    "topicid": "TOPIC1",
+                    "bookmd5": "BOOK1",
+                    "pluginVersion": companion.CURRENT_PLUGIN_VERSION,
+                    "extra": {"handlerFeatures": [companion.DRAFT_SCOPE_BINDING_FEATURE]},
+                }
+            )
             saved = companion.save_draft(
                 {
                     "action": "draft_save",
@@ -7627,7 +8468,7 @@ class CompanionControlsTests(unittest.TestCase):
             )
 
             self.assertTrue(result["ok"])
-            self.assertEqual(result["queued"]["command"]["nativeAction"], "write_draft")
+            self.assertEqual(result["queued"]["command"]["nativeAction"], "write_draft_scope_bound_v1")
             self.assertEqual(result["queued"]["command"]["draftId"], saved["draft"]["id"])
             self.assertEqual(result["queued"]["command"]["mnObjectId"], "mnobj:selection:draft123")
             self.assertEqual(result["queued"]["command"]["mnObjectKind"], "selection")
@@ -7638,7 +8479,7 @@ class CompanionControlsTests(unittest.TestCase):
             polled = companion.poll_commands("TOPIC1", "BOOK1")
 
             self.assertEqual(polled["pending"], 1)
-            self.assertEqual(polled["commands"][0]["nativeAction"], "write_draft")
+            self.assertEqual(polled["commands"][0]["nativeAction"], "write_draft_scope_bound_v1")
             self.assertEqual(polled["commands"][0]["draftId"], saved["draft"]["id"])
             self.assertEqual(polled["commands"][0]["mnObjectId"], "mnobj:selection:draft123")
 

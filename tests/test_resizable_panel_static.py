@@ -121,12 +121,14 @@ class ResizablePanelContractTest(unittest.TestCase):
         reject_body = self.main.split("CodexAssistantAddon.prototype.rejectAiEditTransaction", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1
         )[0]
-        self.assertIn("rollbackAiEditTransactionWithUndo(transaction, ctx)", reject_body)
+        self.assertNotIn("rollbackAiEditTransactionWithUndo", reject_body)
         self.assertIn("aiEditUndoRollbackAttempted", reject_body)
+        self.assertIn("method: 'skipped-unsafe-global-undo'", reject_body)
+        self.assertIn("transaction-id-delete-used", reject_body)
         self.assertIn("deleteNoteForAiEdit(note, ctx, noteId)", reject_body)
         self.assertIn("method: result ? result.method", reject_body)
         self.assertIn("remainingAiEditNoteIds", self.main)
-        self.assertIn("UndoManager.sharedInstance().undo()", self.main)
+        self.assertNotIn("UndoManager.sharedInstance().undo()", self.main)
         self.assertIn("verifyAiEditNoteDeleted", self.main)
         self.assertIn("resolveAiEditNoteById", self.main)
         self.assertIn("databaseNoteById", self.main)
@@ -161,12 +163,222 @@ class ResizablePanelContractTest(unittest.TestCase):
             "findNoteById(ctx.notebook, targetParentNoteId)",
             "verified-parent-missing",
             "verified-parent-title-mismatch",
+            "verified-parent-body-mismatch",
             "mergeIntoVerifiedParent",
         ]:
             self.assertIn(marker, create_mindmap_body)
         self.assertNotIn("verifiedParent.noteTitle =", create_mindmap_body)
         self.assertNotIn("verifiedParent.title =", create_mindmap_body)
         self.assertNotIn("verifiedParent.addChild(existingRoot)", create_mindmap_body)
+
+    def test_created_notes_are_registered_before_fallible_native_writes(self) -> None:
+        create_cards_body = self.main.split(
+            "CodexAssistantAddon.prototype.createCards", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.createMindmap", 1)[0]
+        make_node_body = self.main.split("function makeNode(node, parent)", 1)[1].split(
+            "\n    function mergeChildrenIntoParent", 1
+        )[0]
+        write_draft_body = self.main.split(
+            "CodexAssistantAddon.prototype.writeDraft", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1)[0]
+
+        self.assertLess(
+            create_cards_body.index("recordAiEditCreatedNote(note)"),
+            create_cards_body.index("parent.addChild(note)"),
+        )
+        self.assertLess(
+            make_node_body.index("recordAiEditCreatedNote(note)"),
+            make_node_body.index("parent.addChild(note)"),
+        )
+        self.assertLess(
+            make_node_body.index("recordAiEditCreatedNote(note)"),
+            make_node_body.index("note.appendMarkdownComment"),
+        )
+        catch_body = write_draft_body.split("} catch (err) {", 1)[1]
+        self.assertIn("finishAiEditTransaction(json, {", catch_body)
+        self.assertIn("partial: true", catch_body)
+        self.assertIn("draftWritePartialTransactionReady", catch_body)
+        self.assertNotIn("if (options.aiEditOperation)", write_draft_body)
+
+    def test_failed_responses_never_reach_native_mutation_calls(self) -> None:
+        response_body = self.main.split(
+            "CodexAssistantAddon.prototype.handleCompanionResponse", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.resolveNotebookAndDocument", 1)[0]
+
+        self.assertIn("var okSucceeded = isExplicitTrue(okValue)", response_body)
+        self.assertIn("if (!okSucceeded) return false;", response_body)
+        self.assertLess(
+            response_body.index("if (!okSucceeded) return false;"),
+            response_body.index("this.createCards"),
+        )
+        self.assertIn("cardWriteResult", response_body)
+        self.assertIn("mindmapWriteResult", response_body)
+        self.assertIn("finishOwnedAiEditTransaction", response_body)
+        self.assertIn("partial_failed", response_body)
+        self.assertIn(
+            "finishOwnedAiEditTransaction();\n    } catch (writeErr) {",
+            response_body,
+        )
+        self.assertIn(
+            "finishOwnedAiEditTransaction(safeString(writeErr) || 'native-write-exception');",
+            response_body,
+        )
+        self.assertNotIn(
+            "finishOwnedAiEditTransaction(safeString(writeErr) || 'native-write-exception');\n"
+            "    } catch (writeErr) {",
+            response_body,
+        )
+
+    def test_partial_native_transaction_cannot_be_accepted_even_from_stale_webview(self) -> None:
+        accept_body = self.main.split(
+            "CodexAssistantAddon.prototype.acceptAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.rejectAiEditTransaction", 1)[0]
+
+        self.assertIn("transaction.status === 'partial_failed'", accept_body)
+        self.assertIn("transaction.partial === true", accept_body)
+        self.assertIn("aiEditTransactionAcceptBlocked", accept_body)
+        self.assertIn("仅可拒绝并回滚", accept_body)
+        self.assertLess(
+            accept_body.index("transaction.status === 'partial_failed'"),
+            accept_body.index("delete this.aiEditTransactions[transactionId]"),
+        )
+
+    def test_draft_writes_are_transactional_and_bound_to_the_draft_document(self) -> None:
+        queue_body = self.main.split("if (nativeAction === 'write_draft_scope_bound_v1')", 1)[1].split(
+            "\n    if (nativeAction === 'read_mindmap_tree')", 1
+        )[0]
+        resolver_body = self.main.split(
+            "CodexAssistantAddon.prototype.resolveNotebookAndDocument", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.createCards", 1)[0]
+
+        self.assertIn("aiEditOperation: true", queue_body)
+        self.assertIn("requiredHandlerFeature", queue_body)
+        self.assertIn("draft-write-scope-binding-v1", queue_body)
+        self.assertNotIn("this.writeDraft(draftId);", queue_body)
+        self.assertIn("expectedTopicId", resolver_body)
+        self.assertIn("expectedBookMd5", resolver_body)
+        self.assertIn("draft-topic-mismatch", resolver_body)
+        self.assertIn("draft-document-mismatch", resolver_body)
+        self.assertIn("live-document-mismatch", resolver_body)
+        self.assertIn("live-document-unavailable", resolver_body)
+        write_body = self.main.split(
+            "CodexAssistantAddon.prototype.writeDraft", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1)[0]
+        self.assertIn("draft-scope-missing", write_body)
+        self.assertIn("this.resolveNotebookAndDocument(draftTopicId, draftBookMd5)", write_body)
+        bridge_body = self.controller.split(
+            "if (lower.indexOf('codexpaper://write_draft') === 0)", 1
+        )[1].split("\n  if (lower.indexOf('codexpaper://upload_pdf')", 1)[0]
+        self.assertIn("aiEditOperation: true", bridge_body)
+        self.assertIn("expectedTopicId: params.expectedTopicId", bridge_body)
+        self.assertIn("expectedBookMd5: params.expectedBookMd5", bridge_body)
+
+    def test_card_parent_and_dedupe_are_fail_closed(self) -> None:
+        create_cards_body = self.main.split(
+            "CodexAssistantAddon.prototype.createCards", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.createMindmap", 1)[0]
+
+        self.assertIn("noteBelongsToDocument(parent, ctx.document, ctx.bookmd5)", create_cards_body)
+        self.assertIn("card-parent-document-mismatch", create_cards_body)
+        self.assertIn("card-dedupe-scan-incomplete", create_cards_body)
+        self.assertIn("var cardScanStats = {scanned: 0, markerMatches: 0, titleMatches: 0, incomplete: false}", create_cards_body)
+        self.assertIn("if (cardScanStats.incomplete)", create_cards_body)
+        self.assertLess(
+            create_cards_body.index("card-dedupe-scan-incomplete"),
+            create_cards_body.index("UndoManager.sharedInstance().undoGrouping"),
+        )
+
+    def test_bridge_fallback_never_authorizes_transaction_deletions(self) -> None:
+        reject_body = self.main.split(
+            "CodexAssistantAddon.prototype.rejectAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.writeDraft", 1)[0]
+
+        self.assertNotIn("fallbackAiEditTransactionFromBridge", self.main)
+        self.assertNotIn("aiEditCreatedNoteIdsFromBridgeParams", self.main)
+        self.assertNotIn("aiEditCreatedCardIdsFromBridgeParams", self.main)
+        self.assertNotIn("this.aiEditTransactions[transactionId] = transaction", reject_body)
+        self.assertIn("if (!transaction.createdNoteIdsMap[cardId]) continue;", reject_body)
+        self.assertNotIn("deleteCardForAiEdit(card, ctx, cardId)", reject_body)
+
+    def test_reply_parent_is_bound_to_the_current_document(self) -> None:
+        create_body = self.main.split(
+            "CodexAssistantAddon.prototype.createMindmap", 1
+        )[1].split("\n\n  return CodexAssistantAddon;", 1)[0]
+        serializer_body = self.main.split(
+            "CodexAssistantAddon.prototype.serializeMindmapNode", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.serializeMindmapNotebookRoots", 1)[0]
+        notebook_serializer_body = self.main.split(
+            "CodexAssistantAddon.prototype.serializeMindmapNotebookRoots", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.readMindmapTree", 1)[0]
+
+        self.assertIn("documentId", serializer_body)
+        self.assertIn("documentId: ''", notebook_serializer_body)
+        self.assertIn("var notebookRoots = valueOf(ctx.notebook, 'notes')", notebook_serializer_body)
+        self.assertIn("stats.scope = notebookScopedRoots ? 'whole_notebook' : 'current_document'", notebook_serializer_body)
+        self.assertIn("verified-parent-document-mismatch", create_body)
+        self.assertIn("write-target-document-mismatch", create_body)
+        self.assertIn("var expectedDocumentId = ctx.bookmd5", create_body)
+        self.assertIn("noteBelongsToDocument", create_body)
+        self.assertIn("mindmapTreeFingerprint", self.main)
+        self.assertIn("mindmap-baseline-fingerprint-changed", create_body)
+
+    def test_document_root_reuse_requires_one_exact_marker_and_title(self) -> None:
+        create_mindmap_body = self.main.split(
+            "CodexAssistantAddon.prototype.createMindmap", 1
+        )[1].split("\n\n  return CodexAssistantAddon;", 1)[0]
+
+        self.assertIn("exactCodexIdsFromNote", self.main)
+        self.assertIn("findUniqueExistingCodexNote", self.main)
+        self.assertIn("document-root-ambiguous", create_mindmap_body)
+        self.assertIn("document-root-title-mismatch", create_mindmap_body)
+        self.assertIn("document-root-scan-incomplete", create_mindmap_body)
+        self.assertNotIn("raw.indexOf(String(codexId))", self.main)
+
+    def test_reply_mindmap_refresh_reads_a_complete_notebook_tree(self) -> None:
+        read_body = self.main.split(
+            "CodexAssistantAddon.prototype.readMindmapTree", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.serializeMnObjectForRegistry", 1)[0]
+
+        self.assertIn("wholeNotebook", read_body)
+        self.assertIn("isExplicitTrue(valueOf(command, 'wholeNotebook'))", read_body)
+        self.assertIn("var actualScope", read_body)
+        self.assertIn("scope: actualScope", read_body)
+        self.assertIn("snapshotCapability", read_body)
+        self.assertIn("serializeMindmapNotebookRoots(ctx, 24, 500, stats)", read_body)
+        self.assertIn("serializeMindmapNode(note, 0, 4, 80, stats)", read_body)
+        self.assertIn("var mindmapReadRequestId", read_body)
+        self.assertGreaterEqual(read_body.count("mindmapReadRequestId: mindmapReadRequestId"), 3)
+
+    def test_native_boolean_flags_and_partial_failures_are_fail_closed(self) -> None:
+        create_mindmap_body = self.main.split(
+            "CodexAssistantAddon.prototype.createMindmap", 1
+        )[1].split("\n\n  return CodexAssistantAddon;", 1)[0]
+        ready_body = self.app.split(
+            "setAiEditOperationReady: function(payload)", 1
+        )[1].split("\n    setAiEditOperationResult:", 1)[0]
+        panel_body = self.app.split(
+            "function buildAiEditOperationPanel", 1
+        )[1].split("\n  function renderAiEditOperation", 1)[0]
+
+        self.assertIn("isExplicitTrue(valueOf(tree, 'mergeIntoSelected'))", create_mindmap_body)
+        self.assertIn("payload.partial === true", ready_body)
+        self.assertIn("partial_failed", ready_body)
+        self.assertIn("draft.partial === true", panel_body)
+        self.assertIn("accept.disabled = true", panel_body)
+        self.assertIn("仅可拒绝并回滚", panel_body)
+
+    def test_native_handler_features_identify_safe_scope_and_snapshot_protocols(self) -> None:
+        self.assertIn("'draft-write-scope-binding-v1'", self.main)
+        self.assertIn("'mindmap-whole-notebook-snapshot-v2'", self.main)
+        self.assertIn("'mindmap-visible-surface-guard-v1'", self.main)
+
+    def test_deep_note_scan_marks_depth_truncation_incomplete(self) -> None:
+        scan_body = self.main.split("function scanNotesDeep", 1)[1].split(
+            "\n  function noteBelongsToDocument", 1
+        )[0]
+
+        self.assertIn("if (depth > 24)", scan_body)
+        self.assertIn("stats.incomplete = true", scan_body)
 
     def test_visible_ui_is_margin_note_style_knowledge_workspace(self) -> None:
         for required in [
@@ -243,7 +455,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         )[0]
 
         self.assertIn("missing-selected-node-for-merge", guard_body)
-        self.assertIn("return;", guard_body)
+        self.assertIn("return false;", guard_body)
         self.assertNotIn("makeNode(tree, selected)", guard_body)
 
     def test_create_mindmap_validates_write_target_and_reuses_document_root(self) -> None:
@@ -276,7 +488,41 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertNotIn("未知网络错误", self.main)
         error_branch = self.main.split("if (error) {", 1)[1].split("return;", 1)[0]
         self.assertIn("companionRequestErrorMessage(error, CompanionActionTimeout)", error_branch)
+        self.assertIn("addon.panel.setError(msg)", error_branch)
+        self.assertNotIn("addon.panel.setReply(msg)", error_branch)
         self.assertNotIn("Codex Companion 未运行：请先启动本地 Companion 服务。", error_branch)
+
+    def test_completed_goal_answers_copy_but_failures_do_not_get_answer_actions(self) -> None:
+        display_body = self.app.split("function displayCompanionResult", 1)[1].split(
+            "\n  function addFailureMessage", 1
+        )[0]
+        set_reply_body = self.app.split("setReply: function(payload)", 1)[1].split(
+            "\n    setError:", 1
+        )[0]
+        set_error_body = self.app.split("setError: function(payload)", 1)[1].split(
+            "\n    setAiEditOperationReady:", 1
+        )[0]
+
+        self.assertIn("action === 'goal_run'", display_body)
+        self.assertIn("result.ok === true", display_body)
+        self.assertIn("addAssistantReplyWithActions", display_body)
+        self.assertIn("addAssistantReplyWithActions", set_reply_body)
+        self.assertIn("addMessage('assistant'", set_error_body)
+        self.assertNotIn("addAssistantReplyWithActions", set_error_body)
+        self.assertIn("CodexWebPanelController.prototype.setError", self.controller)
+        history_body = self.app.split("function renderHistoryItems", 1)[1].split(
+            "\n  function renderNewConversationMessage", 1
+        )[0]
+        self.assertIn("item.kind === 'answer'", history_body)
+
+    def test_reject_uses_transaction_note_ids_without_global_undo(self) -> None:
+        reject_body = self.main.split(
+            "CodexAssistantAddon.prototype.rejectAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.writeDraft", 1)[0]
+
+        self.assertNotIn("rollbackAiEditTransactionWithUndo", reject_body)
+        self.assertNotIn("UndoManager.sharedInstance().undo()", self.main)
+        self.assertIn("transaction.createdNoteIds", reject_body)
 
     def test_native_poll_defers_raw_queue_commands_to_webview(self) -> None:
         self.assertIn("callCompanion = function(action, prompt, ackIds)", self.main)
@@ -754,9 +1000,45 @@ class ResizablePanelContractTest(unittest.TestCase):
         resolve_body = self.main.split("CodexAssistantAddon.prototype.resolveContext", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.callCompanion", 1
         )[0]
-        self.assertIn("var pdfPath = pdfPathFromNotebookController(nc)", resolve_body)
+        self.assertIn("var pdfPath = safeString(activeDescriptor.path)", resolve_body)
         self.assertIn("pdfPath: pdfPath", resolve_body)
         self.assertIn("documentPath: pdfPath", resolve_body)
+
+    def test_document_open_refreshes_web_context_and_uses_one_active_document(self) -> None:
+        document_open_body = self.main.split("documentDidOpen: function(docmd5)", 1)[1].split(
+            "\n    documentWillClose", 1
+        )[0]
+        resolve_body = self.main.split("CodexAssistantAddon.prototype.resolveContext", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.callCompanion", 1
+        )[0]
+
+        self.assertIn("sendContextToWeb", document_open_body)
+        self.assertIn("self.lastDocumentController = null", document_open_body)
+        self.assertIn("self.lastSelectionText = ''", document_open_body)
+        self.assertIn("self.stopNativeHighlightSelectionPoll()", document_open_body)
+        self.assertIn("resolveActiveDocumentContext", self.main)
+        self.assertIn("var activeDocument = resolveActiveDocumentContext", resolve_body)
+        self.assertIn("contextDocumentKey", resolve_body)
+        self.assertIn("availableDocuments", resolve_body)
+        self.assertNotIn("var pdfPath = pdfPathFromNotebookController(nc)", resolve_body)
+        self.assertNotIn("var documentTitle = documentTitleFromNotebookController(nc)", resolve_body)
+
+    def test_mindmap_context_falls_back_to_selected_nodes_source_document(self) -> None:
+        active_document_body = self.main.split("function resolveActiveDocumentContext", 1)[1].split(
+            "\n  function md5FromDatabaseTopic", 1
+        )[0]
+        resolve_body = self.main.split("CodexAssistantAddon.prototype.resolveContext", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.callCompanion", 1
+        )[0]
+
+        self.assertLess(
+            resolve_body.index("var selectedNote = mindmapSurface.visible ? this.getSelectedNote() : null"),
+            resolve_body.index("resolveActiveDocumentContext"),
+        )
+        self.assertIn("resolveActiveDocumentContext(this, controller, nc, topicId, selectedNote)", resolve_body)
+        self.assertIn("documentIdFromNote(selectedNote)", active_document_body)
+        self.assertIn("selected_mindmap_node", active_document_body)
+        self.assertIn("documentContextSource", resolve_body)
 
     def test_native_bridge_can_upload_current_pdf_cache(self) -> None:
         self.assertIn("codexpaper://upload_pdf", self.controller)
@@ -798,7 +1080,12 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("write_draft", native_body)
         self.assertIn("nativeDraftWriteCommandPrepared", native_body)
         self.assertIn("var draftId = safeString(valueOf(command, 'draftId')", native_body)
-        self.assertIn("this.writeDraft(draftId)", native_body)
+        self.assertIn("this.writeDraft(draftId, {", native_body)
+        self.assertIn("aiEditOperation: true", native_body)
+        self.assertIn("var expectedTopicId = safeString(valueOf(command, 'expectedTopicId'))", native_body)
+        self.assertIn("var expectedBookMd5 = safeString(valueOf(command, 'expectedBookMd5'))", native_body)
+        self.assertIn("expectedTopicId: expectedTopicId", native_body)
+        self.assertIn("expectedBookMd5: expectedBookMd5", native_body)
         self.assertIn("toArray(valueOf(command, 'pdfPathCandidates'))", native_body)
 
     def test_native_poll_can_request_current_mindmap_tree_read(self) -> None:
@@ -814,6 +1101,35 @@ class ResizablePanelContractTest(unittest.TestCase):
 
         self.assertIn("nativeAction === 'read_mindmap_tree'", native_body)
         self.assertIn("this.readMindmapTree(command)", native_body)
+
+    def test_mindmap_visibility_is_required_for_context_read_and_write(self) -> None:
+        self.assertIn("function mindmapSurfaceState", self.main)
+        resolve_body = self.main.split("CodexAssistantAddon.prototype.resolveContext", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype", 1
+        )[0]
+        read_body = self.main.split("CodexAssistantAddon.prototype.readMindmapTree", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype", 1
+        )[0]
+        create_body = self.main.split("CodexAssistantAddon.prototype.createMindmap", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype", 1
+        )[0]
+
+        self.assertIn("mindmapVisible: mindmapSurface.visible", resolve_body)
+        self.assertIn("mindmapSurfaceState(ctx.controller)", read_body)
+        self.assertIn("reason: 'mindmap-not-open'", read_body)
+        self.assertIn("mindmapVisible: true", read_body)
+        self.assertIn("mindmapSurfaceState(ctx.controller)", create_body)
+        self.assertIn("reason: 'mindmap-not-open-at-write'", create_body)
+
+    def test_document_root_write_uses_document_scoped_notebook_roots_when_document_notes_are_unavailable(self) -> None:
+        create_body = self.main.split("CodexAssistantAddon.prototype.createMindmap", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype", 1
+        )[0]
+
+        self.assertIn("documentRootNoteScope", self.main)
+        self.assertIn("documentRootNoteScope(ctx, expectedDocumentId)", create_body)
+        self.assertIn("noteBelongsToDocument", self.main.split("function documentRootNoteScope", 1)[1].split("\n  function", 1)[0])
+        self.assertNotIn("if (wantsDocumentRoot && isNil(documentRootNotes))", create_body)
 
     def test_native_poll_can_apply_mindmap_diff_operations(self) -> None:
         self.assertIn("apply_mindmap_diff_operations", self.main)

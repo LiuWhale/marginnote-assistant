@@ -105,7 +105,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.48"
+CURRENT_PLUGIN_VERSION = "0.4.51"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -114,6 +114,10 @@ MN_EXTENSION_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Libr
 CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
 CURRENT_GENERATION_PROCESS: Any | None = None
 CURRENT_GENERATION_PROCESS_LABEL = ""
+HISTORY_LOCKS = tuple(threading.RLock() for _ in range(64))
+DRAFT_SCOPE_BINDING_FEATURE = "draft-write-scope-binding-v1"
+WHOLE_NOTEBOOK_SNAPSHOT_FEATURE = "mindmap-whole-notebook-snapshot-v2"
+MINDMAP_VISIBLE_SURFACE_GUARD_FEATURE = "mindmap-visible-surface-guard-v1"
 REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-arm-next-selection-default",
     "native-highlight-prefer-next-selection-v1",
@@ -133,6 +137,9 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-mn-object-existence-probe-v1",
     "native-mindmap-diff-apply-create-v1",
     "native-mindmap-delete-suggestion-confirm-v1",
+    DRAFT_SCOPE_BINDING_FEATURE,
+    WHOLE_NOTEBOOK_SNAPSHOT_FEATURE,
+    MINDMAP_VISIBLE_SURFACE_GUARD_FEATURE,
 ]
 ONEDRIVE_COMPANION_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 PDF_EXPORT_DIR = ONEDRIVE_COMPANION_DIR / "exports"
@@ -158,6 +165,7 @@ COMMON_CLOUD_PDF_RELS = [
     "Notability/论文",
 ]
 STOP_SIGNAL_MAX_AGE_SECONDS = 600
+REPLY_MINDMAP_CACHE_MAX_AGE_SECONDS = 120
 DB_PATH = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents/MN4NotebookDatabase/0/MarginNotes.sqlite"
 KNOWN_PDF_PATHS: dict[str, Path] = {}
 MINDMAP_APPEND_HINTS = (
@@ -345,7 +353,7 @@ NATIVE_QUEUE_ACTIONS = {
     "reload_web_panel",
     "probe_native_api_capabilities",
     "probe_pdf_selection",
-    "write_draft",
+    "write_draft_scope_bound_v1",
     "read_mindmap_tree",
     "scan_mn_objects",
     "probe_mn_object_existence",
@@ -2292,7 +2300,7 @@ def notebook_source_registry(
             )
         )
 
-    cache_access = pdf_cache_access_status(book_md5)
+    cache_access = pdf_cache_access_status(book_md5, payload)
     if str(cache_access.get("path") or ""):
         cache_path = str(cache_access.get("path") or "")
         sources.append(
@@ -3046,11 +3054,40 @@ def pdf_cache_key(book_md5: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", str(book_md5 or "").strip())[:96]
 
 
-def cached_pdf_for_book(book_md5: str) -> Path | None:
-    key = pdf_cache_key(book_md5)
+def normalize_document_context_key(payload: dict[str, Any]) -> str:
+    return str(payload.get("contextDocumentKey") or payload.get("context_document_key") or "").strip()
+
+
+def pdf_cache_storage_key(payload: dict[str, Any], book_md5: str = "") -> str:
+    legacy_key = pdf_cache_key(book_md5 or normalize_book_md5(payload))
+    context_key = normalize_document_context_key(payload)
+    if not context_key:
+        return legacy_key
+    digest = hashlib.sha256(context_key.encode("utf-8")).hexdigest()[:16]
+    return f"{legacy_key or 'document'}--{digest}"
+
+
+def pdf_cache_record_for_payload(payload: dict[str, Any], book_md5: str = "") -> tuple[str, dict[str, Any] | None]:
+    book_md5 = book_md5 or normalize_book_md5(payload)
+    index = pdf_cache_index()
+    storage_key = pdf_cache_storage_key(payload, book_md5)
+    record = index.get(storage_key)
+    if isinstance(record, dict):
+        return storage_key, record
+    legacy_key = pdf_cache_key(book_md5)
+    legacy_record = index.get(legacy_key)
+    if isinstance(legacy_record, dict):
+        path = Path(str(legacy_record.get("sourcePdf") or legacy_record.get("path") or ""))
+        if pdf_path_matches_payload_title(path, payload, book_md5):
+            return legacy_key, legacy_record
+    return storage_key, None
+
+
+def cached_pdf_for_book(book_md5: str, payload: dict[str, Any] | None = None) -> Path | None:
+    payload = payload if isinstance(payload, dict) else {"bookmd5": book_md5}
+    key, record = pdf_cache_record_for_payload(payload, book_md5)
     if not key:
         return None
-    record = pdf_cache_index().get(key)
     if not isinstance(record, dict):
         return None
     path = Path(str(record.get("path") or ""))
@@ -3070,6 +3107,28 @@ def pdf_title_keys(raw_values: list[str]) -> list[str]:
     return keys
 
 
+def pdf_title_acronym_keys(raw_values: list[str]) -> set[str]:
+    stopwords = {"a", "an", "and", "by", "for", "from", "in", "of", "on", "the", "to", "with"}
+    keys: set[str] = set()
+    for raw in raw_values:
+        normalized = normalize_pdf_title_key(raw)
+        collapsed = re.sub(r"[^0-9a-z]+", "", normalized)
+        if 4 <= len(collapsed) <= 12:
+            keys.add(collapsed)
+        tokens = [
+            token
+            for token in normalized.split()
+            if token not in stopwords and not token.isdigit() and token not in {"et", "al"}
+        ]
+        for start in range(len(tokens)):
+            acronym = ""
+            for token in tokens[start : start + 12]:
+                acronym += token[0]
+                if 4 <= len(acronym) <= 12:
+                    keys.add(acronym)
+    return keys
+
+
 def pdf_path_matches_payload_title(path: Path, payload: dict[str, Any], book_md5: str = "") -> bool:
     expected = pdf_title_keys(payload_pdf_name_values(payload))
     if not expected:
@@ -3083,17 +3142,20 @@ def pdf_path_matches_payload_title(path: Path, payload: dict[str, Any], book_md5
         if stripped != path.name:
             names.append(stripped)
     actual = pdf_title_keys(names)
-    return any(
+    if any(
         expected_key == actual_key
         or expected_key in actual_key
         or actual_key in expected_key
         for expected_key in expected
         for actual_key in actual
-    )
+    ):
+        return True
+    return bool(pdf_title_acronym_keys(payload_pdf_name_values(payload)) & pdf_title_acronym_keys(names))
 
 
-def pdf_cache_access_status(book_md5: str) -> dict[str, Any]:
-    key = pdf_cache_key(book_md5)
+def pdf_cache_access_status(book_md5: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {"bookmd5": book_md5}
+    key, record = pdf_cache_record_for_payload(payload, book_md5)
     if not key:
         return {
             "path": "",
@@ -3102,7 +3164,6 @@ def pdf_cache_access_status(book_md5: str) -> dict[str, Any]:
             "status": "MISSING",
             "message": "没有 bookmd5，无法检查 PDF 缓存",
         }
-    record = pdf_cache_index().get(key)
     if not isinstance(record, dict):
         return {
             "path": "",
@@ -3120,7 +3181,7 @@ def pdf_cache_access_status(book_md5: str) -> dict[str, Any]:
     return result
 
 
-def pending_pdf_cache_command(topic_id: str, book_md5: str) -> dict[str, Any] | None:
+def pending_pdf_cache_command(topic_id: str, book_md5: str, context_document_key: str = "") -> dict[str, Any] | None:
     if not topic_id:
         return None
     for path in queue_paths_for_topic(topic_id, book_md5):
@@ -3134,12 +3195,19 @@ def pending_pdf_cache_command(topic_id: str, book_md5: str) -> dict[str, Any] | 
                 continue
             if str(command.get("nativeAction") or "") != "cache_pdf_from_current_document":
                 continue
+            command_context_key = str(command.get("contextDocumentKey") or "")
+            if context_document_key and command_context_key and command_context_key != context_document_key:
+                continue
             command["_queue_id"] = str(record.get("id") or "")
             return command
     return None
 
 
-def clear_pending_pdf_cache_commands(topic_id: str, book_md5: str) -> dict[str, int]:
+def clear_pending_pdf_cache_commands(
+    topic_id: str,
+    book_md5: str,
+    context_document_key: str = "",
+) -> dict[str, int]:
     if not topic_id:
         return {"removed": 0, "remaining": 0}
     paths = queue_paths_for_topic(topic_id, book_md5)
@@ -3165,7 +3233,9 @@ def clear_pending_pdf_cache_commands(topic_id: str, book_md5: str) -> dict[str, 
                 isinstance(command, dict)
                 and str(command.get("nativeAction") or "") == "cache_pdf_from_current_document"
             )
-            if is_same_scope and is_pdf_cache_command:
+            command_context_key = str(command.get("contextDocumentKey") or "") if isinstance(command, dict) else ""
+            is_same_document = not context_document_key or not command_context_key or command_context_key == context_document_key
+            if is_same_scope and is_pdf_cache_command and is_same_document:
                 removed += 1
                 continue
             kept.append(line)
@@ -3180,10 +3250,16 @@ def clear_pending_pdf_cache_commands(topic_id: str, book_md5: str) -> dict[str, 
     return {"removed": removed, "remaining": remaining}
 
 
-def pdf_cache_progress_payload(topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
-    access = pdf_cache_access_status(book_md5)
+def pdf_cache_progress_payload(
+    topic_id: str = "",
+    book_md5: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {"topicid": topic_id, "bookmd5": book_md5}
+    context_document_key = normalize_document_context_key(payload)
+    access = pdf_cache_access_status(book_md5, payload)
     status = str(access.get("status") or "MISSING").upper()
-    pending_command = pending_pdf_cache_command(topic_id, book_md5)
+    pending_command = pending_pdf_cache_command(topic_id, book_md5, context_document_key)
     base: dict[str, Any] = {
         "state": "missing",
         "label": "PDF缓存：未就绪",
@@ -3241,9 +3317,13 @@ def pdf_cache_progress_payload(topic_id: str = "", book_md5: str = "") -> dict[s
     return base
 
 
+def pdf_cache_progress_for_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return pdf_cache_progress_payload(normalize_topic_id(payload), normalize_book_md5(payload), payload)
+
+
 def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
     book_md5 = normalize_book_md5(payload)
-    key = pdf_cache_key(book_md5)
+    key = pdf_cache_storage_key(payload, book_md5)
     if not key:
         return {"ok": False, "message": "缓存 PDF 失败：缺少 bookmd5。"}
     raw = str(payload.get("pdfBase64") or payload.get("fileBase64") or "").strip()
@@ -3268,6 +3348,8 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
     target.write_bytes(data)
     record = {
         "bookmd5": book_md5,
+        "contextDocumentKey": normalize_document_context_key(payload),
+        "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
         "path": str(target),
         "sourcePdf": str(payload.get("pdfPath") or payload.get("documentPath") or ""),
         "size": len(data),
@@ -3277,8 +3359,10 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
     index = pdf_cache_index()
     index[key] = record
     save_pdf_cache_index(index)
-    cleared_queue = clear_pending_pdf_cache_commands(normalize_topic_id(payload), book_md5)
-    pdf_cache = pdf_cache_progress_payload(normalize_topic_id(payload), book_md5)
+    cleared_queue = clear_pending_pdf_cache_commands(
+        normalize_topic_id(payload), book_md5, normalize_document_context_key(payload)
+    )
+    pdf_cache = pdf_cache_progress_for_payload(payload)
     return {
         "ok": True,
         "message": f"已缓存当前 PDF：{name}",
@@ -3295,7 +3379,7 @@ def cache_pdf_from_marginnote(payload: dict[str, Any]) -> dict[str, Any]:
 
 def cache_pdf_from_source_path(payload: dict[str, Any], source_pdf: Path) -> dict[str, Any] | None:
     book_md5 = normalize_book_md5(payload)
-    key = pdf_cache_key(book_md5)
+    key = pdf_cache_storage_key(payload, book_md5)
     if not key or not source_pdf or source_pdf.suffix.lower() != ".pdf":
         return None
     try:
@@ -3323,6 +3407,8 @@ def cache_pdf_from_source_path(payload: dict[str, Any], source_pdf: Path) -> dic
     target.write_bytes(data)
     record = {
         "bookmd5": book_md5,
+        "contextDocumentKey": normalize_document_context_key(payload),
+        "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
         "path": str(target),
         "sourcePdf": str(source_pdf),
         "size": len(data),
@@ -3332,8 +3418,10 @@ def cache_pdf_from_source_path(payload: dict[str, Any], source_pdf: Path) -> dic
     index = pdf_cache_index()
     index[key] = record
     save_pdf_cache_index(index)
-    cleared_queue = clear_pending_pdf_cache_commands(normalize_topic_id(payload), book_md5)
-    pdf_cache = pdf_cache_progress_payload(normalize_topic_id(payload), book_md5)
+    cleared_queue = clear_pending_pdf_cache_commands(
+        normalize_topic_id(payload), book_md5, normalize_document_context_key(payload)
+    )
+    pdf_cache = pdf_cache_progress_for_payload(payload)
     append_diagnostic_log(
         "info",
         "pdf.cache.direct",
@@ -3352,7 +3440,7 @@ def cache_pdf_from_source_path(payload: dict[str, Any], source_pdf: Path) -> dic
         ),
         "cache": record,
         "clearedPdfCacheQueue": cleared_queue,
-        "queue": queue_status_payload(normalize_topic_id(payload), book_md5),
+        "queue": queue_status_payload(normalize_topic_id(payload), book_md5, payload),
         "pdfCache": pdf_cache,
     }
 
@@ -3659,7 +3747,11 @@ def cancel_current_generation_process() -> dict[str, Any]:
     }
 
 
-def queue_status_payload(topic_id: str = "", book_md5: str = "") -> dict[str, Any]:
+def queue_status_payload(
+    topic_id: str = "",
+    book_md5: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     topic_id = topic_id or ""
     book_md5 = book_md5 or ""
     if topic_id:
@@ -3672,7 +3764,7 @@ def queue_status_payload(topic_id: str = "", book_md5: str = "") -> dict[str, An
         "pending": int(pending or 0),
         "stop": stop_status(),
         "run": active_run_status(),
-        "pdfCache": pdf_cache_progress_payload(topic_id, book_md5) if book_md5 else {
+        "pdfCache": pdf_cache_progress_payload(topic_id, book_md5, payload) if book_md5 else {
             "state": "unknown",
             "label": "PDF缓存：未识别文档",
             "detail": "当前上下文没有 bookmd5，暂时无法跟踪 PDF 缓存。",
@@ -4209,6 +4301,8 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
                 "prompt": str(payload.get("prompt") or ""),
                 "source": str(payload.get("source") or "queued-raw-action"),
                 "message": str(payload.get("message") or f"queued raw action: {action}"),
+                "contextDocumentKey": normalize_document_context_key(payload),
+                "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
             }
             if "replyDerivedMindmap" in payload:
                 command["replyDerivedMindmap"] = truthy_payload_flag(payload.get("replyDerivedMindmap"))
@@ -4223,6 +4317,7 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "topicid": topic_id,
         "bookmd5": book_md5,
+        "contextDocumentKey": normalize_document_context_key(payload),
         "command": command,
     }
     with queue_path(topic_id, book_md5).open("a", encoding="utf-8") as handle:
@@ -4266,6 +4361,8 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
         "message": "请 MN4 插件缓存当前 PDF。",
         "source": str(payload.get("source") or "request_pdf_cache"),
         "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "contextDocumentKey": normalize_document_context_key(payload),
+        "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
     }
     if candidates:
         command["pdfPath"] = str(candidates[0])
@@ -4284,8 +4381,8 @@ def request_pdf_cache(payload: dict[str, Any]) -> dict[str, Any]:
             "保持该文档在 MarginNote 4 中打开，插件轮询后会由 MN4 进程读取 PDF 并上传到 Companion 缓存。"
         ),
         "queued": queued["queued"],
-        "queue": queue_status_payload(topic_id, book_md5),
-        "pdfCache": pdf_cache_progress_payload(topic_id, book_md5),
+        "queue": queue_status_payload(topic_id, book_md5, payload),
+        "pdfCache": pdf_cache_progress_for_payload(payload),
     }
 
 
@@ -4295,14 +4392,19 @@ def request_mindmap_tree(payload: dict[str, Any]) -> dict[str, Any]:
     if not topic_id:
         return {"ok": False, "message": "请求读取脑图失败：缺少 topicid。"}
     target = payload.get("mindmapTarget") if isinstance(payload.get("mindmapTarget"), dict) else {}
+    whole_notebook = truthy_payload_flag(payload.get("wholeNotebook"))
+    mindmap_read_request_id = uuid.uuid4().hex
     command = {
         "nativeAction": "read_mindmap_tree",
         "message": "请 MN4 插件读取当前脑图或选中子树。",
         "source": str(payload.get("source") or "request_mindmap_tree"),
         "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "mindmapReadRequestId": mindmap_read_request_id,
         "selectedNoteId": str(payload.get("selectedNoteId") or target.get("selectedNoteId") or ""),
         "selectedNoteTitle": str(payload.get("selectedNoteTitle") or target.get("selectedNoteTitle") or ""),
         "targetMode": str(target.get("mode") or payload.get("targetMode") or "selected_or_document_root"),
+        "wholeNotebook": whole_notebook,
+        "scope": "whole_notebook" if whole_notebook else "selected_subtree",
         "workflowRunId": str(payload.get("workflowRunId") or ""),
     }
     queued = enqueue_command({**payload, "command": command})
@@ -4667,11 +4769,25 @@ def write_latest_mindmap_tree(record: dict[str, Any]) -> dict[str, Any]:
         "topicid": topic_id,
         "bookmd5": book_md5,
         "updatedAt": str(record.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+        "mindmapReadRequestId": str(extra.get("mindmapReadRequestId") or ""),
         "selectedNoteId": str(extra.get("selectedNoteId") or tree.get("noteId") or ""),
         "selectedNoteTitle": str(extra.get("selectedNoteTitle") or tree.get("title") or ""),
         "rootTitle": str(tree.get("title") or extra.get("selectedNoteTitle") or ""),
         "nodeCount": int(extra.get("nodeCount") or operation_runtime.count_mindmap_nodes(tree)),
         "truncatedCount": int(extra.get("truncatedCount") or 0),
+        "mindmapVisible": truthy_payload_flag(extra.get("mindmapVisible")),
+        "studyMode": extra.get("studyMode"),
+        "docMapSplitMode": extra.get("docMapSplitMode"),
+        "snapshotCapability": (
+            WHOLE_NOTEBOOK_SNAPSHOT_FEATURE
+            if str(extra.get("snapshotCapability") or "") == WHOLE_NOTEBOOK_SNAPSHOT_FEATURE
+            else ""
+        ),
+        "producerPluginVersion": str(record.get("pluginVersion") or ""),
+        "scope": str(
+            extra.get("scope")
+            or ("whole_notebook" if truthy_payload_flag(extra.get("wholeNotebook")) else "selected_subtree")
+        ),
         "currentMindmap": tree,
     }
     write_json_file(mindmap_tree_cache_path(topic_id, book_md5), payload)
@@ -4683,11 +4799,109 @@ def write_latest_mindmap_tree(record: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "cache": payload, "mnObjectRegistry": registry_result}
 
 
+def write_unavailable_mindmap_tree(record: dict[str, Any]) -> dict[str, Any]:
+    extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+    topic_id = str(record.get("topicid") or "")
+    book_md5 = str(record.get("bookmd5") or "")
+    if not topic_id:
+        return {"ok": False, "reason": "missing-topic"}
+    payload = {
+        "schema": "codex.mn.mindmapTreeCache.v1",
+        "sourceEvent": str(record.get("event") or "mindmapTreeReadUnavailable"),
+        "topicid": topic_id,
+        "bookmd5": book_md5,
+        "updatedAt": str(record.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+        "mindmapReadRequestId": str(extra.get("mindmapReadRequestId") or ""),
+        "mindmapVisible": False,
+        "mindmapUnavailableReason": str(extra.get("reason") or "mindmap-not-open"),
+        "studyMode": extra.get("studyMode"),
+        "docMapSplitMode": extra.get("docMapSplitMode"),
+        "scope": "unavailable",
+        "snapshotCapability": "",
+        "truncatedCount": 0,
+        "nodeCount": 0,
+        "currentMindmap": {},
+    }
+    write_json_file(mindmap_tree_cache_path(topic_id, book_md5), payload)
+    return {"ok": True, "cache": payload}
+
+
 def read_latest_mindmap_tree(topic_id: str, book_md5: str) -> dict[str, Any]:
     if not topic_id:
         return {}
     payload = read_json_file(mindmap_tree_cache_path(topic_id, book_md5), {})
     return payload if isinstance(payload, dict) else {}
+
+
+def reply_mindmap_cache_status(cache: dict[str, Any]) -> tuple[bool, str]:
+    if not cache:
+        return False, "missing"
+    if "mindmapVisible" not in cache:
+        return False, "missing-visibility"
+    if not truthy_payload_flag(cache.get("mindmapVisible")):
+        return False, str(cache.get("mindmapUnavailableReason") or "mindmap-not-open")
+    tree = cache.get("currentMindmap") if isinstance(cache.get("currentMindmap"), dict) else {}
+    if not tree:
+        return False, "missing"
+    if str(cache.get("scope") or "") != "whole_notebook":
+        return False, "partial-scope"
+    if str(cache.get("snapshotCapability") or "") != WHOLE_NOTEBOOK_SNAPSHOT_FEATURE:
+        return False, "untrusted-snapshot"
+    try:
+        truncated_count = int(cache.get("truncatedCount") or 0)
+    except (TypeError, ValueError):
+        truncated_count = 1
+    if truncated_count > 0:
+        return False, "truncated"
+    updated_epoch = event_epoch({"ts": cache.get("updatedAt")})
+    if updated_epoch <= 0:
+        return False, "stale"
+    age = time.time() - updated_epoch
+    if age < -30:
+        return False, "future"
+    if age > REPLY_MINDMAP_CACHE_MAX_AGE_SECONDS:
+        return False, "stale"
+    return True, "ready"
+
+
+def wait_for_reply_mindmap_refresh(
+    payload: dict[str, Any],
+    refresh: dict[str, Any],
+    attempts: int = 80,
+    interval_seconds: float = 0.25,
+) -> tuple[dict[str, Any], str]:
+    queued = refresh.get("queued") if isinstance(refresh.get("queued"), dict) else {}
+    if not refresh.get("ok") or not queued.get("id"):
+        return {}, "not-queued"
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    command = queued.get("command") if isinstance(queued.get("command"), dict) else {}
+    expected_request_id = str(command.get("mindmapReadRequestId") or "")
+    refresh_epoch = event_epoch(
+        {
+            "ts": str(command.get("requested_at") or queued.get("ts") or ""),
+        }
+    )
+    last_reason = "missing"
+    for _ in range(max(1, attempts)):
+        if stop_status().get("requested"):
+            return {}, "stopped"
+        time.sleep(max(0.0, interval_seconds))
+        cache = read_latest_mindmap_tree(topic_id, book_md5)
+        cache_request_id = str(cache.get("mindmapReadRequestId") or "")
+        if expected_request_id and cache_request_id != expected_request_id:
+            last_reason = "waiting-for-matching-snapshot"
+            continue
+        cache_epoch = event_epoch({"ts": cache.get("updatedAt")})
+        if refresh_epoch > 0 and cache_epoch < refresh_epoch:
+            last_reason = "waiting-for-fresh-snapshot"
+            continue
+        ready, last_reason = reply_mindmap_cache_status(cache)
+        if ready:
+            return cache, "ready"
+        if last_reason == "mindmap-not-open":
+            return {}, last_reason
+    return {}, last_reason
 
 
 def mindmap_tree_preview(tree: dict[str, Any], max_nodes: int = 24, max_depth: int = 2) -> list[dict[str, Any]]:
@@ -4847,11 +5061,15 @@ def request_web_panel_reload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def request_draft_write(payload: dict[str, Any]) -> dict[str, Any]:
-    topic_id = normalize_topic_id(payload)
-    book_md5 = normalize_book_md5(payload)
+    topic_id = str(payload.get("topicid") or "").strip()
+    book_md5 = str(payload.get("bookmd5") or "").strip()
     clean_id = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("id") or payload.get("draftId") or ""))[:80]
-    if not topic_id:
-        return {"ok": False, "message": "写入草稿失败：缺少 topicid。"}
+    if not topic_id or not book_md5:
+        return {
+            "ok": False,
+            "message": "写入草稿失败：请求必须显式提供 topicid 和 bookmd5。",
+            "reply": "已停止写入，避免使用默认上下文把草稿写到其他文档。",
+        }
     if not clean_id:
         return {"ok": False, "message": "写入草稿失败：缺少 draftId。"}
     draft = load_draft(clean_id)
@@ -4861,16 +5079,30 @@ def request_draft_write(payload: dict[str, Any]) -> dict[str, Any]:
     raw_draft = read_json_file(raw_draft_path, {})
     if not isinstance(raw_draft, dict) or not raw_draft:
         raw_draft = draft
+    draft_topic_id = str(raw_draft.get("topicid") or "").strip()
+    draft_book_md5 = str(raw_draft.get("bookmd5") or "").strip()
+    if not topic_id or not book_md5 or not draft_topic_id or not draft_book_md5:
+        return {
+            "ok": False,
+            "message": "写入草稿失败：缺少完整的 topicid/bookmd5 文档绑定。",
+            "reply": "该草稿只能预览，不能写入。请在目标 MarginNote 文档中重新生成草稿。",
+        }
+    if topic_id != draft_topic_id or book_md5 != draft_book_md5:
+        return {
+            "ok": False,
+            "message": "写入草稿失败：草稿文档绑定与当前文档不一致。",
+            "reply": "已停止写入，避免把草稿写到其他文档。请切回原文档或重新生成草稿。",
+        }
     raw_manifest = raw_draft.get("operationManifest") if isinstance(raw_draft.get("operationManifest"), dict) else {}
     if not raw_manifest:
         raw_manifest = draft_operation_manifest(
             raw_draft.get("cards") if isinstance(raw_draft.get("cards"), list) else [],
             raw_draft.get("mindmap") if isinstance(raw_draft.get("mindmap"), dict) else None,
             raw_draft.get("writeTarget") if isinstance(raw_draft.get("writeTarget"), dict) else {},
-            topic_id or str(raw_draft.get("topicid") or ""),
-            book_md5 or str(raw_draft.get("bookmd5") or ""),
+            draft_topic_id,
+            draft_book_md5,
         )
-    dry_run = operation_dry_run(raw_manifest, topic_id or str(raw_draft.get("topicid") or ""), book_md5 or str(raw_draft.get("bookmd5") or ""))
+    dry_run = operation_dry_run(raw_manifest, draft_topic_id, draft_book_md5)
     raw_manifest = {**raw_manifest, "dryRun": dry_run}
     raw_draft["operationManifest"] = raw_manifest
     if raw_draft_path.exists():
@@ -4888,9 +5120,36 @@ def request_draft_write(payload: dict[str, Any]) -> dict[str, Any]:
             "dryRun": dry_run,
             "operationManifest": raw_manifest,
         }
+    native_caps = latest_native_api_capabilities(topic_id, book_md5)
+    native_features = {
+        str(item)
+        for item in native_caps.get("handlerFeatures", [])
+        if item
+    }
+    if (
+        not native_caps.get("available")
+        or str(native_caps.get("pluginVersion") or "") != CURRENT_PLUGIN_VERSION
+        or DRAFT_SCOPE_BINDING_FEATURE not in native_features
+    ):
+        return {
+            "ok": False,
+            "message": "写入草稿失败：MarginNote 原生运行时尚未加载当前安全写入能力。",
+            "reply": (
+                "已停止写入，避免旧版运行时忽略文档绑定。\n\n"
+                "请重新打开 Codex 面板；若仍提示此错误，请完全退出并重开 MarginNote 4。"
+            ),
+            "requiredHandlerFeature": DRAFT_SCOPE_BINDING_FEATURE,
+            "nativeApiCapabilities": native_caps,
+            "draft": draft_summary(clean_id, raw_draft),
+            "dryRun": dry_run,
+        }
     command = {
-        "nativeAction": "write_draft",
+        "nativeAction": "write_draft_scope_bound_v1",
         "draftId": clean_id,
+        "aiEditOperation": True,
+        "expectedTopicId": draft_topic_id,
+        "expectedBookMd5": draft_book_md5,
+        "requiredHandlerFeature": DRAFT_SCOPE_BINDING_FEATURE,
         "message": "请 MN4 插件写入已确认草稿。",
         "source": str(payload.get("source") or "request_draft_write"),
         "requested_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -6587,6 +6846,36 @@ def ack_commands(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "message": "ack recorded", "removed": removed, "remaining": remaining}
 
 
+HISTORY_ERROR_RE = re.compile(
+    r"^\s*(?:真实\s*AI\s*后端不可用(?:\s*[:：]|$)|"
+    r"未生成(?:脑图|卡片|完整精读|回答)(?:\s*[:：]|$)|"
+    r"未生成(?:展开|重组)当前节点分支(?:\s*[:：]|$)|"
+    r"请先在\s*MarginNote\s*脑图里选中|"
+    r"回答中的脑图节点已存在(?:\s*[,，。:：]|$)|"
+    r"Codex\s*CLI\s*(?:调用失败|未返回内容)(?:\s*[:：]|$)|"
+    r"OpenAI\s*API\s*(?:请求失败|未返回内容)(?:\s*[:：]|$)|"
+    r"Codex\s*Companion\s*(?:请求失败|请求超时|未运行)(?:\s*[:：]|$)|"
+    r"阶段\s*[:：]\s*失败|backend unavailable(?:\s*[:：.]|$)|"
+    r"timed out waiting|codex-cli-error|openai-error|ai-unavailable)",
+    re.I,
+)
+
+
+def history_message_kind(item: dict[str, Any], role: str, content: str) -> str:
+    explicit = str(item.get("kind") or "").strip().lower()
+    if explicit in {"prompt", "answer", "error", "system"}:
+        return explicit
+    if role == "user":
+        return "prompt"
+    return "error" if HISTORY_ERROR_RE.search(content) else "answer"
+
+
+def history_lock(payload: dict[str, Any]) -> threading.RLock:
+    key = str(session_path(payload))
+    index = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % len(HISTORY_LOCKS)
+    return HISTORY_LOCKS[index]
+
+
 def load_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     path = session_path(payload)
     if not path.exists():
@@ -6599,13 +6888,19 @@ def load_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     if not isinstance(history, list):
         return []
     clean: list[dict[str, str]] = []
-    for item in history[-16:]:
+    for item in history:
         if not isinstance(item, dict):
             continue
         role = str(item.get("role") or "")
         content = str(item.get("content") or "")
         if role in {"user", "assistant"} and content:
-            clean.append({"role": role, "content": content})
+            clean.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "kind": history_message_kind(item, role, content),
+                }
+            )
     return clean
 
 
@@ -6681,15 +6976,22 @@ def read_conversation_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(history, list):
         history = []
     clean_history: list[dict[str, str]] = []
-    for item in history[-16:]:
+    for item in history:
         if not isinstance(item, dict):
             continue
         role = str(item.get("role") or "")
         content = str(item.get("content") or "")
         if role in {"user", "assistant"} and content:
-            clean_history.append({"role": role, "content": content})
+            clean_history.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "kind": history_message_kind(item, role, content),
+                }
+            )
     topic_id = str(data.get("topicid") or "")
     book_md5 = str(data.get("bookmd5") or "")
+    context_document_key = str(data.get("contextDocumentKey") or "")
     conversation_id = str(data.get("conversationId") or "")
     title = str(data.get("title") or conversation_title_from_history(clean_history) or "新对话")
     updated_at = str(data.get("updated_at") or "")
@@ -6699,6 +7001,8 @@ def read_conversation_file(path: Path) -> dict[str, Any] | None:
         "conversationId": conversation_id,
         "topicid": topic_id,
         "bookmd5": book_md5,
+        "contextDocumentKey": context_document_key,
+        "documentTitle": str(data.get("documentTitle") or ""),
         "source": str(data.get("source") or ""),
         "title": title,
         "updatedAt": updated_at,
@@ -6719,6 +7023,9 @@ def conversation_matches_payload(item: dict[str, Any], payload: dict[str, Any]) 
         return False
     if book_md5 and str(item.get("bookmd5") or "") != book_md5:
         return False
+    context_document_key = normalize_document_context_key(payload)
+    if context_document_key and str(item.get("contextDocumentKey") or "") != context_document_key:
+        return False
     requested_object_ref = object_ref_from_mapping(payload)
     requested_object_id = str(requested_object_ref.get("objectId") or "")
     if requested_object_id:
@@ -6735,6 +7042,8 @@ def conversation_summary(item: dict[str, Any]) -> dict[str, Any]:
         "conversationId": item.get("conversationId") or "",
         "topicid": item.get("topicid") or "",
         "bookmd5": item.get("bookmd5") or "",
+        "contextDocumentKey": item.get("contextDocumentKey") or "",
+        "documentTitle": item.get("documentTitle") or "",
         "title": item.get("title") or "新对话",
         "updatedAt": item.get("updatedAt") or "",
         "messageCount": int(item.get("messageCount") or 0),
@@ -6755,6 +7064,8 @@ def conversation_payload_for_new(payload: dict[str, Any]) -> dict[str, Any]:
         "conversationId": conversation_id,
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
+        "contextDocumentKey": normalize_document_context_key(payload),
+        "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
         "title": "新对话",
         "updatedAt": "",
         "messageCount": 0,
@@ -6836,27 +7147,44 @@ def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None
     body = {
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
+        "contextDocumentKey": normalize_document_context_key(payload),
+        "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
         "source": str(payload.get("source") or ""),
         "conversationId": conversation_id,
         "title": title,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "history": history[-16:],
+        "history": history,
     }
     if object_ref_has_identity(object_ref):
         body["objectRef"] = object_ref
         body["mnObjectId"] = str(object_ref.get("objectId") or "")
         body["mnObjectKind"] = str(object_ref.get("kind") or "")
         body["mnObjectTitle"] = str(object_ref.get("title") or "")
-    path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
-def append_history(payload: dict[str, Any], user_text: str, assistant_text: str) -> None:
-    history = load_history(payload)
-    if user_text:
-        history.append({"role": "user", "content": user_text[:5000]})
-    if assistant_text:
-        history.append({"role": "assistant", "content": assistant_text[:5000]})
-    save_history(payload, history)
+def append_history(
+    payload: dict[str, Any],
+    user_text: str,
+    assistant_text: str,
+    assistant_kind: str = "answer",
+) -> None:
+    with history_lock(payload):
+        history = load_history(payload)
+        if user_text:
+            history.append({"role": "user", "content": user_text, "kind": "prompt"})
+        if assistant_text:
+            kind = assistant_kind if assistant_kind in {"answer", "error", "system"} else "answer"
+            history.append({"role": "assistant", "content": assistant_text, "kind": kind})
+        save_history(payload, history)
 
 
 STALE_MISSING_PDF_HISTORY_RE = re.compile(
@@ -6867,9 +7195,20 @@ STALE_MISSING_PDF_HISTORY_RE = re.compile(
 
 def history_for_model(payload: dict[str, Any], model_input: str) -> list[dict[str, str]]:
     history = load_history(payload)[-8:]
-    if "当前文档全文检索片段" not in model_input:
-        return history
-    return [item for item in history if not STALE_MISSING_PDF_HISTORY_RE.search(str(item.get("content") or ""))]
+    if "当前文档全文检索片段" in model_input:
+        history = [
+            item
+            for item in history
+            if not STALE_MISSING_PDF_HISTORY_RE.search(str(item.get("content") or ""))
+        ]
+    return [
+        {
+            "role": str(item.get("role") or ""),
+            "content": truncate_text(str(item.get("content") or ""), 5000),
+        }
+        for item in history
+        if isinstance(item, dict)
+    ]
 
 
 def history_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -9671,6 +10010,16 @@ def append_event(payload: dict[str, Any]) -> dict[str, Any]:
             }
             if isinstance(cache_result.get("mnObjectRegistry"), dict):
                 record["mnObjectRegistry"] = cache_result["mnObjectRegistry"]
+    if record["event"] == "mindmapTreeReadUnavailable":
+        cache_result = write_unavailable_mindmap_tree(record)
+        if cache_result.get("ok"):
+            record["mindmapTreeCache"] = {
+                "schema": cache_result["cache"].get("schema"),
+                "nodeCount": 0,
+                "updatedAt": cache_result["cache"].get("updatedAt"),
+                "mindmapVisible": False,
+                "reason": cache_result["cache"].get("mindmapUnavailableReason"),
+            }
     if record["event"] == "mnObjectRegistryScanFinished":
         record["mnObjectRegistry"] = register_native_object_scan_event(record)
     return {"ok": True, "message": "event recorded", "event": record}
@@ -10902,9 +11251,9 @@ def resolve_pdf_source(payload: dict[str, Any], book_md5: str) -> tuple[Path | N
             explicit_error = f"传入的 PDF 路径不可用：{candidate}"
             break
     mismatched_sources: list[Path] = []
-    cached = cached_pdf_for_book(book_md5)
+    cached = cached_pdf_for_book(book_md5, payload)
     if cached:
-        record = pdf_cache_index().get(pdf_cache_key(book_md5))
+        _, record = pdf_cache_record_for_payload(payload, book_md5)
         source_pdf = Path(str(record.get("sourcePdf") or "")) if isinstance(record, dict) else None
         title_source = source_pdf if source_pdf and source_pdf.name else cached
         if pdf_path_matches_payload_title(title_source, payload, book_md5):
@@ -11231,7 +11580,7 @@ def diagnose_permissions(payload: dict[str, Any]) -> dict[str, Any]:
     file_access: dict[str, Any] = {}
     checks: list[dict[str, Any]] = []
 
-    file_access["pdfCache"] = pdf_cache_access_status(book_md5)
+    file_access["pdfCache"] = pdf_cache_access_status(book_md5, payload)
 
     if source_pdf:
         file_access["sourcePdf"] = probe_file_read_access(source_pdf)
@@ -12496,6 +12845,14 @@ def chat(payload: dict[str, Any]) -> dict[str, Any]:
     stopped = stop_response_after_generation(str(payload.get("action") or "chat"))
     if stopped:
         return stopped
+    if generation_backend_unavailable(backend):
+        append_history(payload, text, reply, assistant_kind="error")
+        return {
+            "ok": False,
+            "message": f"对话生成失败（{backend}）。",
+            "reply": reply,
+            "backend": backend,
+        }
     append_history(payload, text, reply)
     return {
         "ok": True,
@@ -12792,7 +13149,12 @@ def build_short_cards(text: str, reply: str, backend: str, payload: dict[str, An
 
 
 def with_mn_object(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
-    return {**result, "mnObject": agent_workbench.build_mn_object(payload)}
+    return {
+        **result,
+        "topicid": normalize_topic_id(payload),
+        "bookmd5": normalize_book_md5(payload),
+        "mnObject": agent_workbench.build_mn_object(payload),
+    }
 
 
 def generate_card(payload: dict[str, Any]) -> dict[str, Any]:
@@ -12805,7 +13167,7 @@ def generate_card(payload: dict[str, Any]) -> dict[str, Any]:
         return stopped
     if generation_backend_unavailable(backend):
         message = "未生成卡片：需要可用的 Codex CLI 或 OpenAI 后端。"
-        append_history(payload, text, message)
+        append_history(payload, text, message, assistant_kind="error")
         return {
             "ok": False,
             "message": message,
@@ -12961,6 +13323,18 @@ def mindmap_target_options(payload: dict[str, Any], current_target: dict[str, An
 
 
 def mindmap_target_status(payload: dict[str, Any]) -> dict[str, Any]:
+    if not truthy_payload_flag(payload.get("mindmapVisible")):
+        return {
+            "ok": True,
+            "message": "目标脑图：当前没有打开脑图，未选择任何写入位置。",
+            "mindmapTarget": {
+                "state": "blocked",
+                "label": "目标脑图：未打开脑图",
+                "detail": "当前只打开了文件。请先在 MarginNote 打开目标脑图，再生成或追加脑图。",
+                "target": {},
+                "options": [],
+            },
+        }
     document_key = mindmap_document_key(payload)
     if not document_key:
         return {
@@ -12997,6 +13371,13 @@ def mindmap_target_status(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_mindmap_target(payload: dict[str, Any]) -> dict[str, Any]:
+    if not truthy_payload_flag(payload.get("mindmapVisible")):
+        status = mindmap_target_status(payload)
+        return {
+            "ok": False,
+            "message": "无法设置目标脑图：当前没有打开脑图。",
+            "mindmapTarget": status["mindmapTarget"],
+        }
     document_key = mindmap_document_key(payload)
     if not document_key:
         return {
@@ -13033,6 +13414,8 @@ def update_mindmap_target(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def resolve_mindmap_write_target(payload: dict[str, Any]) -> dict[str, Any]:
+    if not truthy_payload_flag(payload.get("mindmapVisible")):
+        return {}
     explicit = normalize_mindmap_target(payload, payload.get("mindmapTarget"))
     if explicit:
         return explicit
@@ -13228,29 +13611,65 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
     stopped = stopped_response_if_needed("generate_mindmap")
     if stopped:
         return stopped
+    if "mindmapVisible" in payload and not truthy_payload_flag(payload.get("mindmapVisible")):
+        message = "当前只打开了文件，没有打开脑图；本次未选择或写入任何脑图。"
+        return {
+            "ok": False,
+            "message": message,
+            "reply": "请先在 MarginNote 中打开目标脑图，再点击“生成脑图树”。",
+            "mindmapRefreshRequired": False,
+            "mindmapRefreshReason": "mindmap-not-open",
+        }
     reply_derived = is_reply_derived_mindmap_request(payload)
     current_mindmap: dict[str, Any] = {}
+    tree_cache: dict[str, Any] = {}
+    generation_payload = dict(payload)
     if reply_derived:
         tree_cache = read_latest_mindmap_tree(
             normalize_topic_id(payload),
             normalize_book_md5(payload),
         )
-        current_mindmap = _payload_mindmap(tree_cache.get("currentMindmap"))
-        if not current_mindmap:
-            refresh = request_mindmap_tree({**payload, "source": "reply-derived-mindmap"})
-            return {
-                "ok": False,
-                "message": "正在读取当前脑图，请读取完成后再次点击“生成脑图树”。",
-                "reply": (
-                    "为了避免覆盖或把回答挂到错误脑图，Codex Companion 需要先读取当前脑图。"
-                    "已请求 MarginNote 刷新脑图树；读取完成后再次点击“生成脑图树”。"
-                ),
-                "mindmapRefreshRequired": True,
-                "mindmapRefresh": refresh,
-            }
+        cache_ready, cache_reason = reply_mindmap_cache_status(tree_cache)
+        if cache_ready:
+            current_mindmap = _payload_mindmap(tree_cache.get("currentMindmap"))
+        else:
+            refresh = request_mindmap_tree(
+                {
+                    **payload,
+                    "source": "reply-derived-mindmap",
+                    "wholeNotebook": True,
+                }
+            )
+            tree_cache, refreshed_reason = wait_for_reply_mindmap_refresh(payload, refresh)
+            if tree_cache:
+                current_mindmap = _payload_mindmap(tree_cache.get("currentMindmap"))
+            else:
+                stopped = stopped_response_if_needed("generate_mindmap")
+                if stopped:
+                    return stopped
+                return {
+                    "ok": False,
+                    "message": "当前脑图读取未在本次请求内完成，已停止生成以避免写错脑图。",
+                    "reply": (
+                        "Codex Companion 已请求 MarginNote 读取当前脑图，但没有及时取得完整快照。"
+                        "本次不会生成或写入其他脑图；请保持目标脑图页打开后重试。"
+                    ),
+                    "mindmapRefreshRequired": True,
+                    "mindmapRefreshReason": (
+                        cache_reason if refreshed_reason == "not-queued" else refreshed_reason or cache_reason
+                    ),
+                    "mindmapRefresh": refresh,
+                }
+        if not any(
+            str(payload.get(key) or "").strip()
+            for key in ("documentTitle", "bookTitle", "title", "sourceFileName", "fileName", "pdfName")
+        ):
+            current_title = str(current_mindmap.get("title") or "").strip()
+            if current_title and current_title != "notebook-root":
+                generation_payload["documentTitle"] = current_title
     if is_mindmap_append_request(payload) and not has_selected_node_context(payload):
         message = "请先在 MarginNote 脑图里选中一个脑图节点，再执行“补到当前脑图/合并脑图”。"
-        append_history(payload, text, message)
+        append_history(payload, text, message, assistant_kind="error")
         return {
             "ok": False,
             "message": message,
@@ -13260,31 +13679,39 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
                 "selectedNoteTitle 或 selectedNoteText 后，才会把生成结果作为子节点合并进去。"
             ),
         }
-    reply, backend = generate_reply(payload, "generate_mindmap")
+    reply, backend = generate_reply(generation_payload, "generate_mindmap")
     stopped = stop_response_after_generation("generate_mindmap")
     if stopped:
         return stopped
     if generation_backend_unavailable(backend):
         message = "未生成脑图：内置模板已关闭，需要可用的 Codex CLI 或 OpenAI 后端。"
-        append_history(payload, text, message)
+        append_history(payload, text, message, assistant_kind="error")
         return {
             "ok": False,
             "message": message,
             "reply": f"{message}\n\n后端状态：{backend}\n\n{reply}",
             "backend": backend,
         }
-    tree = model_reply_mindmap_tree(payload, reply)
+    tree = model_reply_mindmap_tree(generation_payload, reply)
     attachment: dict[str, Any] = {}
     create_only: dict[str, Any] = {}
     if reply_derived:
         planned = mindmap_attachment.plan_reply_attachment(
             tree,
             current_mindmap,
-            str(payload.get("selectedNoteId") or ""),
-            document_root_mindmap_target(payload),
+            str(generation_payload.get("selectedNoteId") or ""),
+            document_root_mindmap_target(generation_payload),
+            expected_document_id=normalize_book_md5(generation_payload),
         )
         tree = planned["tree"]
         write_target = planned["writeTarget"]
+        write_target["expectedDocumentId"] = normalize_book_md5(payload)
+        write_target["baselineNodeCount"] = int(
+            tree_cache.get("nodeCount")
+            or operation_runtime.count_mindmap_nodes(current_mindmap)
+        )
+        write_target["baselineUpdatedAt"] = str(tree_cache.get("updatedAt") or "")
+        write_target["baselineFingerprint"] = mindmap_attachment.tree_fingerprint(current_mindmap)
         tree["writeTarget"] = write_target
         tree["mergeIntoSelected"] = False
         if write_target.get("mode") == "document_root":
@@ -13304,7 +13731,7 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
         tree["stats"] = stats
         if int(stats.get("nodeCount") or 0) <= 0:
             message = "回答中的脑图节点已存在，没有需要新增的节点。"
-            append_history(payload, text, message)
+            append_history(payload, text, message, assistant_kind="error")
             return {
                 "ok": False,
                 "message": message,
@@ -13361,7 +13788,7 @@ def generate_current_node_mindmap(
         return stopped
     if generation_backend_unavailable(backend):
         message = f"未生成{message_label}：需要可用的 Codex CLI 或 OpenAI 后端。"
-        append_history(payload, text, message)
+        append_history(payload, text, message, assistant_kind="error")
         return {
             "ok": False,
             "message": message,
@@ -13437,7 +13864,7 @@ def generate_full_reading(payload: dict[str, Any]) -> dict[str, Any]:
         return stopped
     if generation_backend_unavailable(backend):
         message = "未生成完整精读：需要可用的 Codex CLI 或 OpenAI 后端。"
-        append_history(payload, text or "完整精读", message)
+        append_history(payload, text or "完整精读", message, assistant_kind="error")
         return {
             "ok": False,
             "message": message,
@@ -13718,7 +14145,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
     if action == "native_highlight_wizard_status":
         return native_highlight_wizard_status(payload)
     if action == "queue_status":
-        queue = queue_status_payload(normalize_topic_id(payload), normalize_book_md5(payload))
+        queue = queue_status_payload(normalize_topic_id(payload), normalize_book_md5(payload), payload)
         run_text = format_run_status_text(queue.get("run") if isinstance(queue.get("run"), dict) else {})
         reply = f"当前队列待处理：{queue['pending']}"
         if run_text:

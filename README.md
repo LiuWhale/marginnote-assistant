@@ -37,6 +37,7 @@ If the main experience is still "ask, read an answer, click card or mind-map but
 ## What It Can Do
 
 - Chat inside the MarginNote 4 panel with context from the current selection, node, or document.
+- Follow the file currently open in MarginNote. In a mind map that contains multiple files, switching the reader file refreshes context and starts a separate document conversation; the plugin never substitutes the notebook's first file for the open file.
 - Open in `Chat` mode by default, with the conversation, input box, send button, and PDF cache status visible. Normal explanation, follow-up questions, and selection Q&A do not require opening the workspace.
 - Switch to the optional `Tools` mode for a simple task center: current status, next-step guidance, and four large actions for reading, mind-map work, review cards, and write verification/rollback.
 - Tools mode generation buttons stage editable prompts in the input box instead of immediately launching long work; the normal send button still controls execution and queueing.
@@ -148,10 +149,11 @@ Select text in a PDF or note node, then ask a question or click an explanation a
 
 1. Choose the target mind map at the top of the chat.
 2. Click `生成脑图树` under the latest answer, or ask for a structured mind map from the full document.
-3. Switch to `Advanced` when you need `Mindmap Studio`, then read the existing tree, preview the Diff, apply selected changes, verify the transaction, or roll it back.
-4. The plugin keeps the latest create/update/merge/move/delete-suggestion summary visible in the operation workspace.
-5. Uncheck nodes you do not want to write, or edit a node title/body directly in the Diff panel; the preview marks skipped nodes and saves edited nodes before writing.
-6. Confirm below the answer: `接受` writes or locally applies the change, while `拒绝` discards the draft.
+3. For answer-derived mind maps, the plugin first reads a fresh, untruncated whole-notebook tree. It attaches to an existing node only when at least three non-overlapping semantic signals match and the native writer revalidates the full-tree fingerprint, note ID, title, body snapshot, and document identity; otherwise it uses the current document root. Partial, stale, future-dated, or truncated caches only trigger a refresh.
+4. Switch to `Advanced` when you need `Mindmap Studio`, then read the existing tree, preview the Diff, apply selected changes, verify the transaction, or roll it back.
+5. The plugin keeps the latest create/update/merge/move/delete-suggestion summary visible in the operation workspace.
+6. Uncheck nodes you do not want to write, or edit a node title/body directly in the Diff panel; the preview marks skipped nodes and saves edited nodes before writing.
+7. Confirm below the answer: `接受` keeps the transaction, while `拒绝` removes only note IDs recorded by that transaction. It never invokes global Undo. Answer-level mind-map actions never rename, move, or overwrite existing nodes.
 
 If the current document has no suitable mind-map page, create or select the target in MarginNote first, then refresh the target list. This is safer than silently writing to an unrelated existing mind map.
 
@@ -161,7 +163,7 @@ Cards are split into short, reviewable items rather than one oversized note. Gen
 
 ### New Conversation And History
 
-The main chat can start a new conversation. History is a separate page for viewing or clearing conversations scoped to the current notebook / document.
+The main chat can start a new conversation. History is a separate page for viewing or clearing conversations scoped to the current open file. When the open file changes, the current chat starts fresh and the previous file's conversation remains in its own history. A multi-document mind map is supported as a container, but normal chat and full-document caching remain bound to one open file at a time; cross-document retrieval must be requested explicitly.
 
 ## Full-Document Reading And Caching
 
@@ -327,20 +329,20 @@ The browser action gate records `buttonActionDeltas`, so repeated-action control
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.48
+python3 package_release.py 0.4.51
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.48-latest-dist.zip --mnaddon release/CodexCompanion-0.4.48-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.48-latest-dist.zip --mnaddon release/CodexCompanion-0.4.48-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.51-latest-dist.zip --mnaddon release/CodexCompanion-0.4.51-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.51-latest-dist.zip --mnaddon release/CodexCompanion-0.4.51-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.48-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.51-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

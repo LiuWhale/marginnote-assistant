@@ -15,7 +15,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_VERSION = "0.4.42"
+EXTENSION_MANIFEST = ROOT / "extension/codex.mn.assistant/mnaddon.json"
+DEFAULT_VERSION = str(json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"])
 DEFAULT_ZIP = ROOT / f"release/CodexCompanion-{DEFAULT_VERSION}-latest-dist.zip"
 DEFAULT_OUTPUT = ROOT / f"release/CodexCompanion-{DEFAULT_VERSION}-latest.pkg"
 ONEDRIVE_DIR = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion"

@@ -27,6 +27,21 @@ class ReleasePackagingTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_pkg_builder_default_version_matches_extension_manifest(self) -> None:
+        spec = importlib.util.spec_from_file_location("codex_mn_build_pkg_version", PKG_BUILDER_PATH)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        manifest = json.loads(
+            (PACKAGE_ROOT / "extension/codex.mn.assistant/mnaddon.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(module.DEFAULT_VERSION, manifest["version"])
+        self.assertIn(f"-{manifest['version']}-", module.DEFAULT_ZIP.name)
+        self.assertIn(f"-{manifest['version']}-", module.DEFAULT_OUTPUT.name)
+
     def test_release_excludes_private_env_but_keeps_example_template(self) -> None:
         module = self.load_module()
 

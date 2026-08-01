@@ -37,6 +37,7 @@ v3 目标不是“当前插件加更多按钮”。只有下面这些产品合�
 ## 现在能做什么
 
 - 在 MarginNote 4 面板内直接对话，自动使用当前选区、当前节点或当前文档上下文。
+- 对话始终跟随 MarginNote 当前打开的文件。一个脑图包含多个文件时，切换阅读器文件会立即刷新上下文并开启该文件的独立对话，不会把脑图中的第一个文件当成当前材料。
 - 默认进入 `对话` 模式，完整显示聊天历史、输入框、发送按钮和 PDF 缓存状态；普通解释、追问和选区问答不需要打开工作台。
 - 可切到 `工具` 模式；默认只显示 `当前状态`、`下一步建议` 和四个大任务按钮：解读当前资料、生成/整理脑图、生成复习卡、检查写入/回滚。
 - 工具页的生成类按钮不会直接跑长任务，而是把可编辑 prompt 放进输入框，再由 `发送 / 可排队` 进入队列。
@@ -148,10 +149,11 @@ Uninstall Codex Companion.command
 
 1. 先在顶部选择脑图写入目标。
 2. 对当前回答点击 `生成脑图树`，或直接要求“根据全文生成结构化脑图”。
-3. 需要脑图对象操作时切到 `高级` 的 `Mindmap Studio`，按需要读取现有脑图、预览 Diff、应用所选、验证事务或回滚事务。
-4. 插件会在操作台常驻显示新增、更新、合并、移动、建议删除统计。
-5. 取消勾选不想写入的节点，或直接在 Diff 面板里修改节点标题/正文；预览会标记跳过节点，并在写入前保存节点编辑。
-6. 在回答下方确认：`接受` 写入或局部应用变更，`拒绝` 丢弃本次草稿。
+3. 回答下方生成脑图时，插件会先读取一份完整、未截断且刚更新的当前 notebook 脑图树。只有至少三个互不重叠的语义信号匹配，并且写入前再次核对整树指纹、noteId、标题、正文快照和文档身份时，才会挂到已有节点；否则写到当前文档脑图根。局部、过期、未来时间戳或截断的缓存只会触发刷新，不会继续生成。
+4. 需要脑图对象操作时切到 `高级` 的 `Mindmap Studio`，按需要读取现有脑图、预览 Diff、应用所选、验证事务或回滚事务。
+5. 插件会在操作台常驻显示新增、更新、合并、移动、建议删除统计。
+6. 取消勾选不想写入的节点，或直接在 Diff 面板里修改节点标题/正文；预览会标记跳过节点，并在写入前保存节点编辑。
+7. 在回答下方确认：`接受` 写入或局部应用变更，`拒绝` 只删除本次事务记录的 noteId，不调用全局撤销。已有节点不会被回答级脑图动作重命名、移动或覆盖。
 
 如果当前文档没有合适的脑图页面，先在 MarginNote 中创建或选中目标，再刷新目标列表。这样比静默写入某个旧脑图安全。
 
@@ -161,7 +163,7 @@ Uninstall Codex Companion.command
 
 ### 新对话和历史
 
-主界面可以开启新对话；历史页是独立页面，用来查看或清理当前 notebook / document 下的对话记录。带有当前 `MNObject` 的会话会保存 `objectRef/mnObjectId`，后续可以只查看某个选区、卡片或文档对象相关的对话。
+主界面可以开启新对话；历史页是独立页面，用来查看或清理当前打开文件的对话记录。切换文件后，插件会为新文件开启独立对话，旧文件的对话仍保留在它自己的历史里。一个脑图可以包含多个文件，但普通对话和全文缓存一次只绑定当前打开文件；只有明确请求跨文档检索时才会读取其他来源。带有当前 `MNObject` 的会话会保存 `objectRef/mnObjectId`，后续可以只查看某个选区、卡片或文档对象相关的对话。
 
 ## 全文读取和缓存
 
@@ -327,20 +329,20 @@ python3 ui_functional_acceptance.py --document-title "任意文档 UI 验收.pdf
 构建 release zip：
 
 ```bash
-python3 package_release.py 0.4.48
+python3 package_release.py 0.4.51
 ```
 
 Smoke test：
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.48-latest-dist.zip --mnaddon release/CodexCompanion-0.4.48-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.48-latest-dist.zip --mnaddon release/CodexCompanion-0.4.48-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.51-latest-dist.zip --mnaddon release/CodexCompanion-0.4.51-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.51-latest-dist.zip --mnaddon release/CodexCompanion-0.4.51-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance：
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.48-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.51-latest-dist.zip --json
 ```
 
 Release acceptance 可能因为机器相关证据不足而阻塞，例如原生高亮证据、签名/公证证据、跨机器安装证据。这些是发布证据检查，不代表源码打包失败。

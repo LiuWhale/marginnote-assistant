@@ -479,7 +479,13 @@ CodexWebPanelController.prototype.handleBridgeUrl = function(raw) {
   if (lower.indexOf('codexpaper://write_draft') === 0) {
     var draftId = params.id || params.draftId || '';
     this.setStatus('正在写入草稿：' + draftId);
-    if (this.addon && this.addon.writeDraft) this.addon.writeDraft(draftId, {aiEditOperation: params.aiEdit === '1'});
+    if (this.addon && this.addon.writeDraft) {
+      this.addon.writeDraft(draftId, {
+        aiEditOperation: true,
+        expectedTopicId: params.expectedTopicId || params.topicid || '',
+        expectedBookMd5: params.expectedBookMd5 || params.bookmd5 || ''
+      });
+    }
     return false;
   }
   if (lower.indexOf('codexpaper://upload_pdf') === 0) {
@@ -564,6 +570,10 @@ CodexWebPanelController.prototype.setStatus = function(text) {
 CodexWebPanelController.prototype.setReply = function(text) {
   this.lastReplyValue = text ? String(text) : '';
   this.callPanel('setReply', {text: this.lastReplyValue});
+};
+
+CodexWebPanelController.prototype.setError = function(text) {
+  this.callPanel('setError', {text: text ? String(text) : ''});
 };
 
 CodexWebPanelController.prototype.setAiEditOperationReady = function(payload) {

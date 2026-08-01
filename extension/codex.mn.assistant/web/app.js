@@ -1931,7 +1931,8 @@
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
       if (item.role === 'user') addMessage('user', item.content || '');
-      else addCompletedAssistantReply(item.content || '', false);
+      else if (item.kind === 'answer') addCompletedAssistantReply(item.content || '', false);
+      else addMessage('assistant', item.content || '');
     }
   }
 
@@ -2228,7 +2229,7 @@
     result = result || {};
     if (result.message) window.CodexPanel.setStatus({text: result.message});
     if (showReply && result.reply) {
-      if (action === 'chat' || action === 'explain_selection') {
+      if (result.ok === true && (action === 'chat' || action === 'explain_selection' || action === 'goal_run')) {
         addAssistantReplyWithActions(result.reply);
       } else {
         addMessage('assistant', result.reply);
@@ -2257,6 +2258,8 @@
   function postCompanion(action, extra, done, options) {
     options = options || {};
     var xhr = new XMLHttpRequest();
+    var requestPayload = companionPayload(action, extra);
+    var requestDocumentKey = String(requestPayload.contextDocumentKey || state.contextDocumentKey || '');
     xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
     setProgressStage(
@@ -2265,6 +2268,17 @@
     );
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
+      if (requestDocumentKey && state.contextDocumentKey && requestDocumentKey !== state.contextDocumentKey) {
+        var staleDocumentResponse = {
+          ok: true,
+          staleDocumentResponse: true,
+          message: '当前文件已切换，上一文件的结果已保留在其历史对话中。'
+        };
+        setWebRunLock(false);
+        window.CodexPanel.setBusy({busy: false});
+        finishProgressStage('已切换文件', staleDocumentResponse.message);
+        return;
+      }
       setProgressStage('已收到结果', 'Companion 已返回，正在解析结果并更新面板。');
       var result = displayCompanionResult(parseCompanionResult(xhr), options.showReply !== false, action);
       if (done) done(result || {});
@@ -2276,7 +2290,7 @@
       window.CodexPanel.setStatus({text: result.message});
       if (done) done(result);
     };
-    xhr.send(JSON.stringify(companionPayload(action, extra)));
+    xhr.send(JSON.stringify(requestPayload));
   }
 
   function postCompanionPath(path, action, extra, done) {
@@ -6906,6 +6920,11 @@
       deferNativeQueuedCommand(command);
       return;
     }
+    var queuedDocumentKey = String(command.contextDocumentKey || '');
+    if (queuedDocumentKey && state.contextDocumentKey && queuedDocumentKey !== state.contextDocumentKey) {
+      ackAndSkipQueuedCommand(command, '任务属于另一个文件，已阻止在当前文件中执行');
+      return;
+    }
     var rawAction = command.rawAction || command.action || '';
     var queueId = command._queue_id || '';
     var prompt = command.prompt || '';
@@ -8703,6 +8722,12 @@
     accept.className = 'ai-edit-accept';
     accept.type = 'button';
     accept.textContent = '接受';
+    var partialFailure = draft && draft.partial === true;
+    if (partialFailure) {
+      accept.disabled = true;
+      accept.style.display = 'none';
+      panel.setAttribute('data-state', 'partial_failed');
+    }
     accept.addEventListener('click', function(ev) {
       releaseButtonFocus(ev.currentTarget);
       state.draft = draft || state.draft;
@@ -8719,13 +8744,16 @@
     });
     var status = document.createElement('div');
     status.className = 'ai-edit-status';
-    status.textContent = '等待确认';
+    status.textContent = partialFailure
+      ? '写入未完整完成，仅可拒绝并回滚本次新增内容。'
+      : '等待确认';
     var secondaryActions = document.createElement('div');
     secondaryActions.className = 'ai-edit-secondary-actions';
     var reviewQueue = document.createElement('button');
     reviewQueue.className = 'small-button ai-edit-review-queue';
     reviewQueue.type = 'button';
     reviewQueue.textContent = '加入复习队列';
+    if (partialFailure) reviewQueue.style.display = 'none';
     reviewQueue.addEventListener('click', function(ev) {
       releaseButtonFocus(ev.currentTarget);
       addDraftToReviewQueue(panel, draft);
@@ -9592,6 +9620,18 @@
 
   function ensureMindmapTargetReady(action) {
     if (action !== 'generate_mindmap' && action !== 'generate_full_reading') return true;
+    if (action === 'generate_mindmap' && (!state.context || state.context.mindmapVisible !== true)) {
+      var closedMessage = '当前没有打开脑图：未选择任何写入位置。请先在 MarginNote 打开目标脑图。';
+      addMessage('assistant', closedMessage);
+      renderMindmapTargetBar({
+        state: 'blocked',
+        label: '目标脑图：未打开脑图',
+        detail: closedMessage,
+        target: {},
+        options: []
+      });
+      return false;
+    }
     var targetState = state.mindmapTarget || {};
     var status = normalizeMindmapTargetState(targetState);
     if (status === 'blocked' || status === 'error') {
@@ -10370,6 +10410,10 @@
       addMessage('assistant', '没有待写入草稿。');
       return;
     }
+    if (state.draft.partial === true) {
+      setAiEditOperationStatus(panel, '写入未完整完成，仅可拒绝并回滚。', 'partial_failed');
+      return;
+    }
     var transactionId = currentAiEditTransactionId(panel);
     if (transactionId) {
       setAiEditOperationBusy(panel, true);
@@ -10512,7 +10556,7 @@
     var ctx = state.context || {};
     var topicid = String(ctx.topicid || ctx.notebookid || '');
     var bookmd5 = String(ctx.bookmd5 || ctx.docmd5 || '');
-    var docKey = String(bookmd5 || ctx.documentTitle || ctx.pdfPath || ctx.documentPath || '');
+    var docKey = String(ctx.contextDocumentKey || bookmd5 || ctx.documentTitle || ctx.pdfPath || ctx.documentPath || '');
     if (!topicid || !bookmd5 || !docKey) return;
     if (state.autoPdfCacheRequestedKey === docKey) return;
     var cacheState = normalizePdfCacheState(state.pdfCache);
@@ -10537,19 +10581,40 @@
     }, {showReply: false});
   }
 
+  function fallbackContextDocumentKey(ctx) {
+    ctx = ctx || {};
+    return [
+      String(ctx.topicid || ctx.notebookid || ''),
+      String(ctx.bookmd5 || ctx.docmd5 || ''),
+      String(ctx.pdfPath || ctx.documentPath || ''),
+      String(ctx.documentTitle || ctx.documentFileName || '')
+    ].join('|');
+  }
+
+  function resetConversationForDocumentChange(ctx) {
+    state.conversationId = '';
+    state.sessionId = '';
+    state.conversations = [];
+    state.autoPdfCacheRequestedKey = '';
+    state.pdfCache = {state: 'unknown'};
+    state.lastPromptFromSelection = '';
+    state.latestAssistantReply = '';
+    state.pendingGuideAction = '';
+    state.pendingGuidePrompt = '';
+    state.draft = null;
+    state.pendingAiEditDrafts = {};
+    renderPdfCacheBanner(state.pdfCache);
+    clearMessages();
+    var title = String((ctx && (ctx.documentTitle || ctx.documentFileName)) || '当前文件');
+    addMessage('assistant', '已切换到《' + title + '》，后续消息将使用这个文件，并保存到独立的历史对话。');
+    closeConversationHistory();
+  }
+
   function renderContext(ctx) {
     state.context = repairContextPayload(ctx || {});
-    var docKey = String(
-      state.context.bookmd5 ||
-      state.context.docmd5 ||
-      state.context.documentTitle ||
-      state.context.pdfPath ||
-      state.context.documentPath ||
-      ''
-    );
+    var docKey = String(state.context.contextDocumentKey || fallbackContextDocumentKey(state.context));
     if (docKey && state.contextDocumentKey && docKey !== state.contextDocumentKey) {
-      state.pdfCache = {state: 'unknown'};
-      renderPdfCacheBanner(state.pdfCache);
+      resetConversationForDocumentChange(state.context);
     }
     if (docKey) state.contextDocumentKey = docKey;
     renderContextSourceLine(state.context);
@@ -10590,6 +10655,7 @@
       compactText(state.lastSourcePdfPath)
     );
     var scope = currentContextScope();
+    var selectedNodeDocument = String(ctx.documentContextSource || '') === 'selected_mindmap_node';
     if (scope === 'selection') {
       if (!selectedSources.length) {
         line.textContent = 'AI 将使用：选区/节点（当前未选中）';
@@ -10601,13 +10667,15 @@
       return;
     }
     if (scope === 'document') {
-      line.textContent = hasDocument ? 'AI 将使用：当前文档全文检索' : 'AI 将使用：全文检索（当前未识别 PDF）';
+      line.textContent = hasDocument ?
+        (selectedNodeDocument ? 'AI 将使用：当前节点关联文件全文检索' : 'AI 将使用：当前文档全文检索') :
+        'AI 将使用：全文检索（当前未识别 PDF）';
       line.setAttribute('data-context-state', hasDocument ? 'ready' : 'empty');
       return;
     }
     var sources = selectedSources.slice();
     if (hasDocument) {
-      sources.push('当前文档');
+      sources.push(selectedNodeDocument ? '当前节点关联文件' : '当前文档');
     }
 
     if (!sources.length) {
@@ -10662,8 +10730,16 @@
         }
       }
     },
+    setError: function(payload) {
+      var text = payload && payload.text ? String(payload.text) : '';
+      if (text) addMessage('assistant', text);
+    },
     setAiEditOperationReady: function(payload) {
       payload = payload || {};
+      if (payload.partial === true) {
+        payload.ok = false;
+        payload.status = 'partial_failed';
+      }
       var draftId = payload.draftId || payload.id || '';
       var draft = draftId && state.pendingAiEditDrafts ? state.pendingAiEditDrafts[draftId] : null;
       draft = draft || {};

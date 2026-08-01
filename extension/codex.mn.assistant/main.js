@@ -4,7 +4,7 @@ JSB.newAddon = function(mainPath) {
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
   var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.48';
+  var PluginVersion = '0.4.51';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -26,7 +26,10 @@ JSB.newAddon = function(mainPath) {
     'native-mn-object-registry-scan-v1',
     'native-mn-object-existence-probe-v1',
     'native-mindmap-diff-apply-create-v1',
-    'native-mindmap-delete-suggestion-confirm-v1'
+    'native-mindmap-delete-suggestion-confirm-v1',
+    'draft-write-scope-binding-v1',
+    'mindmap-whole-notebook-snapshot-v2',
+    'mindmap-visible-surface-guard-v1'
   ];
 
   function isNil(value) {
@@ -36,6 +39,15 @@ JSB.newAddon = function(mainPath) {
   function safeString(value) {
     if (isNil(value)) return '';
     return String(value);
+  }
+
+  function isExplicitTrue(value) {
+    if (value === true || value === 1) return true;
+    try {
+      if (value && typeof value.boolValue === 'function') return !!value.boolValue();
+    } catch (err) {}
+    var text = safeString(value).toLowerCase();
+    return text === 'true' || text === '1';
   }
 
   function looksLikePdfMathUnicodeLoss(text) {
@@ -263,6 +275,34 @@ JSB.newAddon = function(mainPath) {
     return isNaN(parsed) ? 0 : parsed;
   }
 
+  function mindmapSurfaceState(controller) {
+    var rawStudyMode = valueOf(controller, 'studyMode');
+    var rawSplitMode = valueOf(controller, 'docMapSplitMode');
+    var studyModeKnown = !isNil(rawStudyMode);
+    var splitModeKnown = !isNil(rawSplitMode);
+    var studyMode = studyModeKnown ? intValue(rawStudyMode) : -1;
+    var docMapSplitMode = splitModeKnown ? intValue(rawSplitMode) : -1;
+    var notebookController = controller ? valueOf(controller, 'notebookController') : null;
+    var mindmapView = notebookController
+      ? (valueOf(notebookController, 'mindmapView') ||
+        valueOf(notebookController, 'mindMapView') ||
+        valueOf(notebookController, 'noteMindMap'))
+      : null;
+    // MarginNote 4: StudyMode.study=2; DocMapSplitMode allMap=0, half=1, allDoc=2.
+    var visible = !!mindmapView && studyMode === 2 && (docMapSplitMode === 0 || docMapSplitMode === 1);
+    return {
+      visible: visible,
+      studyMode: studyMode,
+      docMapSplitMode: docMapSplitMode,
+      hasMindmapView: !!mindmapView,
+      reason: visible
+        ? 'visible'
+        : (!controller
+          ? 'missing-study-controller'
+          : (docMapSplitMode === 2 ? 'document-only' : 'mindmap-not-open'))
+    };
+  }
+
   function selectionPayloadFromDocumentController(documentController) {
     var text = '';
     var imageBytes = 0;
@@ -365,22 +405,99 @@ JSB.newAddon = function(mainPath) {
     return parts.join('\n');
   }
 
+  function exactCodexIdsFromNote(note) {
+    if (!note) return [];
+    var raw = allTextFromNote(note);
+    var ids = [];
+    var seen = {};
+    var markerPattern = /<!--codex-paper-companion:(\{[\s\S]*?\})-->/g;
+    var match;
+    while ((match = markerPattern.exec(raw)) !== null) {
+      try {
+        var payload = JSON.parse(match[1]);
+        var codexId = safeString(valueOf(payload, 'codexId'));
+        if (codexId && !seen[codexId]) {
+          seen[codexId] = true;
+          ids.push(codexId);
+        }
+      } catch (markerErr) {}
+    }
+    return ids;
+  }
+
   function noteHasCodexId(note, codexId) {
     if (!note || !codexId) return false;
-    var raw = allTextFromNote(note);
-    return raw.indexOf(CodexMarkerPrefix) >= 0 && raw.indexOf(String(codexId)) >= 0;
+    var ids = exactCodexIdsFromNote(note);
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i] === String(codexId)) return true;
+    }
+    return false;
+  }
+
+  function noteDisplayTitle(note) {
+    return safeString(valueOf(note, 'noteTitle') || valueOf(note, 'title') || valueOf(note, 'name') || '');
+  }
+
+  function documentIdFromNote(note) {
+    if (!note) return '';
+    var direct = firstStringValue(note, [
+      'documentId',
+      'documentMd5',
+      'documentMD5',
+      'docMd5',
+      'docmd5',
+      'bookMd5',
+      'bookmd5'
+    ]);
+    if (direct) return direct;
+    var document = valueOf(note, 'document') || valueOf(note, 'book') || valueOf(note, 'sourceDocument');
+    return md5FromDocumentObject(document);
+  }
+
+  function mindmapTreeFingerprint(tree) {
+    var segments = [];
+    function walk(node) {
+      if (!node) return;
+      var children = toArray(valueOf(node, 'children'));
+      segments.push(safeString(valueOf(node, 'noteId') || valueOf(node, 'id')));
+      segments.push(safeString(valueOf(node, 'title') || valueOf(node, 'name')));
+      segments.push(safeString(valueOf(node, 'body')));
+      segments.push(safeString(valueOf(node, 'documentId')));
+      segments.push(String(children.length));
+      for (var i = 0; i < children.length; i++) walk(children[i]);
+    }
+    walk(tree);
+    var canonical = segments.join('\u001f');
+    var hash = 0x811C9DC5;
+    for (var index = 0; index < canonical.length; index++) {
+      hash ^= canonical.charCodeAt(index);
+      hash = (hash + (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)) >>> 0;
+    }
+    var hex = hash.toString(16);
+    while (hex.length < 8) hex = '0' + hex;
+    return 'fnv1a32:' + hex;
   }
 
   function scanNotesDeep(notes, visitor, stats, depth) {
-    if (!notes || depth > 24) return null;
+    if (!notes) return null;
+    if (depth > 24) {
+      if (stats && countOf(notes) > 0) stats.incomplete = true;
+      return null;
+    }
+    if (stats && stats.incomplete) return null;
     var total = countOf(notes);
     for (var i = 0; i < total; i++) {
       var note = objectAt(notes, i);
       if (!note) continue;
-      if (stats) stats.scanned += 1;
+      if (stats) {
+        stats.scanned += 1;
+        if (stats.scanned > 5000) {
+          stats.incomplete = true;
+          return null;
+        }
+      }
       var matched = visitor(note);
       if (matched) return matched;
-      if (stats && stats.scanned > 5000) return null;
       var childKeys = ['childNotes', 'children', 'notes'];
       for (var j = 0; j < childKeys.length; j++) {
         var children = valueOf(note, childKeys[j]);
@@ -392,6 +509,39 @@ JSB.newAddon = function(mainPath) {
     return null;
   }
 
+  function noteBelongsToDocument(note, document, expectedDocumentId) {
+    if (!note || !document) return false;
+    var expected = safeString(expectedDocumentId || md5FromDocumentObject(document));
+    var direct = documentIdFromNote(note);
+    if (direct) return !expected || direct === expected;
+    var targetId = noteIdentifier(note);
+    if (!targetId) return false;
+    var stats = {scanned: 0, incomplete: false};
+    var found = scanNotesDeep(valueOf(document, 'notes'), function(candidate) {
+      return noteIdentifier(candidate) === targetId ? candidate : null;
+    }, stats, 0);
+    return !!found && !stats.incomplete;
+  }
+
+  function documentRootNoteScope(ctx, expectedDocumentId) {
+    var directNotes = valueOf(ctx.document, 'notes');
+    if (!isNil(directNotes)) {
+      return {available: true, notes: directNotes, source: 'document.notes'};
+    }
+    var notebookRoots = valueOf(ctx.notebook, 'notes');
+    var scopedRoots = [];
+    var total = countOf(notebookRoots);
+    for (var i = 0; i < total; i++) {
+      var root = objectAt(notebookRoots, i);
+      if (noteBelongsToDocument(root, ctx.document, expectedDocumentId)) scopedRoots.push(root);
+    }
+    return {
+      available: true,
+      notes: scopedRoots,
+      source: total ? 'notebook.document-filter' : 'empty-notebook'
+    };
+  }
+
   function findExistingCodexNote(notebook, codexId, title, stats) {
     if (!notebook || !codexId) return null;
     if (!stats) stats = {};
@@ -401,10 +551,46 @@ JSB.newAddon = function(mainPath) {
     return scanNotesDeep(notebook.notes, function(note) {
       if (noteHasCodexId(note, codexId)) {
         stats.markerMatches += 1;
-        return note;
+        if (!title || noteDisplayTitle(note) === String(title)) {
+          stats.titleMatches += 1;
+          return note;
+        }
       }
       return null;
     }, stats, 0);
+  }
+
+  function findUniqueExistingCodexNote(notebook, codexId, title, stats) {
+    var result = {
+      note: null,
+      markerMatches: 0,
+      titleMatches: 0,
+      ambiguous: false,
+      titleMismatch: false,
+      incomplete: false
+    };
+    if (!notebook || !codexId) return result;
+    var titleMatches = [];
+    scanNotesDeep(notebook.notes, function(note) {
+      if (!noteHasCodexId(note, codexId)) return null;
+      result.markerMatches += 1;
+      if (noteDisplayTitle(note) === String(title || '')) {
+        result.titleMatches += 1;
+        titleMatches.push(note);
+      }
+      return null;
+    }, stats || {scanned: 0}, 0);
+    result.ambiguous = result.markerMatches > 1 || result.titleMatches > 1;
+    result.titleMismatch = result.markerMatches === 1 && result.titleMatches === 0;
+    result.incomplete = !!(stats && stats.incomplete);
+    if (!result.ambiguous && result.markerMatches === 1 && result.titleMatches === 1) {
+      result.note = titleMatches[0];
+    }
+    if (stats) {
+      stats.markerMatches = result.markerMatches;
+      stats.titleMatches = result.titleMatches;
+    }
+    return result;
   }
 
   function md5FromDocumentObject(doc) {
@@ -632,6 +818,179 @@ JSB.newAddon = function(mainPath) {
       if (direct) return direct;
     }
     return '';
+  }
+
+  function documentDescriptor(doc, source) {
+    if (!doc) return null;
+    var descriptor = {
+      id: md5FromDocumentObject(doc),
+      bookmd5: md5FromDocumentObject(doc),
+      title: documentTitleFromDocumentObject(doc),
+      path: pdfPathFromDocumentObject(doc),
+      source: safeString(source || '')
+    };
+    return descriptor.id || descriptor.title || descriptor.path ? descriptor : null;
+  }
+
+  function documentContextKey(topicId, descriptor, fallbackBookMd5) {
+    descriptor = descriptor || {};
+    return [
+      safeString(topicId),
+      safeString(descriptor.bookmd5 || descriptor.id || fallbackBookMd5),
+      safeString(descriptor.path),
+      safeString(descriptor.title)
+    ].join('|');
+  }
+
+  function notebookDocumentDescriptors(notebook) {
+    var descriptors = [];
+    var documents = valueOf(notebook, 'documents');
+    var total = countOf(documents);
+    for (var i = 0; i < total; i++) {
+      var descriptor = documentDescriptor(objectAt(documents, i), 'notebook.documents');
+      if (descriptor) descriptors.push(descriptor);
+    }
+    return descriptors;
+  }
+
+  function resolveActiveDocumentContext(addon, controller, nc, topicId, selectedNote) {
+    var expectedMd5 = safeString(addon && addon.currentDocMd5);
+    var candidates = [];
+    var seen = {};
+    function add(doc, source) {
+      var descriptor = documentDescriptor(doc, source);
+      if (!descriptor) return;
+      var key = [descriptor.id, descriptor.path, descriptor.title].join('|');
+      if (seen[key]) return;
+      seen[key] = true;
+      candidates.push(descriptor);
+    }
+    function addCurrentObjects(owner, prefix) {
+      if (!owner) return;
+      var objectKeys = ['currentDocument', 'currentDoc', 'doc', 'document', 'currentBook', 'book'];
+      for (var i = 0; i < objectKeys.length; i++) {
+        add(valueOf(owner, objectKeys[i]), prefix + '.' + objectKeys[i]);
+      }
+      var controllerKeys = [
+        'currentDocumentController', 'documentController', 'docController',
+        'readerController', 'readerViewController', 'pdfController', 'pdfViewController'
+      ];
+      for (var j = 0; j < controllerKeys.length; j++) {
+        var currentController = valueOf(owner, controllerKeys[j]);
+        add(currentController, prefix + '.' + controllerKeys[j]);
+        for (var k = 0; k < objectKeys.length; k++) {
+          add(
+            valueOf(currentController, objectKeys[k]),
+            prefix + '.' + controllerKeys[j] + '.' + objectKeys[k]
+          );
+        }
+      }
+    }
+    addCurrentObjects(controller, 'studyController');
+    addCurrentObjects(nc, 'notebookController');
+
+    var notebook = null;
+    try {
+      if (topicId) notebook = Database.sharedInstance().getNotebookById(String(topicId));
+    } catch (notebookErr) {
+      notebook = null;
+    }
+    var availableDocuments = notebookDocumentDescriptors(notebook);
+    var active = null;
+    function descriptorScore(descriptor) {
+      if (!descriptor) return -1;
+      var score = 0;
+      if (descriptor.bookmd5 || descriptor.id) score += 1;
+      if (descriptor.title) score += 3;
+      if (descriptor.path) score += 6;
+      if (descriptor.source.indexOf('currentDocument') >= 0 || descriptor.source.indexOf('currentDoc') >= 0) score += 4;
+      return score;
+    }
+    function bestDescriptor(items, requiredMd5) {
+      var best = null;
+      var bestScore = -1;
+      for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+        var item = items[itemIndex];
+        if (requiredMd5 && item.bookmd5 !== requiredMd5) continue;
+        var score = descriptorScore(item);
+        if (score > bestScore) {
+          best = item;
+          bestScore = score;
+        }
+      }
+      return best;
+    }
+    function selectedNoteDescriptor() {
+      var selectedDocumentId = documentIdFromNote(selectedNote);
+      if (!selectedDocumentId) return null;
+      var selected = bestDescriptor(availableDocuments, selectedDocumentId);
+      if (!selected) {
+        try {
+          selected = documentDescriptor(
+            Database.sharedInstance().getDocumentById(selectedDocumentId),
+            'selected_mindmap_node.database'
+          );
+        } catch (selectedDocumentErr) {
+          selected = null;
+        }
+      }
+      if (!selected) {
+        selected = documentDescriptor(
+          valueOf(selectedNote, 'document') || valueOf(selectedNote, 'book') || valueOf(selectedNote, 'sourceDocument'),
+          'selected_mindmap_node.document'
+        );
+      }
+      if (!selected) {
+        selected = {
+          id: selectedDocumentId,
+          bookmd5: selectedDocumentId,
+          title: '',
+          path: '',
+          source: 'selected_mindmap_node.documentId'
+        };
+      }
+      selected.source = 'selected_mindmap_node';
+      return selected;
+    }
+    var contextSource = '';
+    if (expectedMd5) {
+      active = bestDescriptor(candidates, expectedMd5);
+      if (!active) active = bestDescriptor(availableDocuments, expectedMd5);
+      if (!active) {
+        try {
+          active = documentDescriptor(Database.sharedInstance().getDocumentById(expectedMd5), 'database.document');
+        } catch (documentErr) {
+          active = null;
+        }
+      }
+      if (active) contextSource = 'reader';
+    }
+    if (!active && candidates.length) {
+      active = bestDescriptor(candidates, '');
+      if (active) contextSource = 'reader';
+    }
+    if (!active) {
+      active = selectedNoteDescriptor();
+      if (active) contextSource = 'selected_mindmap_node';
+    }
+    if (!active && availableDocuments.length === 1) {
+      active = availableDocuments[0];
+      contextSource = 'single_document_notebook';
+    }
+    if (!active) {
+      active = {id: expectedMd5, bookmd5: expectedMd5, title: '', path: '', source: 'none'};
+      contextSource = expectedMd5 ? 'reader' : 'none';
+    }
+
+    if (!active.bookmd5) active.bookmd5 = active.id || expectedMd5;
+    if (!active.id) active.id = active.bookmd5;
+    return {
+      document: active,
+      availableDocuments: availableDocuments,
+      documentCount: availableDocuments.length,
+      documentContextSource: contextSource,
+      contextDocumentKey: documentContextKey(topicId, active, expectedMd5)
+    };
   }
 
   function md5FromDatabaseTopic(topicId) {
@@ -1032,47 +1391,6 @@ JSB.newAddon = function(mainPath) {
       if (noteId && !verifyAiEditNoteDeleted(noteId, ctx)) remaining.push(noteId);
     }
     return remaining;
-  }
-
-  function rollbackAiEditTransactionWithUndo(transaction, ctx) {
-    var ids = transaction ? transaction.createdNoteIds : [];
-    var before = remainingAiEditNoteIds(ids, ctx);
-    var topicId = ctx ? ctx.topicId : safeString(transaction ? transaction.topicid : '');
-    if (!before.length) {
-      return {ok: true, method: 'undo-already-deleted', deleted: countOf(ids), remaining: [], reason: ''};
-    }
-    var manager = null;
-    try {
-      manager = UndoManager.sharedInstance();
-    } catch (err) {}
-    if (!manager || !objectRespondsToMethod(manager, 'undo')) {
-      return {ok: false, method: 'undo', deleted: 0, remaining: before, reason: 'undo-unavailable'};
-    }
-    var canUndo = true;
-    try {
-      if (typeof manager.canUndo === 'function') canUndo = !!manager.canUndo();
-      else if (!isNil(manager.canUndo)) canUndo = !!manager.canUndo;
-    } catch (canUndoErr) {}
-    if (!canUndo) {
-      return {ok: false, method: 'undo', deleted: 0, remaining: before, reason: 'undo-stack-empty'};
-    }
-    try {
-      UndoManager.sharedInstance().undo();
-    } catch (undoErr) {
-      return {ok: false, method: 'undo', deleted: 0, remaining: before, reason: 'undo-threw:' + safeString(undoErr)};
-    }
-    markAiEditDatabaseChanged(topicId);
-    try {
-      if (ctx && ctx.topicId) Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
-    } catch (refreshErr) {}
-    var after = remainingAiEditNoteIds(ids, ctx);
-    return {
-      ok: after.length === 0,
-      method: 'undo',
-      deleted: before.length - after.length,
-      remaining: after,
-      reason: after.length ? 'created-notes-still-exist-after-undo' : ''
-    };
   }
 
   function aiEditFallbackContext(topicId) {
@@ -1553,15 +1871,40 @@ JSB.newAddon = function(mainPath) {
 
     documentDidOpen: function(docmd5) {
       self.currentDocMd5 = safeString(docmd5);
+      self.lastDocumentController = null;
+      self.lastSelectionText = '';
+      self.nativeHighlightNextSelectionArmed = false;
+      self.nativeHighlightNextSelectionReason = '';
+      self.nativeHighlightNextSelectionText = '';
+      self.stopNativeHighlightSelectionPoll();
       self.postEvent('documentDidOpen', {docmd5: safeString(docmd5)});
+      if (self.panel && self.panel.sendContextToWeb) self.panel.sendContextToWeb();
+      NSTimer.scheduledTimerWithTimeInterval(0.25, false, function() {
+        if (self.panel && self.panel.sendContextToWeb) self.panel.sendContextToWeb();
+      });
     },
 
     documentWillClose: function(docmd5) {
       self.currentDocMd5 = '';
+      if (self.panel && self.panel.sendContextToWeb) self.panel.sendContextToWeb();
     },
 
     controllerWillLayoutSubviews: function(controller) {
-      if (controller == Application.sharedInstance().studyController(self.window)) self.layoutPanel();
+      if (controller == Application.sharedInstance().studyController(self.window)) {
+        self.layoutPanel();
+        var surface = mindmapSurfaceState(controller);
+        var signature = [
+          surface.visible ? '1' : '0',
+          String(surface.studyMode),
+          String(surface.docMapSplitMode)
+        ].join(':');
+        if (self.lastMindmapSurfaceSignature !== signature) {
+          self.lastMindmapSurfaceSignature = signature;
+          NSTimer.scheduledTimerWithTimeInterval(0.05, false, function() {
+            if (self.panel && self.panel.sendContextToWeb) self.panel.sendContextToWeb();
+          });
+        }
+      }
     },
 
     queryAddonCommandStatus: function() {
@@ -1925,19 +2268,13 @@ JSB.newAddon = function(mainPath) {
     var nc = controller ? controller.notebookController : null;
     var topicId = nc && nc.topicId ? safeString(nc.topicId) : safeString(defaults.objectForKey('mindbooks_lasttopicid'));
     var notebookId = nc && nc.notebookId ? safeString(nc.notebookId) : this.currentNotebookId;
-    var bookMd5 = safeString(this.currentDocMd5) ||
-      md5FromNotebookController(nc) ||
-      md5FromDatabaseTopic(topicId) ||
-      safeString(defaults.objectForKey('mindbooks_lastbookmd5'));
-    var pdfPath = pdfPathFromNotebookController(nc) ||
-      pdfPathFromDatabaseTopic(topicId) ||
-      safeString(defaults.objectForKey('mindbooks_lastpdfpath')) ||
-      safeString(defaults.objectForKey('mindbooks_lastbookpath'));
-    var documentTitle = documentTitleFromNotebookController(nc) ||
-      documentTitleFromDatabaseTopic(topicId) ||
-      safeString(defaults.objectForKey('mindbooks_lastbooktitle')) ||
-      safeString(defaults.objectForKey('mindbooks_lastbookname'));
-    var selectedNote = this.getSelectedNote();
+    var mindmapSurface = mindmapSurfaceState(controller);
+    var selectedNote = mindmapSurface.visible ? this.getSelectedNote() : null;
+    var activeDocument = resolveActiveDocumentContext(this, controller, nc, topicId, selectedNote);
+    var activeDescriptor = activeDocument.document || {};
+    var bookMd5 = safeString(activeDescriptor.bookmd5 || activeDescriptor.id || this.currentDocMd5);
+    var pdfPath = safeString(activeDescriptor.path);
+    var documentTitle = safeString(activeDescriptor.title);
     var selectedNoteText = '';
     var selectedNoteTitle = '';
     var selectedNoteId = '';
@@ -1975,6 +2312,15 @@ JSB.newAddon = function(mainPath) {
       documentTitle: documentTitle,
       documentFileName: documentTitle,
       sourceFileName: documentTitle,
+      contextDocumentKey: activeDocument.contextDocumentKey,
+      documentContextSource: activeDocument.documentContextSource,
+      activeDocument: activeDescriptor,
+      availableDocuments: activeDocument.availableDocuments,
+      documentCount: activeDocument.documentCount,
+      mindmapVisible: mindmapSurface.visible,
+      mindmapSurfaceReason: mindmapSurface.reason,
+      studyMode: mindmapSurface.studyMode,
+      docMapSplitMode: mindmapSurface.docMapSplitMode,
       source: 'marginnote4-plugin',
       pluginVersion: PluginVersion
     };
@@ -2014,7 +2360,7 @@ JSB.newAddon = function(mainPath) {
         });
         if (addon.panel) addon.panel.setStatus(msg);
         if (addon.panel && addon.panel.setBusy) addon.panel.setBusy(false);
-        if (addon.panel && addon.panel.setReply) addon.panel.setReply(msg);
+        if (addon.panel && addon.panel.setError) addon.panel.setError(msg);
         app.showHUD(msg, view, 4);
         return;
       }
@@ -2043,10 +2389,20 @@ JSB.newAddon = function(mainPath) {
     postJSON('http://127.0.0.1:48761/marginnote/event', payload, 5);
   };
 
-  CodexAssistantAddon.prototype.uploadPdfToCompanion = function(pdfPath, pdfPathCandidates) {
+  CodexAssistantAddon.prototype.uploadPdfToCompanion = function(pdfPath, pdfPathCandidates, expectedContextDocumentKey) {
     var controller = this.getStudyController();
     var view = controller ? controller.view : this.window;
     var ctx = this.resolveContext('cache_pdf_from_marginnote', '');
+    expectedContextDocumentKey = safeString(expectedContextDocumentKey);
+    if (expectedContextDocumentKey && safeString(ctx.contextDocumentKey) !== expectedContextDocumentKey) {
+      var switchedMessage = '缓存请求对应的文件已经切换，本次旧请求已跳过。';
+      if (this.panel) this.panel.setStatus(switchedMessage);
+      this.postEvent('pdfCacheUploadSkippedDocumentMismatch', {
+        expectedContextDocumentKey: expectedContextDocumentKey,
+        actualContextDocumentKey: safeString(ctx.contextDocumentKey)
+      });
+      return false;
+    }
     var candidates = [];
     function addCandidate(path) {
       path = safeString(path);
@@ -2631,7 +2987,7 @@ JSB.newAddon = function(mainPath) {
     }
   };
 
-  CodexAssistantAddon.prototype.serializeMindmapNode = function(note, depth, maxDepth, stats) {
+  CodexAssistantAddon.prototype.serializeMindmapNode = function(note, depth, maxDepth, maxChildren, stats) {
     if (!note || depth > maxDepth) return null;
     stats = stats || {nodes: 0, truncated: 0};
     stats.nodes += 1;
@@ -2646,6 +3002,7 @@ JSB.newAddon = function(mainPath) {
       noteId: noteIdentifier(note),
       title: title,
       body: body ? String(body).substring(0, 1200) : '',
+      documentId: documentIdFromNote(note),
       children: []
     };
     var children = valueOf(note, 'childNotes') || valueOf(note, 'children') || valueOf(note, 'notes');
@@ -2654,68 +3011,113 @@ JSB.newAddon = function(mainPath) {
       stats.truncated += total;
       return node;
     }
-    for (var i = 0; i < total && i < 80; i++) {
+    for (var i = 0; i < total && i < maxChildren; i++) {
       var child = objectAt(children, i);
-      var childTree = this.serializeMindmapNode(child, depth + 1, maxDepth, stats);
+      var childTree = this.serializeMindmapNode(child, depth + 1, maxDepth, maxChildren, stats);
       if (childTree) node.children.push(childTree);
     }
-    if (total > 80) stats.truncated += total - 80;
+    if (total > maxChildren) stats.truncated += total - maxChildren;
     return node;
   };
 
-  CodexAssistantAddon.prototype.serializeMindmapNotebookRoots = function(ctx, maxDepth, stats) {
+  CodexAssistantAddon.prototype.serializeMindmapNotebookRoots = function(ctx, maxDepth, maxChildren, stats) {
+    var currentDocumentId = md5FromDocumentObject(ctx.document);
     var root = {
       noteId: 'notebook-root',
       title: documentTitleFromDocumentObject(ctx.document) || documentTitleFromNotebookObject(ctx.notebook) || '当前 notebook',
       body: '',
+      documentId: '',
       children: []
     };
     stats.nodes += 1;
-    var roots = valueOf(ctx.notebook, 'notes');
-    if (countOf(roots) === 0) roots = valueOf(ctx.document, 'notes');
+    var notebookRoots = valueOf(ctx.notebook, 'notes');
+    var notebookScopedRoots = countOf(notebookRoots) > 0;
+    var roots = notebookScopedRoots ? notebookRoots : valueOf(ctx.document, 'notes');
+    stats.scope = notebookScopedRoots ? 'whole_notebook' : 'current_document';
+    if (!notebookScopedRoots) root.documentId = currentDocumentId;
     var total = countOf(roots);
-    for (var i = 0; i < total && i < 80; i++) {
-      var childTree = this.serializeMindmapNode(objectAt(roots, i), 1, maxDepth, stats);
+    for (var i = 0; i < total && i < maxChildren; i++) {
+      var rootNote = objectAt(roots, i);
+      var childTree = this.serializeMindmapNode(rootNote, 1, maxDepth, maxChildren, stats);
+      if (childTree && !childTree.documentId && (
+        !notebookScopedRoots || noteBelongsToDocument(rootNote, ctx.document, currentDocumentId)
+      )) {
+        childTree.documentId = currentDocumentId;
+      }
       if (childTree) root.children.push(childTree);
     }
-    if (total > 80) stats.truncated += total - 80;
+    if (total > maxChildren) stats.truncated += total - maxChildren;
     return root;
   };
 
   CodexAssistantAddon.prototype.readMindmapTree = function(command) {
     var ctx = this.resolveNotebookAndDocument();
+    var mindmapReadRequestId = safeString(valueOf(command, 'mindmapReadRequestId') || '');
     var requestedNoteId = safeString(valueOf(command, 'selectedNoteId') || '');
     var requestedTitle = safeString(valueOf(command, 'selectedNoteTitle') || '');
+    var wholeNotebook = isExplicitTrue(valueOf(command, 'wholeNotebook')) ||
+      safeString(valueOf(command, 'scope')) === 'whole_notebook';
     var note = null;
-    if (ctx && requestedNoteId) note = findNoteById(ctx.notebook, requestedNoteId);
-    if (!note) note = this.getSelectedNote();
+    if (!wholeNotebook && ctx && requestedNoteId) note = findNoteById(ctx.notebook, requestedNoteId);
+    if (!wholeNotebook && !note) note = this.getSelectedNote();
     var noteId = noteIdentifier(note);
     this.postEvent('mindmapTreeReadRequested', {
       nativeAction: 'read_mindmap_tree',
+      mindmapReadRequestId: mindmapReadRequestId,
       requestedNoteId: requestedNoteId,
       requestedTitle: requestedTitle,
       resolvedNoteId: noteId,
+      wholeNotebook: wholeNotebook,
+      scope: wholeNotebook ? 'whole_notebook' : 'selected_subtree',
       source: safeString(valueOf(command, 'source') || 'native-queue')
     });
     if (!ctx) {
       this.postEvent('mindmapTreeReadUnavailable', {
         nativeAction: 'read_mindmap_tree',
+        mindmapReadRequestId: mindmapReadRequestId,
         reason: this.lastResolveError || 'missing-context',
         requestedNoteId: requestedNoteId,
         requestedTitle: requestedTitle
       });
       return;
     }
+    var surface = mindmapSurfaceState(ctx.controller);
+    if (!surface.visible) {
+      this.postEvent('mindmapTreeReadUnavailable', {
+        nativeAction: 'read_mindmap_tree',
+        mindmapReadRequestId: mindmapReadRequestId,
+        reason: 'mindmap-not-open',
+        surfaceReason: surface.reason,
+        studyMode: surface.studyMode,
+        docMapSplitMode: surface.docMapSplitMode,
+        mindmapVisible: false,
+        requestedNoteId: requestedNoteId,
+        requestedTitle: requestedTitle
+      });
+      return;
+    }
     var stats = {nodes: 0, truncated: 0};
-    var tree = note
-      ? this.serializeMindmapNode(note, 0, 4, stats)
-      : this.serializeMindmapNotebookRoots(ctx, 4, stats);
+    var tree = wholeNotebook
+      ? this.serializeMindmapNotebookRoots(ctx, 24, 500, stats)
+      : (note
+        ? this.serializeMindmapNode(note, 0, 4, 80, stats)
+        : this.serializeMindmapNotebookRoots(ctx, 4, 80, stats));
+    var actualScope = wholeNotebook
+      ? (stats.scope || 'current_document')
+      : 'selected_subtree';
     this.postEvent('mindmapTreeReadFinished', {
       nativeAction: 'read_mindmap_tree',
+      mindmapReadRequestId: mindmapReadRequestId,
       selectedNoteId: noteId || 'notebook-root',
       selectedNoteTitle: note ? safeString(valueOf(note, 'noteTitle') || requestedTitle) : tree.title,
       nodeCount: stats.nodes,
       truncatedCount: stats.truncated,
+      wholeNotebook: actualScope === 'whole_notebook',
+      scope: actualScope,
+      mindmapVisible: true,
+      studyMode: surface.studyMode,
+      docMapSplitMode: surface.docMapSplitMode,
+      snapshotCapability: actualScope === 'whole_notebook' ? 'mindmap-whole-notebook-snapshot-v2' : '',
       currentMindmap: tree
     });
   };
@@ -3255,7 +3657,8 @@ JSB.newAddon = function(mainPath) {
     if (nativeAction === 'cache_pdf_from_current_document') {
       this.uploadPdfToCompanion(
         safeString(valueOf(command, 'pdfPath') || valueOf(command, 'documentPath') || ''),
-        toArray(valueOf(command, 'pdfPathCandidates'))
+        toArray(valueOf(command, 'pdfPathCandidates')),
+        safeString(valueOf(command, 'contextDocumentKey'))
       );
       return true;
     }
@@ -3300,18 +3703,33 @@ JSB.newAddon = function(mainPath) {
       this.reloadWebPanel();
       return true;
     }
-    if (nativeAction === 'write_draft') {
+    if (nativeAction === 'write_draft_scope_bound_v1') {
       var draftId = safeString(valueOf(command, 'draftId') || valueOf(command, 'id') || '');
+      var requiredHandlerFeature = safeString(valueOf(command, 'requiredHandlerFeature'));
+      var expectedTopicId = safeString(valueOf(command, 'expectedTopicId'));
+      var expectedBookMd5 = safeString(valueOf(command, 'expectedBookMd5'));
+      if (requiredHandlerFeature !== 'draft-write-scope-binding-v1' ||
+          !expectedTopicId || !expectedBookMd5) {
+        this.postEvent('nativeDraftWriteCommandRejected', {
+          nativeAction: nativeAction,
+          draftId: draftId,
+          reason: 'missing-or-invalid-scope-binding',
+          requiredHandlerFeature: requiredHandlerFeature,
+          expectedTopicId: expectedTopicId,
+          expectedBookMd5: expectedBookMd5
+        });
+        return true;
+      }
       this.postEvent('nativeDraftWriteCommandPrepared', {
         nativeAction: nativeAction,
         draftId: draftId,
         source: safeString(valueOf(command, 'source') || 'native-queue')
       });
-      if (!!valueOf(command, 'aiEditOperation') || valueOf(command, 'aiEdit') === '1') {
-        this.writeDraft(draftId, {aiEditOperation: true});
-      } else {
-        this.writeDraft(draftId);
-      }
+      this.writeDraft(draftId, {
+        aiEditOperation: true,
+        expectedTopicId: expectedTopicId,
+        expectedBookMd5: expectedBookMd5
+      });
       return true;
     }
     if (nativeAction === 'read_mindmap_tree') {
@@ -3376,36 +3794,6 @@ JSB.newAddon = function(mainPath) {
     };
   }
 
-  function aiEditCreatedNoteIdsFromBridgeParams(params) {
-    params = params || {};
-    var createdNoteIdsString = safeString(valueOf(params, 'createdNoteIds'));
-    var parts = createdNoteIdsString.split('|');
-    var out = [];
-    var seen = {};
-    for (var i = 0; i < parts.length; i++) {
-      var noteId = safeString(parts[i]);
-      if (!noteId || seen[noteId]) continue;
-      seen[noteId] = true;
-      out.push(noteId);
-    }
-    return out;
-  }
-
-  function aiEditCreatedCardIdsFromBridgeParams(params) {
-    params = params || {};
-    var createdCardIdsString = safeString(valueOf(params, 'createdCardIds'));
-    var parts = createdCardIdsString.split('|');
-    var out = [];
-    var seen = {};
-    for (var i = 0; i < parts.length; i++) {
-      var cardId = safeString(parts[i]);
-      if (!cardId || seen[cardId]) continue;
-      seen[cardId] = true;
-      out.push(cardId);
-    }
-    return out;
-  }
-
   function mindmapDeleteTargetNoteIdsFromBridgeParams(params) {
     params = params || {};
     var targetNoteIdsString = safeString(valueOf(params, 'targetNoteIds'));
@@ -3419,34 +3807,6 @@ JSB.newAddon = function(mainPath) {
       out.push(noteId);
     }
     return out;
-  }
-
-  function fallbackAiEditTransactionFromBridge(transactionId, fallback) {
-    transactionId = safeString(transactionId);
-    fallback = fallback || {};
-    var createdNoteIds = aiEditCreatedNoteIdsFromBridgeParams(fallback);
-    var createdCardIds = aiEditCreatedCardIdsFromBridgeParams(fallback);
-    if (!transactionId || !createdNoteIds.length) return null;
-    var createdNoteIdsMap = {};
-    for (var i = 0; i < createdNoteIds.length; i++) {
-      createdNoteIdsMap[createdNoteIds[i]] = true;
-    }
-    var createdCardIdsMap = {};
-    for (var c = 0; c < createdCardIds.length; c++) {
-      createdCardIdsMap[createdCardIds[c]] = true;
-    }
-    return {
-      transactionId: transactionId,
-      draftId: safeString(valueOf(fallback, 'draftId') || valueOf(fallback, 'id')),
-      topicid: safeString(valueOf(fallback, 'topicid')),
-      objectRef: aiEditObjectRefFromBridgeParams(fallback),
-      createdNotes: [],
-      createdNoteIds: createdNoteIds,
-      createdNoteIdsMap: createdNoteIdsMap,
-      createdCardIds: createdCardIds,
-      createdCardIdsMap: createdCardIdsMap,
-      startedAt: String(new Date().getTime())
-    };
   }
 
   function copyAiEditObjectRefFields(payload, objectRef) {
@@ -3509,11 +3869,17 @@ JSB.newAddon = function(mainPath) {
     transaction.createdCardIds.push(cardId);
   };
 
-  CodexAssistantAddon.prototype.finishAiEditTransaction = function(json) {
+  CodexAssistantAddon.prototype.finishAiEditTransaction = function(json, options) {
     var transaction = this.activeAiEditTransaction;
     if (!transaction) return null;
+    options = options || {};
+    var partial = options.partial === true;
+    var failureReason = safeString(options.reason || '');
     this.activeAiEditTransaction = null;
     this.aiEditTransactions = this.aiEditTransactions || {};
+    transaction.status = partial ? 'partial_failed' : 'waiting_confirmation';
+    transaction.partial = partial;
+    transaction.failureReason = failureReason;
     this.aiEditTransactions[transaction.transactionId] = transaction;
     var draftSummary = valueOf(json, 'draft') || {};
     var mindmap = valueOf(json, 'mindmap') || {};
@@ -3528,7 +3894,15 @@ JSB.newAddon = function(mainPath) {
       has_mindmap: mindmap ? true : false,
       mindmap_title: safeString(valueOf(draftSummary, 'mindmap_title') || valueOf(mindmap, 'title')),
       write_target: safeString(valueOf(draftSummary, 'write_target')),
-      topicid: transaction.topicid
+      topicid: transaction.topicid,
+      ok: !partial,
+      partial: partial,
+      failed: partial,
+      status: partial ? 'partial_failed' : 'waiting_confirmation',
+      failureReason: failureReason,
+      message: partial
+        ? '写入未完整完成；已保留本次新增对象的回滚记录，仅可拒绝并回滚。'
+        : '写入完成，等待接受或拒绝。'
     };
     copyAiEditObjectRefFields(payload, transaction.objectRef);
     this.postEvent('aiEditOperationReady', payload);
@@ -3539,9 +3913,24 @@ JSB.newAddon = function(mainPath) {
   CodexAssistantAddon.prototype.acceptAiEditTransaction = function(transactionId, fallback) {
     transactionId = safeString(transactionId);
     fallback = fallback || {};
-    var acceptedObjectRef = this.aiEditTransactions && this.aiEditTransactions[transactionId]
-      ? this.aiEditTransactions[transactionId].objectRef
+    var transaction = this.aiEditTransactions && this.aiEditTransactions[transactionId]
+      ? this.aiEditTransactions[transactionId]
+      : null;
+    var acceptedObjectRef = transaction
+      ? transaction.objectRef
       : aiEditObjectRefFromBridgeParams(fallback);
+    if (transaction && (transaction.status === 'partial_failed' || transaction.partial === true)) {
+      var blocked = copyAiEditObjectRefFields({
+        ok: false,
+        action: 'accept',
+        transactionId: transactionId,
+        status: 'partial_failed',
+        message: '写入未完整完成，仅可拒绝并回滚。'
+      }, acceptedObjectRef);
+      this.postEvent('aiEditTransactionAcceptBlocked', blocked);
+      if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(blocked);
+      return blocked;
+    }
     if (this.aiEditTransactions && this.aiEditTransactions[transactionId]) {
       delete this.aiEditTransactions[transactionId];
     }
@@ -3556,13 +3945,6 @@ JSB.newAddon = function(mainPath) {
     fallback = fallback || {};
     var transaction = this.aiEditTransactions ? this.aiEditTransactions[transactionId] : null;
     if (!transaction) {
-      transaction = fallbackAiEditTransactionFromBridge(transactionId, fallback);
-      if (transaction) {
-        this.aiEditTransactions = this.aiEditTransactions || {};
-        this.aiEditTransactions[transactionId] = transaction;
-      }
-    }
-    if (!transaction) {
       var missing = {ok: false, action: 'reject', transactionId: transactionId, message: '未找到可撤销的 AI 编辑事务。'};
       this.postEvent('aiEditTransactionRejected', missing);
       if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(missing);
@@ -3575,7 +3957,14 @@ JSB.newAddon = function(mainPath) {
     var failedNoteIds = [];
     var deletedCardIds = [];
     var failedCardIds = [];
-    var undoRollback = rollbackAiEditTransactionWithUndo(transaction, ctx);
+    var transactionNoteIds = remainingAiEditNoteIds(transaction.createdNoteIds, ctx);
+    var undoRollback = {
+      ok: false,
+      method: 'skipped-unsafe-global-undo',
+      deleted: countOf(transaction.createdNoteIds) - transactionNoteIds.length,
+      remaining: transactionNoteIds,
+      reason: 'transaction-id-delete-used'
+    };
     this.postEvent('aiEditUndoRollbackAttempted', {
       transactionId: transactionId,
       ok: undoRollback.ok,
@@ -3585,8 +3974,8 @@ JSB.newAddon = function(mainPath) {
       reason: undoRollback.reason || ''
     });
     deleted = undoRollback.deleted || 0;
-    if (!undoRollback.ok) {
-      var remainingIds = countOf(undoRollback.remaining) ? undoRollback.remaining : transaction.createdNoteIds;
+    if (transactionNoteIds.length) {
+      var remainingIds = transactionNoteIds;
       UndoManager.sharedInstance().undoGrouping('Codex Reject AI Edit', ctx ? ctx.topicId : transaction.topicid, function() {
         for (var i = remainingIds.length - 1; i >= 0; i--) {
           var noteId = remainingIds[i];
@@ -3607,21 +3996,18 @@ JSB.newAddon = function(mainPath) {
       });
     }
     var cardIds = transaction.createdCardIds || [];
+    transaction.createdNoteIdsMap = transaction.createdNoteIdsMap || {};
+    for (var authorizedIndex = 0; authorizedIndex < transaction.createdNoteIds.length; authorizedIndex++) {
+      transaction.createdNoteIdsMap[transaction.createdNoteIds[authorizedIndex]] = true;
+    }
     for (var cardIndex = 0; cardIndex < cardIds.length; cardIndex++) {
       var cardId = safeString(cardIds[cardIndex]);
       if (!cardId) continue;
-      var card = resolveAiEditNoteById(ctx, cardId);
-      var cardResult = deleteCardForAiEdit(card, ctx, cardId);
-      if (cardResult && cardResult.ok) {
+      if (!transaction.createdNoteIdsMap[cardId]) continue;
+      if (verifyAiEditNoteDeleted(cardId, ctx)) {
         deletedCardIds.push(cardId);
       } else {
         failedCardIds.push(cardId);
-        failed.push({
-          cardId: cardId,
-          objectType: 'card',
-          method: cardResult ? cardResult.method : '',
-          reason: cardResult ? cardResult.reason : 'card-delete-unsupported'
-        });
       }
     }
     markAiEditDatabaseChanged(ctx ? ctx.topicId : transaction.topicid);
@@ -3643,7 +4029,8 @@ JSB.newAddon = function(mainPath) {
     }
     for (var deletedCardIndex = 0; deletedCardIndex < cardIds.length; deletedCardIndex++) {
       var deletedCardId = cardIds[deletedCardIndex];
-      if (deletedCardId && verifyAiEditNoteDeleted(deletedCardId, ctx) && deletedCardIds.indexOf(deletedCardId) < 0) {
+      if (deletedCardId && transaction.createdNoteIdsMap[deletedCardId] &&
+          verifyAiEditNoteDeleted(deletedCardId, ctx) && deletedCardIds.indexOf(deletedCardId) < 0) {
         deletedCardIds.push(deletedCardId);
       }
     }
@@ -3750,11 +4137,50 @@ JSB.newAddon = function(mainPath) {
       var url = DraftURL + encodeURIComponent(draftId);
       var data = NSData.dataWithContentsOfURL(NSURL.URLWithString(url));
       var json = parseJSONData(data);
-      if (!json || valueOf(json, 'ok') === false) {
+      if (!json || !isExplicitTrue(valueOf(json, 'ok'))) {
         var message = json ? safeString(valueOf(json, 'message')) : '草稿读取失败。';
         if (this.panel) this.panel.setStatus(message);
         Application.sharedInstance().showHUD(message, view, 3);
         this.postEvent('draftWriteFailed', {id: draftId, reason: message || 'load-failed'});
+        return;
+      }
+      var draftTopicId = safeString(valueOf(json, 'topicid'));
+      var draftBookMd5 = safeString(valueOf(json, 'bookmd5'));
+      if (!draftTopicId || !draftBookMd5) {
+        var missingScope = '草稿缺少完整的文档绑定，已停止写入。';
+        if (this.panel) this.panel.setStatus(missingScope);
+        this.postEvent('draftWriteFailed', {
+          id: draftId,
+          reason: 'draft-scope-missing',
+          topicid: draftTopicId,
+          bookmd5: draftBookMd5
+        });
+        return;
+      }
+      if ((options.expectedTopicId && draftTopicId !== options.expectedTopicId) ||
+          (options.expectedBookMd5 && draftBookMd5 !== options.expectedBookMd5)) {
+        var scopeMismatch = '草稿所属文档与当前写入请求不一致，已停止写入。';
+        if (this.panel) this.panel.setStatus(scopeMismatch);
+        this.postEvent('draftWriteFailed', {
+          id: draftId,
+          reason: 'draft-command-scope-mismatch',
+          expectedTopicId: options.expectedTopicId || '',
+          actualTopicId: draftTopicId,
+          expectedBookMd5: options.expectedBookMd5 || '',
+          actualBookMd5: draftBookMd5
+        });
+        return;
+      }
+      var draftContext = this.resolveNotebookAndDocument(draftTopicId, draftBookMd5);
+      if (!draftContext) {
+        var liveScopeMismatch = '当前 MarginNote 文档与草稿绑定不一致，已停止写入。';
+        if (this.panel) this.panel.setStatus(liveScopeMismatch);
+        this.postEvent('draftWriteFailed', {
+          id: draftId,
+          reason: this.lastResolveError || 'draft-live-scope-mismatch',
+          topicid: draftTopicId,
+          bookmd5: draftBookMd5
+        });
         return;
       }
       var operationManifest = valueOf(json, 'operationManifest') || {};
@@ -3778,11 +4204,50 @@ JSB.newAddon = function(mainPath) {
         cards: countOf(valueOf(json, 'cards')),
         hasMindmap: valueOf(json, 'mindmap') ? true : false
       });
-      if (options.aiEditOperation) this.beginAiEditTransaction(draftId, json);
-      this.handleCompanionResponse(json, 'write_draft');
-      if (options.aiEditOperation) this.finishAiEditTransaction(json);
+      this.beginAiEditTransaction(draftId, json);
+      var handledDraft = this.handleCompanionResponse(json, 'write_draft');
+      if (handledDraft === false) {
+        var failedTransaction = this.activeAiEditTransaction;
+        var partialResult = null;
+        if (failedTransaction && countOf(failedTransaction.createdNoteIds) > 0) {
+          partialResult = this.finishAiEditTransaction(json, {
+            partial: true,
+            reason: 'draft-response-not-success'
+          });
+          this.postEvent('draftWritePartialTransactionReady', {
+            id: draftId,
+            transactionId: partialResult ? partialResult.transactionId : '',
+            createdCount: partialResult ? partialResult.createdCount : 0,
+            reason: 'draft-response-not-success'
+          });
+        } else {
+          this.activeAiEditTransaction = null;
+        }
+        this.postEvent('draftWriteFailed', {
+          id: draftId,
+          reason: 'draft-response-not-success',
+          transactionId: partialResult ? partialResult.transactionId : ''
+        });
+        return;
+      }
+      this.finishAiEditTransaction(json);
     } catch (err) {
-      this.activeAiEditTransaction = null;
+      if (this.activeAiEditTransaction && countOf(this.activeAiEditTransaction.createdNoteIds) > 0) {
+        try {
+          var partialTransaction = this.finishAiEditTransaction(json, {
+            partial: true,
+            reason: safeString(err)
+          });
+          this.postEvent('draftWritePartialTransactionReady', {
+            id: draftId,
+            transactionId: partialTransaction ? partialTransaction.transactionId : '',
+            createdCount: partialTransaction ? partialTransaction.createdCount : 0,
+            reason: safeString(err)
+          });
+        } catch (transactionErr) {
+          this.activeAiEditTransaction = null;
+        }
+      }
       var errText = '草稿写入失败：' + safeString(err);
       if (this.panel) this.panel.setStatus(errText);
       Application.sharedInstance().showHUD(errText, view, 4);
@@ -3793,13 +4258,22 @@ JSB.newAddon = function(mainPath) {
   CodexAssistantAddon.prototype.handleCompanionResponse = function(json, action) {
     var messageValue = valueOf(json, 'message');
     var okValue = valueOf(json, 'ok');
+    var okSucceeded = isExplicitTrue(okValue);
     var replyValue = valueOf(json, 'reply');
     var cardsValue = valueOf(json, 'cards');
     var mindmapValue = valueOf(json, 'mindmap');
-    var message = messageValue ? String(messageValue) : (okValue ? '完成' : '失败');
+    var draftValue = valueOf(json, 'draft') || {};
+    var expectedContext = {
+      expectedTopicId: safeString(valueOf(json, 'topicid') || valueOf(draftValue, 'topicid')),
+      expectedBookMd5: safeString(valueOf(json, 'bookmd5') || valueOf(draftValue, 'bookmd5'))
+    };
+    var message = messageValue ? String(messageValue) : (okSucceeded ? '完成' : '失败');
     if (this.panel) this.panel.setStatus(message);
     if (this.panel && this.panel.setBusy) this.panel.setBusy(false);
-    if (this.panel && replyValue) this.panel.setReply(String(replyValue));
+    if (this.panel && replyValue) {
+      if (!okSucceeded && this.panel.setError) this.panel.setError(String(replyValue));
+      else this.panel.setReply(String(replyValue));
+    }
     this.postEvent('handleResponse', {
       action: safeString(action),
       message: message,
@@ -3809,13 +4283,74 @@ JSB.newAddon = function(mainPath) {
     var controller = this.getStudyController();
     var view = controller ? controller.view : this.window;
     Application.sharedInstance().showHUD(message, view, 3);
-    if (cardsValue && countOf(cardsValue) > 0) this.createCards(cardsValue);
-    if (mindmapValue) this.createMindmap(mindmapValue);
+    if (!okSucceeded) return false;
+    if ((countOf(cardsValue) > 0 || mindmapValue) &&
+        (!expectedContext.expectedTopicId || !expectedContext.expectedBookMd5)) {
+      this.postEvent('handleResponseWriteBlocked', {
+        action: safeString(action),
+        reason: 'response-scope-missing',
+        topicid: expectedContext.expectedTopicId,
+        bookmd5: expectedContext.expectedBookMd5
+      });
+      return false;
+    }
+    var hasCardWrites = cardsValue && countOf(cardsValue) > 0;
+    var hasMindmapWrite = !!mindmapValue;
+    var ownsAiEditTransaction = false;
+    var responseAddon = this;
+    if ((hasCardWrites || hasMindmapWrite) && !this.activeAiEditTransaction) {
+      var responseDraftId = safeString(
+        valueOf(draftValue, 'id') ||
+        valueOf(json, 'draftId') ||
+        action ||
+        'companion-response'
+      );
+      this.beginAiEditTransaction(responseDraftId, json);
+      ownsAiEditTransaction = true;
+    }
+    function finishOwnedAiEditTransaction(failureReason) {
+      if (!ownsAiEditTransaction) return null;
+      var transaction = responseAddon.activeAiEditTransaction;
+      ownsAiEditTransaction = false;
+      if (transaction && countOf(transaction.createdNoteIds) > 0) {
+        return responseAddon.finishAiEditTransaction(json, failureReason ? {
+          partial: true,
+          status: 'partial_failed',
+          reason: safeString(failureReason)
+        } : {});
+      }
+      responseAddon.activeAiEditTransaction = null;
+      return null;
+    }
+    try {
+      var cardWriteResult = true;
+      if (hasCardWrites) cardWriteResult = this.createCards(cardsValue, expectedContext);
+      if (cardWriteResult === false) {
+        finishOwnedAiEditTransaction('card-write-failed');
+        return false;
+      }
+      var mindmapWriteResult = true;
+      if (hasMindmapWrite) mindmapWriteResult = this.createMindmap(mindmapValue, expectedContext);
+      if (mindmapWriteResult === false) {
+        finishOwnedAiEditTransaction('mindmap-write-failed');
+        return false;
+      }
+      finishOwnedAiEditTransaction();
+    } catch (writeErr) {
+      finishOwnedAiEditTransaction(safeString(writeErr) || 'native-write-exception');
+      this.postEvent('handleResponseWriteFailed', {
+        action: safeString(action),
+        reason: safeString(writeErr)
+      });
+      return false;
+    }
     return true;
   };
 
-  CodexAssistantAddon.prototype.resolveNotebookAndDocument = function() {
+  CodexAssistantAddon.prototype.resolveNotebookAndDocument = function(expectedTopicId, expectedBookMd5) {
     this.lastResolveError = '';
+    expectedTopicId = safeString(expectedTopicId);
+    expectedBookMd5 = safeString(expectedBookMd5);
     var controller = this.getStudyController();
     if (!controller || !controller.notebookController) {
       this.lastResolveError = 'no-study-controller-or-notebook-controller';
@@ -3826,34 +4361,116 @@ JSB.newAddon = function(mainPath) {
       this.lastResolveError = 'no-topic-id';
       return null;
     }
+    topicId = String(topicId);
+    if (expectedTopicId && topicId !== expectedTopicId) {
+      this.lastResolveError = 'draft-topic-mismatch:' + expectedTopicId + ':' + topicId;
+      return null;
+    }
+    var liveBookMd5 = safeString(this.currentDocMd5) ||
+      md5FromNotebookController(controller.notebookController);
+    if (expectedBookMd5 && !liveBookMd5) {
+      this.lastResolveError = 'live-document-unavailable:' + expectedBookMd5;
+      return null;
+    }
+    if (expectedBookMd5 && liveBookMd5 !== expectedBookMd5) {
+      this.lastResolveError = 'live-document-mismatch:' + expectedBookMd5 + ':' + liveBookMd5;
+      return null;
+    }
     var db = Database.sharedInstance();
-    var notebook = db.getNotebookById(String(topicId));
+    var notebook = db.getNotebookById(topicId);
     if (!notebook) {
       this.lastResolveError = 'notebook-not-found:' + String(topicId);
       return null;
     }
     var document = null;
-    if (notebook.documents && countOf(notebook.documents) > 0) document = objectAt(notebook.documents, 0);
-    else if (notebook.mainDocMd5) document = db.getDocumentById(notebook.mainDocMd5);
-    if (!document) {
-      this.lastResolveError = 'document-not-found';
+    var documents = valueOf(notebook, 'documents');
+    var totalDocuments = countOf(documents);
+    var targetBookMd5 = expectedBookMd5 || liveBookMd5;
+    if (targetBookMd5 && totalDocuments > 0) {
+      for (var i = 0; i < totalDocuments; i++) {
+        var candidate = objectAt(documents, i);
+        if (md5FromDocumentObject(candidate) === targetBookMd5) {
+          document = candidate;
+          break;
+        }
+      }
+    }
+    if (!document && expectedBookMd5 && totalDocuments > 0) {
+      this.lastResolveError = 'draft-document-mismatch:' + expectedBookMd5;
       return null;
     }
-    return {controller: controller, notebook: notebook, document: document, topicId: String(topicId)};
+    if (!document && expectedBookMd5 && totalDocuments === 0) {
+      try {
+        document = db.getDocumentById(expectedBookMd5);
+      } catch (expectedDocumentErr) {}
+    }
+    if (!document && !expectedBookMd5 && totalDocuments > 0) document = objectAt(documents, 0);
+    if (!document && !expectedBookMd5 && notebook.mainDocMd5) document = db.getDocumentById(notebook.mainDocMd5);
+    if (!document) {
+      this.lastResolveError = expectedBookMd5
+        ? 'draft-document-mismatch:' + expectedBookMd5
+        : 'document-not-found';
+      return null;
+    }
+    var resolvedBookMd5 = md5FromDocumentObject(document);
+    if (expectedBookMd5 && resolvedBookMd5 && resolvedBookMd5 !== expectedBookMd5) {
+      this.lastResolveError = 'draft-document-mismatch:' + expectedBookMd5 + ':' + resolvedBookMd5;
+      return null;
+    }
+    return {
+      controller: controller,
+      notebook: notebook,
+      document: document,
+      topicId: topicId,
+      bookmd5: resolvedBookMd5 || expectedBookMd5
+    };
   };
 
-  CodexAssistantAddon.prototype.createCards = function(cards) {
-    var ctx = this.resolveNotebookAndDocument();
+  CodexAssistantAddon.prototype.createCards = function(cards, expectedContext) {
+    expectedContext = expectedContext || {};
+    var ctx = this.resolveNotebookAndDocument(expectedContext.expectedTopicId, expectedContext.expectedBookMd5);
     if (!ctx) {
       this.postEvent('createCardsFailed', {reason: this.lastResolveError || 'unknown'});
-      return;
+      return false;
     }
     var addon = this;
     var parent = this.getSelectedNote();
+    if (parent && !noteBelongsToDocument(parent, ctx.document, ctx.bookmd5)) {
+      this.postEvent('createCardsFailed', {
+        reason: 'card-parent-document-mismatch',
+        parentNoteId: noteIdentifier(parent),
+        expectedDocumentId: ctx.bookmd5,
+        actualDocumentId: documentIdFromNote(parent),
+        topicid: ctx.topicId
+      });
+      return false;
+    }
     var created = [];
     var skipped = [];
     var arr = toArray(cards);
+    var dedupeRoots = valueOf(ctx.document, 'notes');
+    if (isNil(dedupeRoots)) {
+      this.postEvent('createCardsFailed', {
+        reason: 'card-document-scope-unavailable',
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    var completenessStats = {scanned: 0, incomplete: false};
+    scanNotesDeep(dedupeRoots, function() { return null; }, completenessStats, 0);
+    if (completenessStats.incomplete) {
+      this.postEvent('createCardsFailed', {
+        reason: 'card-dedupe-scan-incomplete',
+        scanned: completenessStats.scanned,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    var dedupeScope = {notes: dedupeRoots};
     var dedupeStats = {scanned: 0, markerMatches: 0, titleMatches: 0};
+    var dedupeScanFailed = false;
+    var dedupeFailureScanned = 0;
+    var nativeCreationFailed = false;
     UndoManager.sharedInstance().undoGrouping('Codex Create Cards', ctx.topicId, function() {
       for (var i = 0; i < arr.length; i++) {
         var item = arr[i];
@@ -3863,24 +4480,47 @@ JSB.newAddon = function(mainPath) {
         var title = titleValue ? String(titleValue) : 'Codex 卡片';
         var body = bodyValue ? String(bodyValue) : '';
         var codexId = codexIdValue ? String(codexIdValue) : '';
-        if (codexId && findExistingCodexNote(ctx.notebook, codexId, title, dedupeStats)) {
+        var cardScanStats = {scanned: 0, markerMatches: 0, titleMatches: 0, incomplete: false};
+        var existingCard = codexId
+          ? findExistingCodexNote(dedupeScope, codexId, title, cardScanStats)
+          : null;
+        dedupeStats.scanned += cardScanStats.scanned;
+        dedupeStats.markerMatches += cardScanStats.markerMatches;
+        dedupeStats.titleMatches += cardScanStats.titleMatches;
+        if (cardScanStats.incomplete) {
+          dedupeScanFailed = true;
+          dedupeFailureScanned = cardScanStats.scanned;
+          break;
+        }
+        if (existingCard) {
           skipped.push(codexId);
           continue;
         }
         var note = Note.createWithTitleNotebookDocument(title, ctx.notebook, ctx.document);
-          if (note) {
-            if (parent) parent.addChild(note);
+        if (note) {
+          created.push(note);
+          addon.recordAiEditCreatedNote(note);
+          addon.recordAiEditCreatedCard(note);
+          if (parent) parent.addChild(note);
           if (note.appendMarkdownComment) {
             var marker = metadataComment(codexId);
             note.appendMarkdownComment(marker ? marker + '\n\n' + body : body);
           }
-          created.push(note);
-          addon.recordAiEditCreatedNote(note);
-          addon.recordAiEditCreatedCard(note);
+        } else {
+          nativeCreationFailed = true;
         }
       }
     });
     Application.sharedInstance().refreshAfterDBChanged(ctx.topicId);
+    if (dedupeScanFailed) {
+      this.postEvent('createCardsFailed', {
+        reason: 'card-dedupe-scan-incomplete',
+        scanned: dedupeFailureScanned,
+        created: created.length,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
     this.postEvent('createCardsFinished', {
       requested: arr.length,
       created: created.length,
@@ -3896,13 +4536,45 @@ JSB.newAddon = function(mainPath) {
         ctx.controller.focusNoteInMindMapById(noteId);
       });
     }
+    if (nativeCreationFailed) {
+      this.postEvent('createCardsFailed', {
+        reason: 'native-note-create-failed',
+        requested: arr.length,
+        created: created.length,
+        skipped: skipped.length,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    return true;
   };
 
-  CodexAssistantAddon.prototype.createMindmap = function(tree) {
-    var ctx = this.resolveNotebookAndDocument();
+  CodexAssistantAddon.prototype.createMindmap = function(tree, expectedContext) {
+    expectedContext = expectedContext || {};
+    var ctx = this.resolveNotebookAndDocument(expectedContext.expectedTopicId, expectedContext.expectedBookMd5);
     if (!ctx || !tree) {
       this.postEvent('createMindmapFailed', {reason: this.lastResolveError || 'missing-tree'});
-      return;
+      return false;
+    }
+    var mindmapSurface = mindmapSurfaceState(ctx.controller);
+    if (!mindmapSurface.visible) {
+      var closedMindmapMessage = '当前只打开了文件，没有打开脑图；本次未选择或写入任何脑图。';
+      if (this.panel) this.panel.setStatus(closedMindmapMessage);
+      try {
+        Application.sharedInstance().showHUD(
+          closedMindmapMessage,
+          ctx.controller ? ctx.controller.view : this.window,
+          3
+        );
+      } catch (closedMindmapHudErr) {}
+      this.postEvent('createMindmapFailed', {
+        reason: 'mindmap-not-open-at-write',
+        surfaceReason: mindmapSurface.reason,
+        studyMode: mindmapSurface.studyMode,
+        docMapSplitMode: mindmapSurface.docMapSplitMode,
+        topicid: ctx.topicId
+      });
+      return false;
     }
     var addon = this;
     var selected = this.getSelectedNote();
@@ -3914,11 +4586,51 @@ JSB.newAddon = function(mainPath) {
     var writeTarget = valueOf(tree, 'writeTarget') || {};
     var targetMode = String(valueOf(writeTarget, 'mode') || '');
     var targetSelectedNoteId = String(valueOf(writeTarget, 'selectedNoteId') || '');
-    var wantsMergeIntoSelected = !!valueOf(tree, 'mergeIntoSelected') || targetMode === 'merge_children_into_selected_node';
+    var wantsMergeIntoSelected = isExplicitTrue(valueOf(tree, 'mergeIntoSelected')) ||
+      targetMode === 'merge_children_into_selected_node';
     var wantsVerifiedParent = targetMode === 'verified_parent_node';
     var targetParentNoteId = String(valueOf(writeTarget, 'parentNoteId') || '');
     var targetParentNoteTitle = String(valueOf(writeTarget, 'parentNoteTitle') || '');
+    var targetParentEvidenceBody = String(valueOf(writeTarget, 'parentEvidenceBody') || '');
+    var targetParentDocumentId = String(valueOf(writeTarget, 'parentDocumentId') || '');
+    var requestedExpectedDocumentId = String(valueOf(writeTarget, 'expectedDocumentId') || '');
+    var expectedDocumentId = ctx.bookmd5;
+    if (requestedExpectedDocumentId && requestedExpectedDocumentId !== expectedDocumentId) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'write-target-document-mismatch',
+        requestedDocumentId: requestedExpectedDocumentId,
+        expectedDocumentId: expectedDocumentId,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    var baselineNodeCount = intValue(valueOf(writeTarget, 'baselineNodeCount'));
+    var baselineFingerprint = String(valueOf(writeTarget, 'baselineFingerprint') || '');
     var wantsDocumentRoot = targetMode === 'document_root';
+    if (baselineNodeCount > 0 || baselineFingerprint) {
+      var currentBaselineStats = {nodes: 0, truncated: 0};
+      var currentBaselineTree = this.serializeMindmapNotebookRoots(ctx, 24, 500, currentBaselineStats);
+      if (currentBaselineStats.truncated > 0 || currentBaselineStats.nodes !== baselineNodeCount) {
+        this.postEvent('createMindmapFailed', {
+          reason: 'mindmap-baseline-changed',
+          expectedNodeCount: baselineNodeCount,
+          actualNodeCount: currentBaselineStats.nodes,
+          truncatedCount: currentBaselineStats.truncated,
+          topicid: ctx.topicId
+        });
+        return false;
+      }
+      var currentBaselineFingerprint = mindmapTreeFingerprint(currentBaselineTree);
+      if (baselineFingerprint && currentBaselineFingerprint !== baselineFingerprint) {
+        this.postEvent('createMindmapFailed', {
+          reason: 'mindmap-baseline-fingerprint-changed',
+          expectedFingerprint: baselineFingerprint,
+          actualFingerprint: currentBaselineFingerprint,
+          topicid: ctx.topicId
+        });
+        return false;
+      }
+    }
     var verifiedParent = wantsVerifiedParent && targetParentNoteId
       ? findNoteById(ctx.notebook, targetParentNoteId)
       : null;
@@ -3936,11 +4648,23 @@ JSB.newAddon = function(mainPath) {
         topicid: ctx.topicId,
         requestedMode: 'verified_parent_node'
       });
-      return;
+      return false;
     }
-    var verifiedParentTitle = verifiedParent
-      ? safeString(valueOf(verifiedParent, 'noteTitle') || valueOf(verifiedParent, 'title') || '')
-      : '';
+    if (wantsVerifiedParent && (
+      (targetParentDocumentId && targetParentDocumentId !== expectedDocumentId) ||
+      !noteBelongsToDocument(verifiedParent, ctx.document, expectedDocumentId)
+    )) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'verified-parent-document-mismatch',
+        expectedNoteId: targetParentNoteId,
+        expectedDocumentId: expectedDocumentId,
+        cachedDocumentId: targetParentDocumentId,
+        actualDocumentId: documentIdFromNote(verifiedParent),
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    var verifiedParentTitle = verifiedParent ? noteDisplayTitle(verifiedParent) : '';
     if (wantsVerifiedParent && targetParentNoteTitle && verifiedParentTitle !== targetParentNoteTitle) {
       var changedVerifiedParent = '自动选择的脑图父节点已发生变化，请刷新当前脑图后重新生成。';
       if (this.panel) this.panel.setStatus(changedVerifiedParent);
@@ -3956,7 +4680,26 @@ JSB.newAddon = function(mainPath) {
         topicid: ctx.topicId,
         requestedMode: 'verified_parent_node'
       });
-      return;
+      return false;
+    }
+    var verifiedParentBody = verifiedParent ? allTextFromNote(verifiedParent).substring(0, 1200) : '';
+    if (wantsVerifiedParent && targetParentEvidenceBody && verifiedParentBody !== targetParentEvidenceBody) {
+      var changedVerifiedParentBody = '自动选择的脑图父节点内容已发生变化，请刷新当前脑图后重新生成。';
+      if (this.panel) this.panel.setStatus(changedVerifiedParentBody);
+      try {
+        Application.sharedInstance().showHUD(changedVerifiedParentBody, ctx.controller ? ctx.controller.view : this.window, 3);
+      } catch (changedParentBodyHudErr) {}
+      this.postEvent('createMindmapFailed', {
+        reason: 'verified-parent-body-mismatch',
+        expectedNoteId: targetParentNoteId,
+        expectedTitle: targetParentNoteTitle,
+        expectedBody: targetParentEvidenceBody,
+        actualBody: verifiedParentBody,
+        title: rootTitle,
+        topicid: ctx.topicId,
+        requestedMode: 'verified_parent_node'
+      });
+      return false;
     }
     if (wantsMergeIntoSelected && selected && targetSelectedNoteId && noteIdentifier(selected) !== targetSelectedNoteId) {
       var mismatchMessage = '目标脑图节点已变化，请重新选择目标脑图后再生成。';
@@ -3972,7 +4715,16 @@ JSB.newAddon = function(mainPath) {
         topicid: ctx.topicId,
         requestedMode: 'mergeIntoSelected'
       });
-      return;
+      return false;
+    }
+    if (wantsMergeIntoSelected && selected && !noteBelongsToDocument(selected, ctx.document, expectedDocumentId)) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'selected-node-document-mismatch',
+        expectedDocumentId: expectedDocumentId,
+        actualDocumentId: documentIdFromNote(selected),
+        topicid: ctx.topicId
+      });
+      return false;
     }
     if (wantsMergeIntoSelected && !selected) {
       var missingSelected = '请先在脑图中选中一个节点，再执行合并/补到当前脑图。';
@@ -3986,13 +4738,71 @@ JSB.newAddon = function(mainPath) {
         topicid: ctx.topicId,
         requestedMode: 'mergeIntoSelected'
       });
-      return;
+      return false;
     }
     var mergeIntoSelected = wantsMergeIntoSelected && !!selected;
     var mergeIntoVerifiedParent = wantsVerifiedParent && !!verifiedParent;
     var createdNodes = [];
+    var nativeCreationFailed = false;
     var rootDedupeStats = {scanned: 0, markerMatches: 0, titleMatches: 0};
-    var existingRoot = rootCodexId ? findExistingCodexNote(ctx.notebook, rootCodexId, rootTitle, rootDedupeStats) : null;
+    var documentRootScopeResult = documentRootNoteScope(ctx, expectedDocumentId);
+    if (wantsDocumentRoot && !documentRootScopeResult.available) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'document-root-scope-unavailable',
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    var documentRootScope = {notes: documentRootScopeResult.notes};
+    var existingRootMatch = wantsDocumentRoot && rootCodexId
+      ? findUniqueExistingCodexNote(documentRootScope, rootCodexId, rootTitle, rootDedupeStats)
+      : {note: null, markerMatches: 0, titleMatches: 0, ambiguous: false, titleMismatch: false};
+    if (existingRootMatch.incomplete) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'document-root-scan-incomplete',
+        codexId: rootCodexId,
+        scanned: rootDedupeStats.scanned,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    if (existingRootMatch.ambiguous) {
+      var ambiguousRootMessage = '检测到多个相同标记的文档脑图根节点，已停止写入，请先整理重复根节点。';
+      if (this.panel) this.panel.setStatus(ambiguousRootMessage);
+      this.postEvent('createMindmapFailed', {
+        reason: 'document-root-ambiguous',
+        codexId: rootCodexId,
+        expectedTitle: rootTitle,
+        markerMatches: existingRootMatch.markerMatches,
+        titleMatches: existingRootMatch.titleMatches,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    if (existingRootMatch.titleMismatch) {
+      var rootTitleMismatchMessage = '文档脑图标记对应的标题已变化，已停止写入，请刷新或修正目标脑图。';
+      if (this.panel) this.panel.setStatus(rootTitleMismatchMessage);
+      this.postEvent('createMindmapFailed', {
+        reason: 'document-root-title-mismatch',
+        codexId: rootCodexId,
+        expectedTitle: rootTitle,
+        markerMatches: existingRootMatch.markerMatches,
+        titleMatches: existingRootMatch.titleMatches,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    var existingRoot = existingRootMatch.note;
+    if (existingRoot && !noteBelongsToDocument(existingRoot, ctx.document, expectedDocumentId)) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'document-root-document-mismatch',
+        codexId: rootCodexId,
+        expectedDocumentId: expectedDocumentId,
+        actualDocumentId: documentIdFromNote(existingRoot),
+        topicid: ctx.topicId
+      });
+      return false;
+    }
 
     function makeNode(node, parent) {
       if (!node) return null;
@@ -4004,14 +4814,17 @@ JSB.newAddon = function(mainPath) {
       var body = bodyValue ? String(bodyValue) : '';
       var codexId = codexIdValue ? String(codexIdValue) : '';
       var note = Note.createWithTitleNotebookDocument(title, ctx.notebook, ctx.document);
-      if (!note) return null;
+      if (!note) {
+        nativeCreationFailed = true;
+        return null;
+      }
+      createdNodes.push(note);
+      addon.recordAiEditCreatedNote(note);
       if (parent) parent.addChild(note);
       if (note.appendMarkdownComment) {
         var marker = metadataComment(codexId);
         note.appendMarkdownComment(marker ? marker + '\n\n' + body : body);
       }
-      createdNodes.push(note);
-      addon.recordAiEditCreatedNote(note);
       var children = toArray(childrenValue);
       for (var i = 0; i < children.length; i++) makeNode(children[i], note);
       return note;
@@ -4065,6 +4878,15 @@ JSB.newAddon = function(mainPath) {
         ctx.controller.focusNoteInMindMapById(rootNote.noteId);
       });
     }
+    if (nativeCreationFailed) {
+      this.postEvent('createMindmapFailed', {
+        reason: 'native-note-create-failed',
+        createdCount: createdNodes.length,
+        topicid: ctx.topicId
+      });
+      return false;
+    }
+    return true;
   };
 
   return CodexAssistantAddon;

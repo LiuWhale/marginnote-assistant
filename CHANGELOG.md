@@ -4,6 +4,8 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.51 - 2026-08-01
+
 ### Added
 
 - Added a `复制` button to every completed Codex answer, including restored history. It copies the original Markdown and falls back to the WebView-compatible copy command when the modern clipboard API is unavailable.
@@ -12,12 +14,32 @@ All notable changes to Codex Companion are documented here.
 ### Changed
 
 - The answer-level `生成脑图树` action now reads the current mind-map baseline, chooses a semantically compatible parent when confidence is sufficient, and otherwise falls back to the current document root.
+- Reply-derived mind maps now require a fresh, untruncated whole-notebook tree snapshot. Partial, stale, future-dated, or truncated caches trigger a native refresh and never proceed to generation.
+- Existing-node routing now requires at least three non-overlapping semantic signals. The native writer revalidates the full-tree fingerprint, chosen note ID, title, body evidence, and document identity before creating anything.
 - Reply-derived mind-map plans are create-only: exact duplicate headings are pruned, unique children are promoted, and existing nodes are never renamed, moved, merged, or overwritten.
+- Duplicate-title checks preserve meaningful punctuation, so titles such as `C`, `C++`, `A/B`, and `AB` remain distinct.
 - Queued answer-level mind-map requests now preserve their reply source metadata through the Companion queue.
+- Conversation storage preserves the complete assistant Markdown for history and copying, while model replay remains bounded to 5,000 characters per message. Concurrent history updates use fixed striped locks and atomic file replacement.
 
 ### Fixed
 
-- The native MarginNote writer now revalidates the chosen parent by both note ID and title immediately before writing. A missing or changed parent blocks the write and requests a fresh tree instead of attaching to an unrelated location.
+- The macOS package builder now reads its default version from the MarginNote add-on manifest instead of a duplicated constant, preventing a current release zip from producing an older `.pkg` name and install directory.
+- Opening a document no longer implies that its notebook mind map is open. The target selector is blocked in document-only view, native tree reads invalidate stale caches, and the writer rechecks the visible mind-map surface immediately before creating nodes.
+- Mind-map context now follows MarginNote's live study/split mode. Closing or opening the mind-map pane refreshes the WebView context, and selected-node context is ignored while the mind-map pane is not visible.
+- Answer-level mind-map generation now waits for the native whole-notebook snapshot and continues in the same click instead of reporting a temporary failure that requires a second click.
+- Mind-map refresh waits now distinguish an absent snapshot from an explicitly closed mind-map pane and correlate each native read with a unique request ID, preventing same-second `0s` failures just before MarginNote returns the tree.
+- When the open notebook has one root linked to the current document, reply-derived branches are attached to that verified root. Low semantic confidence no longer creates a separate tree beside the currently open mind map.
+- Document-root lookup can safely use notebook roots filtered by the current document identity when MarginNote does not expose `document.notes`.
+- Mind-map-only views now resolve document context from the currently selected node's linked source when no reader document is active. Multi-document notebooks still fail closed when neither an open reader file nor a sourced node identifies the file.
+- PDF cache validation now recognizes common acronym/full-title pairs such as `I-JEPA` and its expanded paper title, while retaining the existing rejection for genuinely unrelated cached documents.
+- Switching the open MarginNote file now refreshes the WebView context immediately and starts a document-bound conversation instead of continuing with the previous file.
+- Multi-document notebooks no longer share one PDF cache or conversation merely because MarginNote reports the same `bookmd5`; cache and history records are isolated by a composite current-document key.
+- Responses and queued actions created for a previously open file are blocked from appearing or running against the newly opened file.
+- The native writer registers every created note in the rollback transaction before parent attachment or comment writes, so a partial write can still be rejected and deleted.
+- Document-root reuse now requires one exact Codex marker and an exact title. Ambiguous or renamed roots block the write instead of choosing the first match.
+- Failed model or native responses no longer receive answer-only actions such as `复制` or `生成脑图树`.
+- Every draft write is transactional and requires an exact `topicid`/`bookmd5` binding. Missing, switched, or cross-document contexts fail closed before native writes.
+- Reject now deletes only note IDs recorded by the active transaction; card metadata cannot authorize deletion of any additional note, and global Undo is never invoked.
 
 ## 0.4.48 - 2026-07-30
 

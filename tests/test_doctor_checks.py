@@ -33,6 +33,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             "native-mn-object-existence-probe-v1",
             "native-mindmap-diff-apply-create-v1",
             "native-mindmap-delete-suggestion-confirm-v1",
+            "mindmap-visible-surface-guard-v1",
         ]:
             self.assertIn(feature, doctor.REQUIRED_NATIVE_HANDLER_FEATURES)
 
@@ -661,6 +662,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                             ],
                             "capabilityMatrix": {
                                 "nativeHighlightSelection": {
@@ -720,6 +722,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                             ],
                             "capabilityMatrix": {
                                 "nativeHighlightSelection": {
@@ -829,7 +832,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
             extension.mkdir()
             main_js = extension / "main.js"
             main_js.write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\nmindmap-visible-surface-guard-v1\n",
                 encoding="utf-8",
             )
             doctor.EXT_DIR = extension
@@ -876,6 +879,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                 ],
             )
 
@@ -927,6 +931,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                 ],
             )
             self.assertEqual(
@@ -950,6 +955,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                 ],
             )
 
@@ -1043,6 +1049,7 @@ class DoctorNativeApiChecks(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                         ],
                         "capabilityMatrix": {
                             "nativeCards": {"available": True, "ready": True},

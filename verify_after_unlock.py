@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import subprocess
 import sys
 import time
@@ -15,7 +14,6 @@ from pathlib import Path
 HOME = Path.home()
 ROOT = Path(os.environ.get("CODEX_MN_COMPANION_HOME", HOME / ".codex/marginnote-assistant")).expanduser()
 EXT_DIR = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
-DB_PATH = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents/MN4NotebookDatabase/0/MarginNotes.sqlite"
 EVENTS_PATH = ROOT / "events.jsonl"
 QUEUE_DIR = ROOT / "queue"
 COMPANION = "http://127.0.0.1:48761"
@@ -80,23 +78,6 @@ def recent_events(limit: int = 80) -> list[dict]:
     return out
 
 
-def count_title(topic_id: str, title: str) -> int:
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        row = conn.execute(
-            """
-            select count(*)
-              from ZBOOKNOTE
-             where ZTOPICID=?
-               and ZNOTETITLE like ?
-            """,
-            (topic_id, f"{title}%"),
-        ).fetchone()
-        return int(row[0])
-    finally:
-        conn.close()
-
-
 def queue_files() -> list[str]:
     if not QUEUE_DIR.exists():
         return []
@@ -136,43 +117,37 @@ def main() -> int:
         print("当前 MN4 还没有加载最新插件。请退出并重开 MN4 后再运行。")
         return 4
 
-    title = f"Codex Assistant 验证卡片 {time.strftime('%Y%m%d-%H%M%S')}"
-    body = (
-        "## Codex Assistant 验证\n\n"
-        "如果你在 MarginNote 脑图中看到这张卡片，说明 Companion -> MN4 插件 -> "
-        "MN 原生卡片创建链路已经跑通。"
-    )
+    before_probe_count = sum(event.get("event") == "nativeApiCapabilities" for event in recent_events(500))
     payload = {
         "topicid": topic_id,
         "bookmd5": book_md5,
         "command": {
-            "ok": True,
-            "message": "Codex Assistant 验证卡片已推送。",
-            "reply": "这是解锁后验收脚本生成的唯一标题诊断卡片。",
-            "cards": [{"title": title, "body": body}],
+            "nativeAction": "probe_native_api_capabilities",
+            "message": "运行只读 MN 原生能力探测。",
         },
     }
     result = http_json("POST", "/marginnote/enqueue", payload)
-    print(f"enqueue:                 {result.get('ok')} - {title}")
+    print(f"enqueue read-only probe: {result.get('ok')}")
     print(f"queue files before wait: {', '.join(queue_files()) or 'none'}")
 
     deadline = time.time() + 30
-    seen = 0
+    probe_seen = False
     while time.time() < deadline:
         time.sleep(2)
-        seen = count_title(topic_id, title)
-        if seen:
+        probe_count = sum(event.get("event") == "nativeApiCapabilities" for event in recent_events(500))
+        if probe_count > before_probe_count:
+            probe_seen = True
             break
 
     events = recent_events(60)
     names = [event.get("event") for event in events]
-    print(f"created card count:      {seen}")
+    print(f"native probe observed:   {probe_seen}")
     print(f"queue files after wait:  {', '.join(queue_files()) or 'none'}")
     print(
         "event evidence:          "
-        + ", ".join(name for name in ["pollCallback", "commandsReceived", "handleResponse", "createCardsFinished", "commandsAcked"] if name in names)
+        + ", ".join(name for name in ["pollCallback", "commandsReceived", "nativeApiCapabilities", "commandsAcked"] if name in names)
     )
-    return 0 if seen else 5
+    return 0 if probe_seen else 5
 
 
 if __name__ == "__main__":

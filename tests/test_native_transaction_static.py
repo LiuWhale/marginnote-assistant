@@ -51,7 +51,7 @@ class NativeTransactionStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, body)
 
-    def test_transaction_bridge_can_rebuild_rollback_transaction_from_ledger_params(self) -> None:
+    def test_transaction_bridge_cannot_rebuild_rollback_authority_from_url_params(self) -> None:
         for marker in [
             "rejectAiEditTransaction(rejectTransactionId, params)",
             "acceptAiEditTransaction(acceptTransactionId, params)",
@@ -59,17 +59,16 @@ class NativeTransactionStaticTests(unittest.TestCase):
             "dismissMindmapDeleteTransaction(dismissDeleteTransactionId, params)",
         ]:
             self.assertIn(marker, self.panel_controller_js)
-        for marker in [
-            "function aiEditObjectRefFromBridgeParams",
-            "function aiEditCreatedNoteIdsFromBridgeParams",
-            "function fallbackAiEditTransactionFromBridge",
-            "createdNoteIdsString.split('|')",
-            "fallbackAiEditTransactionFromBridge(transactionId, fallback)",
-            "this.aiEditTransactions[transactionId] = transaction;",
-            "acceptAiEditTransaction = function(transactionId, fallback)",
-            "rejectAiEditTransaction = function(transactionId, fallback)",
-        ]:
-            self.assertIn(marker, self.main_js)
+        self.assertIn("function aiEditObjectRefFromBridgeParams", self.main_js)
+        self.assertNotIn("function aiEditCreatedNoteIdsFromBridgeParams", self.main_js)
+        self.assertNotIn("function aiEditCreatedCardIdsFromBridgeParams", self.main_js)
+        self.assertNotIn("function fallbackAiEditTransactionFromBridge", self.main_js)
+        reject_body = self.main_js.split(
+            "CodexAssistantAddon.prototype.rejectAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.writeDraft", 1)[0]
+        self.assertNotIn("this.aiEditTransactions[transactionId] = transaction", reject_body)
+        self.assertIn("acceptAiEditTransaction = function(transactionId, fallback)", self.main_js)
+        self.assertIn("rejectAiEditTransaction = function(transactionId, fallback)", self.main_js)
 
     def test_native_delete_suggestion_confirmation_posts_transaction_events(self) -> None:
         for marker in [
@@ -84,17 +83,20 @@ class NativeTransactionStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, self.main_js)
 
-    def test_reject_transaction_carries_card_rollback_evidence(self) -> None:
+    def test_reject_transaction_constrains_card_evidence_to_created_notes(self) -> None:
         for marker in [
             "createdCardIds",
             "createdCardIdsMap",
             "recordAiEditCreatedCard",
             "deletedCardIds",
             "failedCardIds",
-            "deleteCardForAiEdit",
-            "reason: 'card-delete-unsupported'",
         ]:
             self.assertIn(marker, self.main_js)
+        reject_body = self.main_js.split(
+            "CodexAssistantAddon.prototype.rejectAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.writeDraft", 1)[0]
+        self.assertIn("if (!transaction.createdNoteIdsMap[cardId]) continue;", reject_body)
+        self.assertNotIn("deleteCardForAiEdit", reject_body)
 
     def test_native_object_registry_scan_command_posts_registry_event(self) -> None:
         for marker in [

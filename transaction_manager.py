@@ -334,7 +334,11 @@ def apply_native_event(record: dict[str, Any]) -> dict[str, Any]:
     elif event_name == "aiEditOperationReady":
         created_note_ids = unique_strings(extra.get("createdNoteIds"))
         created_card_ids = unique_strings(extra.get("createdCardIds"))
-        transaction["status"] = "ready"
+        partial = bool(extra.get("partial")) or str(extra.get("status") or "") == "partial_failed"
+        transaction["status"] = "apply_failed" if partial else "ready"
+        transaction["partial"] = partial
+        transaction["failureReason"] = str(extra.get("failureReason") or "")
+        transaction["message"] = str(extra.get("message") or transaction.get("message") or "")
         transaction["createdNoteIds"] = created_note_ids
         transaction["createdCardIds"] = created_card_ids or unique_strings(transaction.get("createdCardIds"))
         transaction["updatedNoteIds"] = unique_strings(extra.get("updatedNoteIds")) or unique_strings(transaction.get("updatedNoteIds"))
@@ -469,6 +473,8 @@ def transaction_summary(transaction: dict[str, Any]) -> dict[str, Any]:
         "bookmd5": str(transaction.get("bookmd5") or ""),
         "docmd5": str(transaction.get("docmd5") or ""),
         "status": str(transaction.get("status") or ""),
+        "partial": bool(transaction.get("partial")),
+        "failureReason": str(transaction.get("failureReason") or ""),
         "createdCount": int(transaction.get("createdCount") or len(created_note_ids)),
         "createdNoteIds": created_note_ids,
         "createdCardIds": created_card_ids,

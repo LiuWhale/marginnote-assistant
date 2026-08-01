@@ -64,6 +64,36 @@ class TransactionManagerTests(unittest.TestCase):
             self.assertEqual(loaded["draftId"], "draft-1")
             self.assertEqual(loaded["createdCount"], 3)
 
+    def test_partial_ready_event_allows_rollback_but_not_accept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transaction_manager.configure(Path(tmp))
+
+            result = transaction_manager.apply_native_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "transactionId": "ai-edit-partial",
+                        "draftId": "draft-partial",
+                        "createdNoteIds": ["N1"],
+                        "createdCount": 1,
+                        "partial": True,
+                        "status": "partial_failed",
+                        "failureReason": "native-note-create-failed",
+                    },
+                }
+            )
+
+            transaction = result["transaction"]
+            self.assertEqual(transaction["status"], "apply_failed")
+            self.assertTrue(transaction["partial"])
+            self.assertEqual(transaction["failureReason"], "native-note-create-failed")
+            self.assertEqual(
+                transaction_manager.transaction_available_actions(transaction),
+                ["rollback", "verify", "evidence"],
+            )
+
     def test_mindmap_diff_apply_finished_persists_transaction_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             transaction_manager.configure(Path(tmp))

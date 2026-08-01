@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 ACCEPTANCE_PATH = Path(__file__).resolve().parents[1] / "release_acceptance.py"
+UNLOCK_VERIFY_PATH = Path(__file__).resolve().parents[1] / "verify_after_unlock.py"
 
 
 class ReleaseAcceptanceTests(unittest.TestCase):
@@ -31,8 +32,15 @@ class ReleaseAcceptanceTests(unittest.TestCase):
             "native-mn-object-existence-probe-v1",
             "native-mindmap-diff-apply-create-v1",
             "native-mindmap-delete-suggestion-confirm-v1",
+            "mindmap-visible-surface-guard-v1",
         ]:
             self.assertIn(feature, module.REQUIRED_NATIVE_HANDLER_FEATURES)
+
+    def test_unlock_verifier_uses_read_only_native_probe_instead_of_creating_card(self) -> None:
+        source = UNLOCK_VERIFY_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('"nativeAction": "probe_native_api_capabilities"', source)
+        self.assertNotIn('"cards": [{"title": title, "body": body}]', source)
 
     def test_acceptance_blocks_unsigned_pkg_missing_native_highlight_and_cross_machine_evidence(self) -> None:
         module = self.load_module()
@@ -517,6 +525,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                     ],
                     "capabilityMatrix": {
                         "nativeCards": {"ready": True},
@@ -583,6 +592,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
                 ],
                 "capabilityMatrix": {
                     "nativeCards": {"ready": True},
@@ -640,7 +650,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
             extension = Path(tmp) / "codex.mn.assistant"
             extension.mkdir(parents=True)
             (extension / "main.js").write_text(
-                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\n",
+                "native-highlight-arm-next-selection-default\nnative-highlight-prefer-next-selection-v1\nnative-highlight-command-prepared\nselection-popup-diagnostics-v1\nnative-highlight-selection-poll-v1\nnative-highlight-selection-poll-probe-v1\nselection-popup-scene-observer-v1\nselection-popup-notebook-rebind-v1\nnative-highlight-selection-text-resolver-v1\nnative-pdf-selection-probe-v1\nnative-pdf-selection-image-probe-v1\ncontext-refresh-clears-stale-selection-v1\nai-edit-transaction-rollback-v1\nai-edit-undo-rollback-v2\nnative-mn-object-registry-scan-v1\nnative-mn-object-existence-probe-v1\nnative-mindmap-diff-apply-create-v1\nnative-mindmap-delete-suggestion-confirm-v1\nmindmap-visible-surface-guard-v1\n",
                 encoding="utf-8",
             )
             module.LIVE_EXTENSION = extension
@@ -725,6 +735,7 @@ class ReleaseAcceptanceTests(unittest.TestCase):
                             "native-mn-object-existence-probe-v1",
                             "native-mindmap-diff-apply-create-v1",
                             "native-mindmap-delete-suggestion-confirm-v1",
+                            "mindmap-visible-surface-guard-v1",
             ],
         )
         self.assertIn("missing-native-handler-feature:native-highlight-arm-next-selection-default", result["problems"])

@@ -834,6 +834,11 @@ class WebControlsStaticTests(unittest.TestCase):
             "writeTarget: result.writeTarget ||",
         ]:
             self.assertIn(marker, self.js)
+        ensure_body = self.js.split("function ensureMindmapTargetReady", 1)[1].split(
+            "\n  function renderControls", 1
+        )[0]
+        self.assertIn("state.context.mindmapVisible", ensure_body)
+        self.assertIn("当前没有打开脑图", ensure_body)
 
     def test_knowledge_and_workflow_workspaces_are_executable_not_status_only(self) -> None:
         main_html = self.html.split('<main id="aiChatShell"', 1)[1].split("</main>", 1)[0]
@@ -1505,6 +1510,35 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("waiting_native", auto_cache_body)
         self.assertIn("topicid", auto_cache_body)
         self.assertIn("bookmd5", auto_cache_body)
+
+    def test_document_switch_starts_a_fresh_document_conversation(self) -> None:
+        render_context_body = self.js.split("function renderContext(ctx)", 1)[1].split(
+            "\n  function renderContextSourceLine", 1
+        )[0]
+        post_body = self.js.split("function postCompanion(action", 1)[1].split(
+            "\n  function postCompanionPath", 1
+        )[0]
+
+        self.assertIn("state.context.contextDocumentKey", render_context_body)
+        self.assertIn("resetConversationForDocumentChange", render_context_body)
+        self.assertIn("state.conversationId = ''", self.js)
+        self.assertIn("state.sessionId = ''", self.js)
+        self.assertIn("state.autoPdfCacheRequestedKey = ''", self.js)
+        self.assertIn("requestDocumentKey", post_body)
+        self.assertIn("staleDocumentResponse", post_body)
+        queued_body = self.js.split("function runQueuedCommand(command)", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        self.assertIn("queuedDocumentKey", queued_body)
+        self.assertIn("任务属于另一个文件", queued_body)
+
+    def test_context_source_explains_selected_mindmap_node_document_fallback(self) -> None:
+        source_line_body = self.js.split("function renderContextSourceLine(ctx)", 1)[1].split(
+            "\n  window.CodexPanel", 1
+        )[0]
+
+        self.assertIn("selected_mindmap_node", source_line_body)
+        self.assertIn("当前节点关联文件", source_line_body)
 
     def test_update_button_opens_release_page_without_installing(self) -> None:
         install_body = self.js.split("function installUpdate()", 1)[1].split("\n  function trimText", 1)[0]
