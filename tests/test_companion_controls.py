@@ -6491,6 +6491,70 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(valid["complete"], valid)
             self.assertEqual(valid["diagnostics"], [])
 
+    def test_source_usage_requires_exactly_one_acknowledgement_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-ONE-ACK-LINE")
+            cases = [
+                (
+                    "earlier invalid final clean",
+                    "资料读取：src-x=read\nanswer\n资料读取：src-a=read; src-b=read",
+                ),
+                (
+                    "multiple clean lines",
+                    "资料读取：src-a=read; src-b=read\nanswer\n资料读取：src-a=read; src-b=read",
+                ),
+            ]
+
+            for label, reply in cases:
+                with self.subTest(label=label):
+                    usage = companion.source_usage_for_reply(payload, reply)
+                    diagnostic_codes = {
+                        str(item.get("code") or "")
+                        for item in usage.get("diagnostics", [])
+                        if isinstance(item, dict)
+                    }
+                    self.assertFalse(usage["complete"], usage)
+                    self.assertIn("multiple-acknowledgement-lines", diagnostic_codes)
+
+    def test_source_usage_rejects_empty_delimiter_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-EMPTY-ACK-TOKEN")
+            cases = [
+                ("leading", "answer\n资料读取：; src-a=read; src-b=read"),
+                ("doubled", "answer\n资料读取：src-a=read;; src-b=read"),
+                ("trailing", "answer\n资料读取：src-a=read; src-b=read;"),
+            ]
+
+            for label, reply in cases:
+                with self.subTest(label=label):
+                    usage = companion.source_usage_for_reply(payload, reply)
+                    malformed = [
+                        item
+                        for item in usage.get("diagnostics", [])
+                        if isinstance(item, dict) and item.get("code") == "malformed-token"
+                    ]
+                    self.assertFalse(usage["complete"], usage)
+                    self.assertTrue(malformed, usage)
+                    self.assertTrue(any(item.get("token") == "" for item in malformed), usage)
+
+    def test_source_usage_accepts_one_exact_acknowledgement_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-VALID-ACK-LINE")
+
+            usage = companion.source_usage_for_reply(
+                payload,
+                "answer\n资料读取：src-a=read; src-b=read",
+            )
+
+            self.assertTrue(usage["complete"], usage)
+            self.assertEqual(usage["diagnostics"], [])
+
     def test_multi_file_zero_exit_stdout_error_is_not_promoted_to_answer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -13314,13 +13314,27 @@ def source_usage_for_reply(payload: dict[str, Any], reply: str) -> dict[str, Any
         }
     statuses: dict[str, str] = {}
     diagnostics: list[dict[str, Any]] = []
-    acknowledgement_lines = re.findall(r"(?m)^\s*资料读取\s*[:：]\s*(.*?)\s*$", str(reply or ""))
+    acknowledgement_lines = re.findall(r"(?m)^资料读取：(.*)$", str(reply or ""))
     if not acknowledgement_lines:
         diagnostics.append({"code": "missing-acknowledgement-line"})
+    elif len(acknowledgement_lines) > 1:
+        diagnostics.append(
+            {
+                "code": "multiple-acknowledgement-lines",
+                "lineCount": len(acknowledgement_lines),
+            }
+        )
     else:
-        for raw_token in re.split(r"[;；]", acknowledgement_lines[-1]):
+        for token_index, raw_token in enumerate(re.split(r"[;；]", acknowledgement_lines[0]), start=1):
             token = raw_token.strip()
             if not token:
+                diagnostics.append(
+                    {
+                        "code": "malformed-token",
+                        "token": "",
+                        "tokenIndex": token_index,
+                    }
+                )
                 continue
             match = re.fullmatch(r"([^=]+?)\s*=\s*(read|unread)", token, re.I)
             if not match:
