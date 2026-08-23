@@ -13297,7 +13297,10 @@ def source_workspace_model_contract(workspace: dict[str, Any]) -> str:
 
 def source_usage_for_reply(payload: dict[str, Any], reply: str) -> dict[str, Any]:
     workspace = generation_source_workspace(payload)
-    source_ids = unique_string_list(payload.get("sourceIds"))
+    workspace_sources = [source for source in workspace.get("sources", []) if isinstance(source, dict)]
+    source_ids = [str(source.get("sourceId") or "") for source in workspace_sources if source.get("sourceId")]
+    if not source_ids:
+        source_ids = unique_string_list(payload.get("sourceIds"))
     if not workspace.get("active"):
         return {
             "schema": "codex.mn.sourceUsage.v1",
@@ -13307,20 +13310,51 @@ def source_usage_for_reply(payload: dict[str, Any], reply: str) -> dict[str, Any
             "unread": [],
             "missing": [],
             "complete": True,
+            "diagnostics": [],
         }
     statuses: dict[str, str] = {}
+    diagnostics: list[dict[str, Any]] = []
     acknowledgement_lines = re.findall(r"(?m)^\s*资料读取\s*[:：]\s*(.*?)\s*$", str(reply or ""))
-    if acknowledgement_lines:
-        for item in re.split(r"[;；]", acknowledgement_lines[-1]):
-            source_id, separator, status = item.strip().partition("=")
-            source_id = source_id.strip()
-            status = status.strip().lower()
-            if separator and source_id in source_ids and status in {"read", "unread"}:
-                statuses[source_id] = status
+    if not acknowledgement_lines:
+        diagnostics.append({"code": "missing-acknowledgement-line"})
+    else:
+        for raw_token in re.split(r"[;；]", acknowledgement_lines[-1]):
+            token = raw_token.strip()
+            if not token:
+                continue
+            match = re.fullmatch(r"([^=]+?)\s*=\s*(read|unread)", token, re.I)
+            if not match:
+                diagnostics.append({"code": "malformed-token", "token": token})
+                continue
+            source_id = match.group(1).strip()
+            status = match.group(2).lower()
+            if source_id not in source_ids:
+                diagnostics.append({"code": "unknown-source-id", "sourceId": source_id})
+                continue
+            if source_id in statuses:
+                diagnostics.append({"code": "duplicate-source-id", "sourceId": source_id})
+                if statuses[source_id] != status:
+                    diagnostics.append(
+                        {
+                            "code": "conflicting-source-status",
+                            "sourceId": source_id,
+                            "firstStatus": statuses[source_id],
+                            "duplicateStatus": status,
+                        }
+                    )
+                continue
+            statuses[source_id] = status
     read = [source_id for source_id in source_ids if statuses.get(source_id) == "read"]
     unread = [source_id for source_id in source_ids if statuses.get(source_id) == "unread"]
     missing = [source_id for source_id in source_ids if source_id not in statuses]
-    complete = bool(workspace.get("ok")) and len(read) == len(source_ids) and not unread and not missing
+    diagnostics.extend({"code": "missing-source-id", "sourceId": source_id} for source_id in missing)
+    complete = (
+        bool(workspace.get("ok"))
+        and len(read) == len(source_ids)
+        and not unread
+        and not missing
+        and not diagnostics
+    )
     return {
         "schema": "codex.mn.sourceUsage.v1",
         "active": True,
@@ -13330,6 +13364,7 @@ def source_usage_for_reply(payload: dict[str, Any], reply: str) -> dict[str, Any
         "missing": missing,
         "complete": complete,
         "errors": list(workspace.get("errors") or []),
+        "diagnostics": diagnostics,
     }
 
 
@@ -13338,13 +13373,21 @@ def with_generation_source_usage(
     reply: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    usage = source_usage_for_reply(payload, reply)
+    result_reply = str(result.get("reply") or "") if "reply" in result else str(reply or "")
+    usage = source_usage_for_reply(payload, result_reply)
     if not usage.get("active"):
         return result
+    usable_reply = re.sub(r"(?m)^\s*资料读取\s*[:：].*$", "", result_reply).strip()
+    write_eligible = bool(
+        result.get("ok")
+        and result.get("backend") == "codex-cli"
+        and usable_reply
+        and usage.get("complete")
+    )
     return {
         **result,
         "sourceUsage": usage,
-        "answerDerivedWritesEligible": bool(usage.get("complete")),
+        "answerDerivedWritesEligible": write_eligible,
     }
 
 
@@ -13613,7 +13656,13 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
                 pass
         if returncode == 0 and final_text:
             return final_text, "codex-cli"
-        if returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
+        if (
+            not workspace.get("active")
+            and returncode == 0
+            and stdout
+            and "stream error:" not in stdout
+            and "requires a newer version of Codex" not in stdout
+        ):
             return stdout, "codex-cli"
         last_detail = stdout or stderr or "Codex CLI 返回为空。"
         if attempt == 0 and attempts > 1 and is_retryable_codex_cli_startup_error(last_detail):

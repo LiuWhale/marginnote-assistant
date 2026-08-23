@@ -33,6 +33,27 @@ def load_companion(root: Path) -> Any:
 
 
 class CompanionControlsTests(unittest.TestCase):
+    def multi_file_payload(
+        self,
+        companion: Any,
+        root: Path,
+        conversation_id: str,
+        source_ids: tuple[str, ...] = ("src-a", "src-b"),
+    ) -> dict[str, Any]:
+        sources = []
+        for index, source_id in enumerate(source_ids, start=1):
+            path = root / f"source-{index}.md"
+            path.write_text(f"content for {source_id}", encoding="utf-8")
+            sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
+        workspace = companion.source_workspace.build_workspace(conversation_id, sources, False)
+        self.assertTrue(workspace["ok"], workspace)
+        return {
+            "prompt": "compare selected sources",
+            "conversationId": conversation_id,
+            "sourceIds": list(source_ids),
+            "sourceWorkspaceRevision": workspace["revision"],
+        }
+
     def test_required_native_handler_features_cover_v2_object_workbench_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -6370,6 +6391,207 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["sourceUsage"]["unread"], ["src-b"])
             self.assertFalse(result["sourceUsage"]["complete"])
             self.assertFalse(result["answerDerivedWritesEligible"])
+
+    def test_failed_backend_with_complete_acknowledgement_is_not_write_eligible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-FAILED-BACKEND")
+            reply = "authentication failed\n资料读取：src-a=read; src-b=read"
+
+            result = companion.with_generation_source_usage(
+                payload,
+                reply,
+                {
+                    "ok": False,
+                    "reply": reply,
+                    "backend": "codex-cli-error",
+                },
+            )
+
+            self.assertTrue(result["sourceUsage"]["complete"])
+            self.assertFalse(result["answerDerivedWritesEligible"])
+
+    def test_answer_derived_write_eligibility_requires_usable_codex_cli_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-ELIGIBILITY")
+            acknowledgement = "资料读取：src-a=read; src-b=read"
+            cases = [
+                ("openai backend", {"ok": True, "reply": f"answer\n{acknowledgement}", "backend": "openai:test"}),
+                ("empty reply", {"ok": True, "reply": "", "backend": "codex-cli"}),
+                ("acknowledgement only", {"ok": True, "reply": acknowledgement, "backend": "codex-cli"}),
+            ]
+
+            for label, raw_result in cases:
+                with self.subTest(label=label):
+                    result = companion.with_generation_source_usage(
+                        payload,
+                        str(raw_result["reply"]),
+                        raw_result,
+                    )
+                    self.assertFalse(result["answerDerivedWritesEligible"])
+
+            eligible = companion.with_generation_source_usage(
+                payload,
+                f"usable answer\n{acknowledgement}",
+                {"ok": True, "reply": f"usable answer\n{acknowledgement}", "backend": "codex-cli"},
+            )
+            self.assertTrue(eligible["answerDerivedWritesEligible"])
+
+    def test_source_usage_rejects_duplicate_unknown_substring_and_malformed_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-STRICT-USAGE")
+            cases = [
+                (
+                    "duplicate",
+                    "answer\n资料读取：src-a=read; src-a=read; src-b=read",
+                    {"duplicate-source-id"},
+                ),
+                (
+                    "conflict",
+                    "answer\n资料读取：src-a=read; src-a=unread; src-b=read",
+                    {"duplicate-source-id", "conflicting-source-status"},
+                ),
+                (
+                    "unknown",
+                    "answer\n资料读取：src-a=read; src-b=read; src-x=read",
+                    {"unknown-source-id"},
+                ),
+                (
+                    "substring",
+                    "answer\n资料读取：src-a=read; src-b=read; src-a-extra=read",
+                    {"unknown-source-id"},
+                ),
+                (
+                    "malformed",
+                    "answer\n资料读取：src-a=read; malformed; src-b=read",
+                    {"malformed-token"},
+                ),
+            ]
+
+            for label, reply, expected_codes in cases:
+                with self.subTest(label=label):
+                    usage = companion.source_usage_for_reply(payload, reply)
+                    diagnostic_codes = {
+                        str(item.get("code") or "")
+                        for item in usage.get("diagnostics", [])
+                        if isinstance(item, dict)
+                    }
+                    self.assertFalse(usage["complete"])
+                    self.assertTrue(expected_codes.issubset(diagnostic_codes), usage)
+
+            valid = companion.source_usage_for_reply(
+                payload,
+                "answer\n资料读取：src-a=read; src-b=read",
+            )
+            self.assertTrue(valid["complete"], valid)
+            self.assertEqual(valid["diagnostics"], [])
+
+    def test_multi_file_zero_exit_stdout_error_is_not_promoted_to_answer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-STDOUT-ERROR")
+            companion.save_runtime_settings({"aiBackend": "codex_cli", "codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.effective_codex_cli_model = lambda settings=None: "gpt-test"
+            calls: list[list[str]] = []
+
+            class FakeProcess:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, command: list[str], **kwargs: Any) -> None:
+                    calls.append(command)
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "ERROR: authentication failed", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = FakeProcess
+            try:
+                text, backend = companion.call_codex_cli(payload, "chat")
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            codex_calls = [command for command in calls if command[:2] == ["/tmp/codex", "exec"]]
+            self.assertEqual(len(codex_calls), 1)
+            self.assertEqual(backend, "codex-cli-error")
+            self.assertIn("authentication failed", text or "")
+
+    def test_single_document_zero_exit_stdout_fallback_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings({"aiBackend": "codex_cli", "codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.effective_codex_cli_model = lambda settings=None: "gpt-test"
+
+            class FakeProcess:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, command: list[str], **kwargs: Any) -> None:
+                    pass
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "legacy stdout answer", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_document_context = companion.document_context_for_model
+            old_popen = companion.subprocess.Popen
+            companion.document_context_for_model = lambda payload, query: {"ok": True, "text": "document context"}
+            companion.subprocess.Popen = FakeProcess
+            try:
+                text, backend = companion.call_codex_cli({"prompt": "single document"}, "chat")
+            finally:
+                companion.document_context_for_model = old_document_context
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual((text, backend), ("legacy stdout answer", "codex-cli"))
+
+    def test_multi_file_retryable_startup_failure_uses_one_popen(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(companion, root, "CONV-ONE-STARTUP")
+            companion.save_runtime_settings({"aiBackend": "codex_cli", "codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.effective_codex_cli_model = lambda settings=None: "gpt-test"
+            calls: list[list[str]] = []
+
+            class FakeProcess:
+                pid = 4321
+                returncode = 1
+
+                def __init__(self, command: list[str], **kwargs: Any) -> None:
+                    calls.append(command)
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "Error: timed out waiting for cloud config bundle after 15s", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = FakeProcess
+            try:
+                text, backend = companion.call_codex_cli(payload, "chat")
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            codex_calls = [command for command in calls if command[:2] == ["/tmp/codex", "exec"]]
+            self.assertEqual(len(codex_calls), 1)
+            self.assertEqual(backend, "codex-cli-error")
+            self.assertIn("cloud config bundle", text or "")
 
     def test_explicit_queue_command_inherits_authoritative_source_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
