@@ -2166,6 +2166,124 @@ class WebControlsStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, self.html + self.js + self.css)
 
+    def test_chat_header_has_multi_file_source_control_and_page(self) -> None:
+        for marker in [
+            'id="sourceWorkspaceButton"',
+            'id="sourceWorkspaceCount"',
+            'id="sourceWorkspacePage"',
+            'id="sourceWorkspaceBackButton"',
+            'id="sourceWorkspaceFollowCurrentDocument"',
+            'id="sourceWorkspaceCurrentDocumentList"',
+            'id="sourceWorkspaceNotebookList"',
+            'id="sourceWorkspaceUploadList"',
+            'id="sourceWorkspaceLocalList"',
+            'id="sourceWorkspaceValidationStatus"',
+            'id="sourceWorkspaceClearButton"',
+            'id="sourceWorkspaceValidateButton"',
+            'id="sourceWorkspaceDoneButton"',
+            'id="sourceWorkspaceDiagnostics"',
+            '>资料 <span id="sourceWorkspaceCount"',
+            '返回对话',
+            '跟随当前文件',
+            '全部取消',
+            '验证资料',
+            '完成',
+        ]:
+            self.assertIn(marker, self.html)
+
+        for marker in [
+            "sourceWorkspace: {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''}",
+            "sourceWorkspaceCandidates: []",
+            "sourceWorkspaceSelection: {}",
+            "followCurrentDocument: true",
+            "function openSourceWorkspacePage",
+            "function renderSourceWorkspacePage",
+            "function saveSourceWorkspaceSelection",
+            "source_workspace_get",
+            "source_workspace_update",
+            "source_workspace_validate",
+            "source_workspace_clear",
+            "candidate.path",
+            "sourceWorkspaceDiagnostics",
+        ]:
+            self.assertIn(marker, self.js)
+
+        row_body = self.js.split("function buildSourceWorkspaceRow", 1)[1].split(
+            "\n  function renderSourceWorkspaceDiagnostics", 1
+        )[0]
+        self.assertNotIn("candidate.path", row_body)
+        self.assertIn("candidate.title", row_body)
+        self.assertIn("row.title =", row_body)
+        self.assertIn("type = 'checkbox'", row_body)
+
+    def test_generation_payload_and_source_coverage_are_fail_closed(self) -> None:
+        payload_body = self.js.split("function companionPayload", 1)[1].split(
+            "\n  function parseCompanionResult", 1
+        )[0]
+        queued_body = self.js.split("function runQueuedCommand", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        completed_body = self.js.split("function addCompletedAssistantReply", 1)[1].split(
+            "\n  function addAssistantReplyWithActions", 1
+        )[0]
+
+        for marker in [
+            "payload.sourceIds",
+            "payload.followCurrentDocument",
+            "payload.sourceWorkspaceRevision",
+            "payload.conversationId",
+        ]:
+            self.assertIn(marker, payload_body)
+        for marker in [
+            "command.sourceIds",
+            "command.followCurrentDocument",
+            "command.sourceWorkspaceRevision",
+            "command.conversationId",
+        ]:
+            self.assertIn(marker, queued_body)
+        for marker in [
+            "sourceUsage",
+            "sourceUsage.complete",
+            "answerDerivedWritesEligible",
+            "已读取 ",
+            "source-usage-unread",
+            "unreadIds",
+            "missingIds",
+        ]:
+            self.assertIn(marker, self.js)
+        self.assertIn("本次资料：", self.js)
+        self.assertIn("个文件，均可读", self.js)
+        self.assertIn("replyText", completed_body)
+        self.assertIn("buildReplyCopyButton(replyText)", completed_body)
+        self.assertIn("allowAnswerDerivedWrites", completed_body)
+        self.assertIn("if (allowAnswerDerivedWrites)", completed_body)
+
+    def test_follow_current_document_preserves_explicit_selection(self) -> None:
+        context_body = self.js.split("function renderContext(ctx)", 1)[1].split(
+            "\n  function renderContextSourceLine", 1
+        )[0]
+        follow_body = self.js.split("function syncFollowCurrentDocumentMembership", 1)[1].split(
+            "\n  function renderHistoryItems", 1
+        )[0]
+        conversation_body = self.js.split("function setCurrentConversation", 1)[1].split(
+            "\n  function currentMnObjectRef", 1
+        )[0]
+
+        for marker in [
+            "syncFollowCurrentDocumentMembership",
+            "previousDocumentKey",
+            "docKey !== previousDocumentKey",
+        ]:
+            self.assertIn(marker, context_body)
+        self.assertIn("state.followCurrentDocument", follow_body)
+        self.assertIn("preservedSelection", follow_body)
+        for marker in [
+            "conversation.sourceIds",
+            "conversation.followCurrentDocument",
+            "conversation.sourceWorkspaceRevision",
+        ]:
+            self.assertIn(marker, conversation_body)
+
     def test_parity_matrix_document_tracks_builtin_ai_chat_requirements(self) -> None:
         doc = (Path(__file__).resolve().parents[1] / "docs/MN4_AI_CHAT_PARITY.md").read_text(encoding="utf-8")
         for marker in [

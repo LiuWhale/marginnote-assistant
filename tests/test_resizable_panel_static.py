@@ -629,6 +629,25 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("addMessage('user'", history_body)
         self.assertIn("addCompletedAssistantReply", history_body)
 
+    def test_source_workspace_page_fits_minimum_panel_and_long_names(self) -> None:
+        self.assertIn(".source-workspace-row", self.css)
+        row_body = self.css.split(".source-workspace-row {", 1)[1].split("}", 1)[0]
+        name_body = self.css.split(".source-workspace-name {", 1)[1].split("}", 1)[0]
+        commands_body = self.css.split(".source-workspace-commands {", 1)[1].split("}", 1)[0]
+        command_button_body = self.css.split(".source-workspace-commands .small-button {", 1)[1].split("}", 1)[0]
+
+        self.assertIn("minmax(0, 1fr)", row_body)
+        self.assertIn("min-width: 0;", name_body)
+        self.assertIn("overflow-wrap: anywhere;", name_body)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr));", commands_body)
+        self.assertIn("min-height:", command_button_body)
+        self.assertIn("height: 100%;", command_button_body)
+
+        source_css = self.css.split(".source-workspace-page", 1)[1]
+        self.assertNotIn("width: 390px", source_css)
+        self.assertNotIn("min-width: 420px", source_css)
+        self.assertIn("@media (max-width: 520px)", source_css)
+
     def test_reply_mindmap_source_metadata_survives_direct_and_queued_execution(self) -> None:
         next_action_body = self.app.split("function runAgentNextAction", 1)[1].split(
             "\n  function buildReplyAgentActions", 1

@@ -51,6 +51,7 @@
       <div class="topbar-actions">
         <button class="small-button" id="newConversationButton" type="button">新对话</button>
         <button class="small-button" id="conversationHistoryButton" type="button">历史</button>
+        <button class="small-button source-workspace-button neutral" id="sourceWorkspaceButton" type="button">资料 <span id="sourceWorkspaceCount">0</span></button>
         <button class="small-button" id="settingsButton" type="button">设置</button>
         <button class="icon-button" id="closeButton" type="button" title="关闭">x</button>
       </div>
@@ -780,6 +781,53 @@
     </div>
   </section>
 
+  <section id="sourceWorkspacePage" class="config-page source-workspace-page hidden" aria-label="资料选择">
+    <header class="config-header">
+      <div>
+        <h2>资料</h2>
+        <p>选择本次对话要完整读取的文件</p>
+      </div>
+      <button id="sourceWorkspaceBackButton" class="small-button primary-lite" type="button">返回对话</button>
+    </header>
+    <div class="config-body source-workspace-body">
+      <section class="source-workspace-follow">
+        <label for="sourceWorkspaceFollowCurrentDocument">
+          <input id="sourceWorkspaceFollowCurrentDocument" type="checkbox" checked>
+          <span>跟随当前文件</span>
+        </label>
+        <p>开启后，切换文件只更新当前文件，其他已选资料保持不变。</p>
+      </section>
+
+      <section class="source-workspace-section" aria-labelledby="sourceWorkspaceCurrentDocumentTitle">
+        <h3 id="sourceWorkspaceCurrentDocumentTitle">当前文件</h3>
+        <div id="sourceWorkspaceCurrentDocumentList" class="source-workspace-list"></div>
+      </section>
+      <section class="source-workspace-section" aria-labelledby="sourceWorkspaceNotebookTitle">
+        <h3 id="sourceWorkspaceNotebookTitle">当前 notebook 文件</h3>
+        <div id="sourceWorkspaceNotebookList" class="source-workspace-list"></div>
+      </section>
+      <section class="source-workspace-section" aria-labelledby="sourceWorkspaceUploadTitle">
+        <h3 id="sourceWorkspaceUploadTitle">已上传文件</h3>
+        <div id="sourceWorkspaceUploadList" class="source-workspace-list"></div>
+      </section>
+      <section class="source-workspace-section" aria-labelledby="sourceWorkspaceLocalTitle">
+        <h3 id="sourceWorkspaceLocalTitle">本地选择与搜索结果</h3>
+        <div id="sourceWorkspaceLocalList" class="source-workspace-list"></div>
+      </section>
+
+      <div id="sourceWorkspaceValidationStatus" class="source-workspace-validation idle" role="status">资料尚未验证</div>
+      <details id="sourceWorkspaceDiagnostics" class="source-workspace-diagnostics">
+        <summary>技术诊断</summary>
+        <div id="sourceWorkspaceDiagnosticsBody">展开后显示本地路径和验证详情。</div>
+      </details>
+      <div class="source-workspace-commands">
+        <button id="sourceWorkspaceClearButton" class="small-button danger-lite" type="button">全部取消</button>
+        <button id="sourceWorkspaceValidateButton" class="small-button" type="button">验证资料</button>
+        <button id="sourceWorkspaceDoneButton" class="small-button primary" type="button">完成</button>
+      </div>
+    </div>
+  </section>
+
   <section id="configPage" class="config-page hidden" aria-label="Codex Companion 配置">
     <header class="config-header">
       <div>
@@ -958,6 +1006,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260627-source-registry-v1"></script>
+  <script src="app.js?v=20260823-source-workspace-v1"></script>
 </body>
 </html>
