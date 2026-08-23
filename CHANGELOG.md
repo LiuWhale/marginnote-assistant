@@ -4,6 +4,18 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.53 - 2026-08-23
+
+### Added
+
+- Added a conversation-scoped multi-file source picker with follow-current behavior, per-source validation/read state, deterministic managed workspaces, ordered `SOURCES.md` contracts, and source acknowledgement in the response.
+- Added one-call Codex CLI execution for explicit multi-file sets, including workspace `cwd`, queue revision binding, source removal, and broken-link preflight blocking.
+
+### Changed
+
+- Multi-file requests now require Codex CLI and never fall back to the OpenAI API, which cannot read local workspace links.
+- Read sources are independent of the single validated MarginNote write target; managed workspace cleanup removes only Companion metadata and links, never selected originals.
+
 ## 0.4.52 - 2026-08-01
 
 ### Fixed

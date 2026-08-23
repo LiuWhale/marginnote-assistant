@@ -163,7 +163,17 @@ Uninstall Codex Companion.command
 
 ### 新对话和历史
 
-主界面可以开启新对话；历史页是独立页面，用来查看或清理当前打开文件的对话记录。切换文件后，插件会为新文件开启独立对话，旧文件的对话仍保留在它自己的历史里。一个脑图可以包含多个文件，但普通对话和全文缓存一次只绑定当前打开文件；只有明确请求跨文档检索时才会读取其他来源。带有当前 `MNObject` 的会话会保存 `objectRef/mnObjectId`，后续可以只查看某个选区、卡片或文档对象相关的对话。
+主界面可以开启新对话；历史页是独立页面，用来查看或清理当前打开文件的对话记录。切换文件后，插件会为新文件开启独立对话，旧文件的对话仍保留在它自己的历史里。一个脑图可以包含多个文件。普通单文档对话和全文缓存仍一次只绑定当前打开文件；需要一次读取多个指定文件时，使用下面的多文件资料工作区。带有当前 `MNObject` 的会话会保存 `objectRef/mnObjectId`，后续可以只查看某个选区、卡片或文档对象相关的对话。
+
+### 多文件资料工作区
+
+当一个问题需要比较或综合多个文件时，点击对话标题栏的 `资料 N`。资料页会列出当前 MarginNote 文件、当前 notebook 文件、已上传文件、手动选择的本地文件和搜索根目录结果。勾选文件后先查看可读状态和文本提取状态，再点 `验证资料` 和 `完成`。`全部取消` 会清空显式资料集；单独移除某一项只影响下一次请求，不会操作源文件。
+
+`跟随当前文件` 默认开启，此时 MarginNote 当前打开的文件会始终进入资料集，并随阅读器切换。需要固定比较对象时关闭它；关闭后切换当前文件不会替换已经显式选择的资料。红色状态表示文件缺失、不可读、macOS 权限不足或链接已断开。恢复文件或权限后重新验证，也可以移除失败项；Companion 不会静默忽略失败资料。
+
+每次发送只执行 **一次 Codex CLI 调用**，工作目录是当前对话的托管资料工作区。Codex 先按顺序读取 `SOURCES.md`；`files/` 和 `text/` 中保存的是指向原文件、缓存或提取文本的托管`软链接`。清理或重建工作区只删除 Companion 创建的链接和清单，`不会删除原文件`，也不会移动、重命名或修改原文件。
+
+多文件资料工作区必须使用 Codex CLI。`auto` 可以选择 Codex CLI，但这类请求不会回退到 OpenAI API；只配置 OpenAI API 时会在生成前阻止，因为 API 后端不能读取本地软链接。回答会报告成功读取的 source ID。读取资料与 MarginNote 写入目标彼此独立：卡片或脑图仍只能写入一个明确的当前 notebook 和已验证目标，选择多个资料不代表允许写入多个 notebook。
 
 ## 全文读取和缓存
 
@@ -329,20 +339,20 @@ python3 ui_functional_acceptance.py --document-title "任意文档 UI 验收.pdf
 构建 release zip：
 
 ```bash
-python3 package_release.py 0.4.52
+python3 package_release.py 0.4.53
 ```
 
 Smoke test：
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.52-latest-dist.zip --mnaddon release/CodexCompanion-0.4.52-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.52-latest-dist.zip --mnaddon release/CodexCompanion-0.4.52-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance：
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.52-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.53-latest-dist.zip --json
 ```
 
 Release acceptance 可能因为机器相关证据不足而阻塞，例如原生高亮证据、签名/公证证据、跨机器安装证据。这些是发布证据检查，不代表源码打包失败。

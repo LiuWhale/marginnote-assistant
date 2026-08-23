@@ -11,6 +11,33 @@ class ReleaseDocsTests(unittest.TestCase):
     def read_doc(self, name: str) -> str:
         return (ROOT / name).read_text(encoding="utf-8")
 
+    def test_user_guides_document_multi_file_source_workspace_contract(self) -> None:
+        for name in ["README.md", "README.zh-CN.md", "docs/USER_MANUAL.md"]:
+            with self.subTest(name=name):
+                text = self.read_doc(name)
+                for marker in [
+                    "资料",
+                    "一次 Codex CLI 调用",
+                    "SOURCES.md",
+                    "软链接",
+                    "OpenAI API",
+                    "不会删除原文件",
+                ]:
+                    self.assertIn(marker, text)
+
+    def test_release_checklist_covers_three_file_live_and_broken_link_preflight(self) -> None:
+        text = self.read_doc("docs/RELEASE_CHECKLIST.md")
+
+        for marker in [
+            "三个文件",
+            "一次 Codex CLI 调用",
+            "SOURCES.md",
+            "断开的软链接",
+            "模型调用前阻止",
+            "Codex CLI 调用数仍为 0",
+        ]:
+            self.assertIn(marker, text)
+
     def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
         text = self.read_doc("docs/RELEASE_STATUS_MATRIX.md")
 

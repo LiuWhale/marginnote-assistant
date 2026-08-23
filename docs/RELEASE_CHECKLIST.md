@@ -3,9 +3,9 @@
 ## 版本信息
 
 - 插件名：Codex Companion
-- 当前发布候选：0.4.52
-- MN4 插件 manifest 版本：0.4.52
-- Companion 版本：0.4.52
+- 当前发布候选：0.4.53
+- MN4 插件 manifest 版本：0.4.53
+- Companion 版本：0.4.53
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`
@@ -15,11 +15,11 @@
 0. 发布包一键安装入口
 
 ```bash
-unzip CodexCompanion-0.4.52-latest-dist.zip
-cd CodexCompanion-0.4.52
+unzip CodexCompanion-0.4.53-latest-dist.zip
+cd CodexCompanion-0.4.53
 python3 release_smoke_test.py
-python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.52-latest.mnaddon
-python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.52-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.53-latest.mnaddon
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.53-latest.mnaddon --install-dry-run
 python3 build_pkg.py --dry-run
 ./install.sh
 ```
@@ -55,7 +55,7 @@ python3 build_pkg.py --sign-identity "Developer ID Installer: <Team Name> (<Team
 签名 pkg 还不是最终可分发包。公发前必须 notarize 并 staple：
 
 ```bash
-python3 notarize_pkg.py ./release/CodexCompanion-0.4.52-latest.pkg --keychain-profile "CodexNotary"
+python3 notarize_pkg.py ./release/CodexCompanion-0.4.53-latest.pkg --keychain-profile "CodexNotary"
 ```
 
 发布维护者也可以双击 `Notarize Package.command`。该入口需要 `NOTARYTOOL_KEYCHAIN_PROFILE`，或 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_SPECIFIC_PASSWORD`。`doctor.py` 会用 `xcrun stapler validate` 和 `spctl -a -vv -t install` 把 notarization 作为独立证据；`release_acceptance.py` 会把 `signed_pkg` 和 `notarized_pkg` 分开阻断。
@@ -111,7 +111,7 @@ tail -n 30 "$HOME/.codex/marginnote-assistant/events.jsonl"
 
 应看到：
 
-- `pluginVersion` 为 `0.4.52`
+- `pluginVersion` 为 `0.4.53`
 - `webPanelLoaded`
 - `panelShownState`
 - `panelKind=webview`
@@ -221,7 +221,21 @@ python3 "$HOME/.codex/marginnote-assistant/release_acceptance.py" \
 - 所有事件和 action result 均匹配同一个 `topicid/bookmd5`；跨文档证据必须被拒绝。
 - 设置页 `本文档验收` 按钮会调用 `single_document_acceptance_summary`，在面板内显示当前文档 PASS/BLOCK 和阻塞项；它用于日常功能验收，不替代最终 `release_acceptance.py` gate。
 
-9. 视觉 QA
+9. 多文件资料工作区现场验收
+
+使用当前会话的托管工作区和三个文件：当前 MarginNote 文档、一个已上传文本文件、一个明确选择的本地文件。三个文件都必须无敏感内容、可读且可安全删除测试副本。关闭 `跟随当前文件` 后发送一个需要比较三份资料的问题；该操作必须只有**一次 Codex CLI 调用**。
+
+验收条件：
+
+- 当前会话的 `control/source-workspaces/<conversation-id>/SOURCES.md` 按顺序列出三个文件，`manifest.json` 有三个 source ID，`files/` 有三个可读链接；可提取格式还应在 `text/` 中有对应链接。
+- 进程/诊断证据显示仅启动一个 Codex CLI 进程，且该进程的 `cwd` 是上述资料工作区；回答逐一确认三个 source ID，并给出来源相关说明。
+- `跟随当前文件` 关闭时，切换 MarginNote 当前文档不会替换显式资料集。
+- 移除一个资料后重新验证，下一次工作区只列出两个 source ID；原始三个文件的 hash 和存在状态不变。
+- 手动造成一个**断开的软链接**后，验证和发送都必须在**模型调用前阻止**，错误明确指出失败 source；本轮 Codex CLI 调用数仍为 0。恢复链接或移除失败资料后才能继续。
+- 脑图生成只做 dry-run/operation-plan 验证：计划必须只包含一个明确的当前 notebook 和一个已验证写入目标，不得向真实用户脑图执行写入。只有明确存在可丢弃测试 notebook 时才可补做原生写入验收。
+- 清空会话工作区后，三个原文件仍存在且 hash 不变；只允许 Companion 管理的 `SOURCES.md`、manifest 和软链接被删除。
+
+10. 视觉 QA
 
 截图不是功能验收的主路径，只用于确认 UI：
 

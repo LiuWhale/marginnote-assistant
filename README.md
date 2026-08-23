@@ -163,7 +163,17 @@ Cards are split into short, reviewable items rather than one oversized note. Gen
 
 ### New Conversation And History
 
-The main chat can start a new conversation. History is a separate page for viewing or clearing conversations scoped to the current open file. When the open file changes, the current chat starts fresh and the previous file's conversation remains in its own history. A multi-document mind map is supported as a container, but normal chat and full-document caching remain bound to one open file at a time; cross-document retrieval must be requested explicitly.
+The main chat can start a new conversation. History is a separate page for viewing or clearing conversations scoped to the current open file. When the open file changes, the current chat starts fresh and the previous file's conversation remains in its own history. A multi-document mind map is supported as a container. Normal single-document chat and full-document caching remain bound to one open file; the explicit source workspace below is the supported way to read several selected files in one request.
+
+### Multi-File Source Workspace (`资料`)
+
+Use the `资料 N` control in the chat header when one answer must compare or synthesize several files. The dedicated picker lists the current MarginNote document, notebook files, uploaded files, locally selected files, and search-root results. Select each file, inspect its read and text-extraction status, then click `验证资料` and `完成`. `全部取消` clears the explicit set; removing one source updates the next request without touching the source itself.
+
+`跟随当前文件` starts enabled. When enabled, the document currently open in MarginNote remains in the source set and changes with the reader. Disable it before fixing an explicit comparison set: switching the current document then leaves the selected files unchanged. A red source state means a file is missing, unreadable, denied by macOS permissions, or has a broken link. Restore permission or the file, validate again, or remove that source; Companion never silently drops it.
+
+One send uses **一次 Codex CLI 调用** from a conversation-managed workspace. Codex reads the ordered source contract in `SOURCES.md`; `files/` and `text/` contain managed `软链接` to readable originals, caches, or extracted text. The safety guarantee is `不会删除原文件`: clearing or rebuilding this workspace removes only Companion-managed links and metadata, and never moves, renames, or edits a selected source.
+
+Multi-file workspace mode requires Codex CLI. `auto` may use Codex CLI, but it does not fall back to the OpenAI API for this request; an OpenAI API-only configuration is blocked before generation because that backend cannot read local workspace links. The response reports which source IDs were read. Read sources remain independent of the MarginNote write target: cards and mind maps still require one explicit current notebook and one validated target, and selecting several files never authorizes writes to several notebooks.
 
 ## Full-Document Reading And Caching
 
@@ -329,20 +339,20 @@ The browser action gate records `buttonActionDeltas`, so repeated-action control
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.52
+python3 package_release.py 0.4.53
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.52-latest-dist.zip --mnaddon release/CodexCompanion-0.4.52-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.52-latest-dist.zip --mnaddon release/CodexCompanion-0.4.52-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.52-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.53-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.
