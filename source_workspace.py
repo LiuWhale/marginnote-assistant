@@ -30,7 +30,8 @@ def workspace_path(conversation_id: str) -> Path:
     safe_id = safe_conversation_id(conversation_id)
     if not safe_id:
         raise ValueError("missing valid conversationId")
-    return SOURCE_WORKSPACES_DIR / safe_id
+    digest = hashlib.sha256(str(conversation_id).encode("utf-8")).hexdigest()[:16]
+    return SOURCE_WORKSPACES_DIR / f"{safe_id[:96]}--{digest}"
 
 
 def _now() -> str:

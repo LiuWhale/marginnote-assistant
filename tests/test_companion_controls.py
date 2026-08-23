@@ -5981,7 +5981,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(deleted["ok"], deleted)
             self.assertFalse((companion.SESSIONS_DIR / f"{session_id}.json").exists())
 
-    def test_queue_revision_mismatch_blocks_raw_generation_dispatch(self) -> None:
+    def test_queue_revision_mismatch_quarantines_stale_item_and_dispatches_later_valid_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             companion = load_companion(root)
@@ -6022,15 +6022,62 @@ class CompanionControlsTests(unittest.TestCase):
                 {**base, "action": "source_workspace_update", "sourceIds": source_ids}
             )
             self.assertNotEqual(changed["workspace"]["revision"], revision)
+            valid = companion.enqueue_command(
+                {
+                    "action": "chat",
+                    "_queue_raw": True,
+                    "prompt": "later valid work",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "unittest",
+                }
+            )
+            self.assertTrue(valid["ok"], valid)
 
             polled = companion.poll_commands("T1", "B1")
 
-            self.assertFalse(polled["ok"])
+            self.assertTrue(polled["ok"], polled)
             self.assertEqual(polled["pending"], 1)
-            self.assertFalse(polled["hasCommand"])
-            self.assertEqual(polled["commands"], [])
-            self.assertEqual(polled["blocked"], "source_workspace_revision_mismatch")
-            self.assertIn("revision", polled["message"].lower())
+            self.assertTrue(polled["hasCommand"])
+            self.assertEqual([item["prompt"] for item in polled["commands"]], ["later valid work"])
+            self.assertEqual(polled["rejectedCount"], 1)
+            self.assertEqual(polled["rejectedCommands"][0]["queueId"], queued["queued"]["id"])
+            self.assertEqual(polled["rejectedCommands"][0]["reason"], "source_workspace_revision_mismatch")
+            self.assertNotIn(queued["queued"]["id"], [item["id"] for item in companion.read_queue_lines(companion.queue_path("T1", "B1"))])
+            quarantine_path = Path(polled["rejectedCommands"][0]["quarantinePath"])
+            self.assertTrue(quarantine_path.is_file())
+            quarantined = [json.loads(line) for line in quarantine_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(quarantined[-1]["id"], queued["queued"]["id"])
+
+    def test_explicit_queue_command_inherits_authoritative_source_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": "T1|B1|/papers/a.pdf",
+                "conversationId": "CONV-EXPLICIT",
+                "sourceIds": ["src-a", "src-b"],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": "REV-OUTER",
+                "command": {
+                    "rawAction": "chat",
+                    "prompt": "explicit command",
+                    "sourceIds": ["inner-wrong"],
+                    "sourceWorkspaceRevision": "REV-INNER",
+                    "contextDocumentKey": "wrong-context",
+                },
+            }
+
+            queued = companion.enqueue_command(payload)
+
+            self.assertTrue(queued["ok"], queued)
+            command = queued["queued"]["command"]
+            self.assertEqual(command["conversationId"], "CONV-EXPLICIT")
+            self.assertEqual(command["sourceIds"], ["src-a", "src-b"])
+            self.assertFalse(command["followCurrentDocument"])
+            self.assertEqual(command["sourceWorkspaceRevision"], "REV-OUTER")
+            self.assertEqual(command["contextDocumentKey"], "T1|B1|/papers/a.pdf")
 
     def test_source_text_artifact_reuses_page_aware_pdf_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6525,6 +6572,55 @@ class CompanionControlsTests(unittest.TestCase):
             )
             self.assertFalse(write_retry["ok"])
             self.assertIn("确认", write_retry["message"])
+
+    def test_workflow_retry_preserves_source_binding_from_started_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "workflow-source.md"
+            source.write_text("workflow source", encoding="utf-8")
+            workspace = companion.source_workspace.build_workspace(
+                "CONV-WORKFLOW",
+                [{"id": "src-workflow", "title": source.name, "kind": "text", "path": str(source)}],
+                False,
+            )
+            binding = {
+                "conversationId": "CONV-WORKFLOW",
+                "sourceIds": ["src-workflow"],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": workspace["revision"],
+                "contextDocumentKey": "T1|B1|/papers/workflow.pdf",
+            }
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            started = companion.handle_action(
+                {
+                    "action": "workflow_start",
+                    "workflowId": "selection_to_cards",
+                    "prompt": "把当前选区做成短卡",
+                    "selectionText": "selected text",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    **binding,
+                }
+            )
+            companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+
+            retried = companion.handle_action(
+                {
+                    "action": "workflow_retry_step",
+                    "workflowRunId": started["summary"]["id"],
+                    "workflowStepId": "cards",
+                }
+            )
+
+            self.assertTrue(retried["ok"], retried)
+            command = retried["queued"][0]["command"]
+            for key, value in binding.items():
+                self.assertEqual(command[key], value)
+            polled = companion.poll_commands("T1", "B1")
+            self.assertTrue(polled["ok"], polled)
+            self.assertEqual([item["rawAction"] for item in polled["commands"]], ["chat", "generate_card"])
+            self.assertTrue(all(item["sourceWorkspaceRevision"] == workspace["revision"] for item in polled["commands"]))
 
     def test_external_gateway_start_workflow_records_request_ledger_and_reuses_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

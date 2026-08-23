@@ -66,6 +66,24 @@ class SourceWorkspaceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source_workspace.build_workspace("../", [], False)
 
+    def test_distinct_conversation_ids_with_same_readable_prefix_use_distinct_workspaces(self):
+        colon_source = self._source("colon.txt", "colon")
+        dash_source = self._source("dash.txt", "dash")
+
+        colon = source_workspace.build_workspace("A:B", [colon_source], False)
+        dash = source_workspace.build_workspace("A-B", [dash_source], False)
+
+        self.assertTrue(colon["ok"] and dash["ok"])
+        self.assertNotEqual(colon["workspacePath"], dash["workspacePath"])
+        self.assertEqual(source_workspace.load_workspace("A:B")["sources"][0]["sourceId"], "colon")
+        self.assertEqual(source_workspace.load_workspace("A-B")["sources"][0]["sourceId"], "dash")
+
+        cleared = source_workspace.clear_workspace("A:B")
+
+        self.assertTrue(cleared["ok"], cleared)
+        self.assertFalse(Path(colon["workspacePath"]).exists())
+        self.assertTrue(Path(dash["workspacePath"]).is_dir())
+
     def test_missing_source_and_duplicate_source_id_fail_without_workspace(self):
         missing = self.root / "missing.pdf"
         result = source_workspace.build_workspace(

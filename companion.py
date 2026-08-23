@@ -1299,6 +1299,7 @@ def workflow_retry_step(payload: dict[str, Any]) -> dict[str, Any]:
         "id": str(run.get("workflowId") or ""),
         "title": str(run.get("title") or ""),
     }
+    binding_source = run if any(key in run for key in SOURCE_QUEUE_BINDING_FIELDS) else payload
     retry_payload = {
         **payload,
         "topicid": topic_id,
@@ -1309,6 +1310,7 @@ def workflow_retry_step(payload: dict[str, Any]) -> dict[str, Any]:
         "mnObject": run.get("mnObject") if isinstance(run.get("mnObject"), dict) else {},
         "mnObjectId": str(object_ref.get("objectId") or ""),
         "mnObjectKind": str(object_ref.get("kind") or ""),
+        **source_queue_binding(binding_source),
     }
 
     queued_records: list[dict[str, Any]] = []
@@ -1618,6 +1620,7 @@ def workflow_start(payload: dict[str, Any]) -> dict[str, Any]:
         "createdAt": now,
         "updatedAt": now,
         "prompt": str(payload.get("prompt") or ""),
+        **source_queue_binding(payload),
         "preview": workflow,
         "steps": run_steps,
         "events": [
@@ -4517,6 +4520,22 @@ def source_metadata(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+SOURCE_QUEUE_BINDING_FIELDS = (
+    "conversationId",
+    "sourceIds",
+    "followCurrentDocument",
+    "sourceWorkspaceRevision",
+    "contextDocumentKey",
+)
+
+
+def source_queue_binding(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **source_metadata(data),
+        "contextDocumentKey": normalize_document_context_key(data),
+    }
+
+
 def session_path(payload: dict[str, Any]) -> Path:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
@@ -4567,6 +4586,60 @@ def queue_paths_for_topic(topic_id: str, book_md5: str) -> list[Path]:
     return paths
 
 
+def quarantine_queue_records(
+    path: Path, rejected: list[tuple[dict[str, Any], dict[str, Any]]]
+) -> tuple[list[dict[str, Any]], str]:
+    if not rejected:
+        return [], ""
+    rejected_ids = {str(record.get("id") or "") for record, _ in rejected}
+    quarantine_path = QUEUE_DIR / "rejected" / path.name
+    rejected_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    evidence: list[dict[str, Any]] = []
+    try:
+        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+        with quarantine_path.open("a", encoding="utf-8") as handle:
+            for record, workspace in rejected:
+                reason = "source_workspace_revision_mismatch"
+                quarantined = {
+                    **record,
+                    "rejectedAt": rejected_at,
+                    "rejectionReason": reason,
+                    "sourceWorkspace": workspace,
+                }
+                handle.write(json.dumps(quarantined, ensure_ascii=False) + "\n")
+                evidence.append(
+                    {
+                        "queueId": str(record.get("id") or ""),
+                        "reason": reason,
+                        "rejectedAt": rejected_at,
+                        "quarantinePath": str(quarantine_path),
+                        "sourceWorkspace": workspace,
+                    }
+                )
+
+        kept: list[str] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except Exception:
+                kept.append(line)
+                continue
+            if not isinstance(record, dict) or str(record.get("id") or "") not in rejected_ids:
+                kept.append(line)
+        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary_path.write_text(("\n".join(kept) + "\n") if kept else "", encoding="utf-8")
+            os.replace(temporary_path, path)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+    except Exception as exc:
+        return [], f"queue quarantine failed: {exc}"
+    return evidence, ""
+
+
 def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
@@ -4584,14 +4657,13 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
                 "contextDocumentKey": normalize_document_context_key(payload),
                 "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
             }
-            if action in GENERATION_ACTIONS:
-                command.update(source_metadata(payload))
             if "replyDerivedMindmap" in payload:
                 command["replyDerivedMindmap"] = truthy_payload_flag(payload.get("replyDerivedMindmap"))
             if payload.get("sourceAnswerMarkdown"):
                 command["sourceAnswerMarkdown"] = str(payload.get("sourceAnswerMarkdown") or "")
         else:
             return {"ok": False, "message": f"unsupported queue action: {action or '(empty)'}"}
+    command.update(source_queue_binding(payload))
     if not is_valid_queue_command(command):
         return {"ok": False, "message": "unsupported queue command"}
     record = {
@@ -7052,7 +7124,9 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
     if not paths:
         return {"ok": True, "pending": 0, "commands": []}
     commands: list[dict[str, Any]] = []
+    rejected_commands: list[dict[str, Any]] = []
     for path in paths:
+        rejected_for_path: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for record in read_queue_lines(path):
             if str(record.get("topicid") or "") != topic_id:
                 continue
@@ -7087,19 +7161,39 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
                             workspace["ok"] = False
                             workspace["errors"] = ["workspace source IDs do not match queued source IDs"]
                     if not workspace.get("ok"):
-                        return {
-                            "ok": False,
-                            "pending": sum(count_valid_queue_records(item) for item in paths),
-                            "hasCommand": False,
-                            "command": None,
-                            "commands": [],
-                            "blocked": "source_workspace_revision_mismatch",
-                            "message": "Queued source workspace revision mismatch; no command was dispatched.",
-                            "queueId": str(record.get("id") or ""),
-                            "sourceWorkspace": workspace,
-                        }
+                        rejected_for_path.append((record, workspace))
+                        continue
             command["_queue_id"] = str(record.get("id") or "")
             commands.append(command)
+        quarantined, quarantine_error = quarantine_queue_records(path, rejected_for_path)
+        if quarantine_error:
+            return {
+                "ok": False,
+                "pending": sum(count_valid_queue_records(item) for item in paths),
+                "hasCommand": False,
+                "command": None,
+                "commands": [],
+                "blocked": "queue_quarantine_failed",
+                "message": quarantine_error,
+                "rejectedCount": 0,
+                "rejectedCommands": [],
+            }
+        rejected_commands.extend(quarantined)
+    rejection_fields = {
+        "rejectedCount": len(rejected_commands),
+        "rejectedCommands": rejected_commands,
+    }
+    if rejected_commands and not commands:
+        return {
+            "ok": False,
+            "pending": 0,
+            "hasCommand": False,
+            "command": None,
+            "commands": [],
+            "blocked": "source_workspace_revision_mismatch",
+            "message": "Rejected stale source-workspace queue bindings; no stale command was dispatched.",
+            **rejection_fields,
+        }
     if web_busy_status().get("busy"):
         passthrough_commands = [
             command
@@ -7115,6 +7209,7 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
                 "commands": passthrough_commands[:8],
                 "webBusy": True,
                 "deferredByWebBusy": len(commands) - len(passthrough_commands),
+                **rejection_fields,
             }
         return {
             "ok": True,
@@ -7123,6 +7218,7 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
             "command": None,
             "commands": [],
             "blocked": "web_busy",
+            **rejection_fields,
         }
     return {
         "ok": True,
@@ -7130,6 +7226,7 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
         "hasCommand": bool(commands),
         "command": commands[0] if commands else None,
         "commands": commands[:8],
+        **rejection_fields,
     }
 
 
