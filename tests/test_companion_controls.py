@@ -5755,6 +5755,283 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(all(Path(item["path"]).is_file() for item in result["sources"]))
             self.assertTrue(all(item["id"] == companion.source_registry.stable_source_id(item["kind"], item["identity"]) for item in result["sources"]))
 
+    def test_source_workspace_update_persists_selection_and_returns_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            uploads = []
+            for index, name in enumerate(["one.md", "two.txt"], start=1):
+                path = root / "uploads" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"source {index}", encoding="utf-8")
+                uploads.append({"id": f"upload-{index}", "name": name, "path": str(path), "size": path.stat().st_size})
+            companion.save_uploaded_files(uploads)
+            candidates = companion.source_workspace_candidates({})["sources"]
+            source_ids = [item["id"] for item in candidates]
+            payload = {
+                "action": "source_workspace_update",
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": "T1|B1|/papers/current.pdf",
+                "source": "unittest",
+                "conversationId": "CONV-1",
+                "sourceIds": source_ids,
+                "followCurrentDocument": False,
+            }
+
+            result = companion.handle_action(payload)
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["workspace"]["sourceCount"], 2)
+            self.assertTrue(result["workspace"]["revision"])
+            self.assertEqual(result["sourceIds"], source_ids)
+            saved = json.loads(companion.session_path(payload).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], source_ids)
+            self.assertFalse(saved["followCurrentDocument"])
+            self.assertEqual(saved["sourceWorkspaceRevision"], result["workspace"]["revision"])
+
+            fetched = companion.handle_action({**payload, "action": "source_workspace_get"})
+            validated = companion.handle_action({**payload, "action": "source_workspace_validate"})
+            self.assertEqual(fetched["workspace"]["revision"], result["workspace"]["revision"])
+            self.assertTrue(validated["workspace"]["ok"], validated)
+
+    def test_source_workspace_update_rejects_unknown_and_broken_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            binary = root / "uploads" / "broken.bin"
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes(b"\xff\xfe\x00\x80")
+            companion.save_uploaded_files(
+                [{"id": "broken", "name": binary.name, "path": str(binary), "size": binary.stat().st_size}]
+            )
+            candidate_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "source": "unittest",
+                "conversationId": "CONV-BROKEN",
+                "followCurrentDocument": False,
+            }
+
+            unknown = companion.handle_action(
+                {**base, "action": "source_workspace_update", "sourceIds": ["upload:unknown"]}
+            )
+            broken = companion.handle_action(
+                {**base, "action": "source_workspace_update", "sourceIds": [candidate_id]}
+            )
+
+            self.assertFalse(unknown["ok"])
+            self.assertIn("unknown", " ".join(unknown["errors"]).lower())
+            self.assertFalse(broken["ok"])
+            self.assertIn("utf-8", " ".join(broken["errors"]).lower())
+            self.assertFalse(companion.source_workspace.workspace_path("CONV-BROKEN").exists())
+
+    def test_source_workspace_clear_preserves_history_and_clears_conversation_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "uploads" / "notes.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("notes", encoding="utf-8")
+            companion.save_uploaded_files(
+                [{"id": "notes", "name": source.name, "path": str(source), "size": source.stat().st_size}]
+            )
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "source": "unittest",
+                "conversationId": "CONV-CLEAR",
+                "followCurrentDocument": False,
+            }
+            updated = companion.handle_action(
+                {**base, "action": "source_workspace_update", "sourceIds": [source_id]}
+            )
+            self.assertTrue(updated["ok"], updated)
+            companion.append_history(base, "question", "answer")
+
+            cleared = companion.handle_action({**base, "action": "source_workspace_clear"})
+
+            self.assertTrue(cleared["ok"], cleared)
+            self.assertFalse(companion.source_workspace.workspace_path("CONV-CLEAR").exists())
+            saved = json.loads(companion.session_path(base).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], [])
+            self.assertEqual(saved["sourceWorkspaceRevision"], "")
+            self.assertFalse(saved["followCurrentDocument"])
+            self.assertEqual([item["content"] for item in saved["history"]], ["question", "answer"])
+
+    def test_conversation_load_restores_source_metadata_and_rebuilds_missing_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "uploads" / "notes.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("restorable notes", encoding="utf-8")
+            companion.save_uploaded_files(
+                [{"id": "notes", "name": source.name, "path": str(source), "size": source.stat().st_size}]
+            )
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": "T1|B1|/papers/a.pdf",
+                "source": "unittest",
+                "conversationId": "CONV-RESTORE",
+            }
+            updated = companion.handle_action(
+                {
+                    **base,
+                    "action": "source_workspace_update",
+                    "sourceIds": [source_id],
+                    "followCurrentDocument": False,
+                }
+            )
+            companion.append_history(base, "remember sources", "saved")
+            session_id = companion.session_path(base).stem
+            companion.source_workspace.clear_workspace("CONV-RESTORE")
+            source.write_text("restorable notes changed", encoding="utf-8")
+
+            loaded = companion.handle_action({**base, "action": "conversation_load", "sessionId": session_id})
+
+            self.assertTrue(loaded["ok"], loaded)
+            self.assertEqual(loaded["conversation"]["sourceIds"], [source_id])
+            self.assertFalse(loaded["conversation"]["followCurrentDocument"])
+            self.assertTrue(loaded["workspace"]["ok"], loaded["workspace"])
+            self.assertNotEqual(loaded["workspace"]["revision"], updated["workspace"]["revision"])
+            self.assertEqual(
+                loaded["conversation"]["sourceWorkspaceRevision"],
+                loaded["workspace"]["revision"],
+            )
+            self.assertTrue(companion.source_workspace.workspace_path("CONV-RESTORE").is_dir())
+
+    def test_conversation_delete_clears_workspace_only_after_ownership_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "uploads" / "notes.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("notes", encoding="utf-8")
+            companion.save_uploaded_files(
+                [{"id": "notes", "name": source.name, "path": str(source), "size": source.stat().st_size}]
+            )
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            owned = {
+                "topicid": "T1",
+                "bookmd5": "SHARED",
+                "contextDocumentKey": "T1|SHARED|/papers/a.pdf",
+                "source": "unittest",
+                "conversationId": "CONV-DELETE",
+            }
+            updated = companion.handle_action(
+                {
+                    **owned,
+                    "action": "source_workspace_update",
+                    "sourceIds": [source_id],
+                    "followCurrentDocument": False,
+                }
+            )
+            self.assertTrue(updated["ok"], updated)
+            session_id = companion.session_path(owned).stem
+            workspace_path = companion.source_workspace.workspace_path("CONV-DELETE")
+
+            blocked = companion.handle_action(
+                {
+                    **owned,
+                    "contextDocumentKey": "T1|SHARED|/papers/b.pdf",
+                    "action": "conversation_delete",
+                    "sessionId": session_id,
+                }
+            )
+            self.assertFalse(blocked["ok"])
+            self.assertTrue(workspace_path.is_dir())
+
+            deleted = companion.handle_action({**owned, "action": "conversation_delete", "sessionId": session_id})
+            self.assertTrue(deleted["ok"], deleted)
+            self.assertFalse(workspace_path.exists())
+
+    def test_conversation_delete_keeps_legacy_sessions_without_conversation_id_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            session_id = "a" * 24
+            companion.SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+            (companion.SESSIONS_DIR / f"{session_id}.json").write_text(
+                json.dumps(
+                    {
+                        "topicid": "T1",
+                        "bookmd5": "B1",
+                        "contextDocumentKey": "T1|B1|/papers/legacy.pdf",
+                        "history": [{"role": "user", "content": "legacy question"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            deleted = companion.handle_action(
+                {
+                    "action": "conversation_delete",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|/papers/legacy.pdf",
+                    "sessionId": session_id,
+                }
+            )
+
+            self.assertTrue(deleted["ok"], deleted)
+            self.assertFalse((companion.SESSIONS_DIR / f"{session_id}.json").exists())
+
+    def test_queue_revision_mismatch_blocks_raw_generation_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            uploads = []
+            for index, name in enumerate(["one.md", "two.md"], start=1):
+                path = root / "uploads" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"source {index}", encoding="utf-8")
+                uploads.append({"id": str(index), "name": name, "path": str(path), "size": path.stat().st_size})
+            companion.save_uploaded_files(uploads)
+            source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": "T1|B1|/papers/a.pdf",
+                "source": "unittest",
+                "conversationId": "CONV-QUEUE",
+                "followCurrentDocument": False,
+            }
+            initial = companion.handle_action(
+                {**base, "action": "source_workspace_update", "sourceIds": source_ids[:1]}
+            )
+            revision = initial["workspace"]["revision"]
+            queued = companion.enqueue_command(
+                {
+                    **base,
+                    "action": "chat",
+                    "_queue_raw": True,
+                    "prompt": "compare sources",
+                    "sourceIds": source_ids[:1],
+                    "sourceWorkspaceRevision": revision,
+                }
+            )
+            self.assertTrue(queued["ok"], queued)
+            self.assertEqual(queued["queued"]["sourceWorkspaceRevision"], revision)
+            self.assertEqual(queued["queued"]["command"]["sourceIds"], source_ids[:1])
+            changed = companion.handle_action(
+                {**base, "action": "source_workspace_update", "sourceIds": source_ids}
+            )
+            self.assertNotEqual(changed["workspace"]["revision"], revision)
+
+            polled = companion.poll_commands("T1", "B1")
+
+            self.assertFalse(polled["ok"])
+            self.assertEqual(polled["pending"], 1)
+            self.assertFalse(polled["hasCommand"])
+            self.assertEqual(polled["commands"], [])
+            self.assertEqual(polled["blocked"], "source_workspace_revision_mismatch")
+            self.assertIn("revision", polled["message"].lower())
+
     def test_source_text_artifact_reuses_page_aware_pdf_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

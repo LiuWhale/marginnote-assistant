@@ -270,6 +270,10 @@ READ_ONLY_ACTIONS = {
     "conversation_list",
     "conversation_load",
     "conversation_delete",
+    "source_workspace_get",
+    "source_workspace_update",
+    "source_workspace_validate",
+    "source_workspace_clear",
     "diagnose_highlights",
     "diagnose_permissions",
     "open_full_disk_access_settings",
@@ -4491,6 +4495,28 @@ def normalize_conversation_id(payload: dict[str, Any]) -> str:
     return re.sub(r"[^A-Za-z0-9_.:-]+", "-", raw)[:80]
 
 
+def unique_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+def source_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "conversationId": normalize_conversation_id(data),
+        "sourceIds": unique_string_list(data.get("sourceIds")),
+        "followCurrentDocument": bool(data.get("followCurrentDocument", True)),
+        "sourceWorkspaceRevision": str(data.get("sourceWorkspaceRevision") or ""),
+    }
+
+
 def session_path(payload: dict[str, Any]) -> Path:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
@@ -4546,7 +4572,7 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
     book_md5 = normalize_book_md5(payload)
     if not topic_id:
         return {"ok": False, "message": "missing topicid"}
-    command = payload.get("command") if isinstance(payload.get("command"), dict) else None
+    command = dict(payload["command"]) if isinstance(payload.get("command"), dict) else None
     if not command:
         action = str(payload.get("action") or "").strip()
         if action in QUEUE_RAW_ACTIONS:
@@ -4558,6 +4584,8 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
                 "contextDocumentKey": normalize_document_context_key(payload),
                 "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
             }
+            if action in GENERATION_ACTIONS:
+                command.update(source_metadata(payload))
             if "replyDerivedMindmap" in payload:
                 command["replyDerivedMindmap"] = truthy_payload_flag(payload.get("replyDerivedMindmap"))
             if payload.get("sourceAnswerMarkdown"):
@@ -4573,6 +4601,7 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
         "bookmd5": book_md5,
         "contextDocumentKey": normalize_document_context_key(payload),
         "command": command,
+        **source_metadata(payload),
     }
     with queue_path(topic_id, book_md5).open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -7032,6 +7061,43 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
             command = record.get("command") if isinstance(record, dict) else None
             if not is_valid_queue_command(command):
                 continue
+            raw_action = str(command.get("rawAction") or command.get("action") or "").strip()
+            if raw_action in GENERATION_ACTIONS:
+                source_ids = unique_string_list(command.get("sourceIds") or record.get("sourceIds"))
+                expected_revision = str(
+                    command.get("sourceWorkspaceRevision") or record.get("sourceWorkspaceRevision") or ""
+                )
+                conversation_id = str(command.get("conversationId") or record.get("conversationId") or "")
+                if source_ids:
+                    if not conversation_id or not expected_revision:
+                        workspace = {
+                            "ok": False,
+                            "errors": ["queued source workspace binding is incomplete"],
+                            "sourceCount": 0,
+                        }
+                    else:
+                        workspace = source_workspace.validate_workspace(conversation_id, expected_revision)
+                        workspace_source_ids = [
+                            str(source.get("sourceId") or "")
+                            for source in workspace.get("sources", [])
+                            if isinstance(source, dict)
+                        ]
+                        if workspace.get("ok") and workspace_source_ids != source_ids:
+                            workspace = dict(workspace)
+                            workspace["ok"] = False
+                            workspace["errors"] = ["workspace source IDs do not match queued source IDs"]
+                    if not workspace.get("ok"):
+                        return {
+                            "ok": False,
+                            "pending": sum(count_valid_queue_records(item) for item in paths),
+                            "hasCommand": False,
+                            "command": None,
+                            "commands": [],
+                            "blocked": "source_workspace_revision_mismatch",
+                            "message": "Queued source workspace revision mismatch; no command was dispatched.",
+                            "queueId": str(record.get("id") or ""),
+                            "sourceWorkspace": workspace,
+                        }
             command["_queue_id"] = str(record.get("id") or "")
             commands.append(command)
     if web_busy_status().get("busy"):
@@ -7278,6 +7344,9 @@ def read_conversation_file(path: Path) -> dict[str, Any] | None:
         "messageCount": len(clean_history),
         "lastMessage": conversation_last_message(clean_history),
         "history": clean_history,
+        "sourceIds": unique_string_list(data.get("sourceIds")),
+        "followCurrentDocument": bool(data.get("followCurrentDocument", True)),
+        "sourceWorkspaceRevision": str(data.get("sourceWorkspaceRevision") or ""),
         "objectRef": object_ref,
         "mnObjectId": str(object_ref.get("objectId") or ""),
         "mnObjectKind": str(object_ref.get("kind") or ""),
@@ -7317,6 +7386,9 @@ def conversation_summary(item: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": item.get("updatedAt") or "",
         "messageCount": int(item.get("messageCount") or 0),
         "lastMessage": item.get("lastMessage") or "",
+        "sourceIds": unique_string_list(item.get("sourceIds")),
+        "followCurrentDocument": bool(item.get("followCurrentDocument", True)),
+        "sourceWorkspaceRevision": str(item.get("sourceWorkspaceRevision") or ""),
         "objectRef": object_ref if object_ref_has_identity(object_ref) else {},
         "mnObjectId": str(object_ref.get("objectId") or ""),
         "mnObjectKind": str(object_ref.get("kind") or ""),
@@ -7339,6 +7411,9 @@ def conversation_payload_for_new(payload: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": "",
         "messageCount": 0,
         "lastMessage": "",
+        "sourceIds": unique_string_list(payload.get("sourceIds")),
+        "followCurrentDocument": bool(payload.get("followCurrentDocument", True)),
+        "sourceWorkspaceRevision": str(payload.get("sourceWorkspaceRevision") or ""),
         "objectRef": object_ref,
         "mnObjectId": str(object_ref.get("objectId") or ""),
         "mnObjectKind": str(object_ref.get("kind") or ""),
@@ -7383,11 +7458,13 @@ def load_conversation(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "message": "加载历史对话失败：会话不存在。"}
     if not conversation_matches_payload(item, payload):
         return {"ok": False, "message": "加载历史对话失败：该会话不属于当前文档或当前对象。"}
+    workspace = restore_conversation_source_workspace(item, payload)
     return {
         "ok": True,
         "message": "已加载历史对话。",
         "conversation": conversation_summary(item),
         "history": item["history"],
+        "workspace": workspace,
     }
 
 
@@ -7401,6 +7478,15 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "message": "删除历史对话失败：会话不存在。"}
     if not conversation_matches_payload(item, payload):
         return {"ok": False, "message": "删除历史对话失败：该会话不属于当前文档或当前对象。"}
+    conversation_id = str(item.get("conversationId") or "")
+    if conversation_id:
+        cleanup = source_workspace.clear_workspace(conversation_id)
+        if not cleanup.get("ok"):
+            return {
+                "ok": False,
+                "message": "删除历史对话失败：来源工作区清理失败。",
+                "workspace": cleanup,
+            }
     try:
         path.unlink()
     except Exception as exc:
@@ -7410,6 +7496,7 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
 
 def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None:
     path = session_path(payload)
+    existing = read_conversation_file(path) if path.exists() else None
     conversation_id = normalize_conversation_id(payload)
     title = conversation_title_from_history(history)
     object_ref = object_ref_from_mapping(payload, object_ref_from_existing_session(path))
@@ -7423,6 +7510,19 @@ def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None
         "title": title,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "history": history,
+        "sourceIds": unique_string_list(
+            payload.get("sourceIds") if "sourceIds" in payload else (existing or {}).get("sourceIds")
+        ),
+        "followCurrentDocument": bool(
+            payload.get("followCurrentDocument")
+            if "followCurrentDocument" in payload
+            else (existing or {}).get("followCurrentDocument", True)
+        ),
+        "sourceWorkspaceRevision": str(
+            payload.get("sourceWorkspaceRevision")
+            if "sourceWorkspaceRevision" in payload
+            else (existing or {}).get("sourceWorkspaceRevision") or ""
+        ),
     }
     if object_ref_has_identity(object_ref):
         body["objectRef"] = object_ref
@@ -7438,6 +7538,270 @@ def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def conversation_record_for_source_action(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str]:
+    conversation_id = normalize_conversation_id(payload)
+    if not conversation_id:
+        return None, "来源工作区操作失败：缺少有效 conversationId。"
+    session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+    if session_id:
+        item = read_conversation_file(SESSIONS_DIR / f"{session_id}.json")
+        if not item:
+            return None, "来源工作区操作失败：会话不存在。"
+        if str(item.get("conversationId") or "") != conversation_id or not conversation_matches_payload(item, payload):
+            return None, "来源工作区操作失败：该会话不属于当前文档或当前对象。"
+        return item, ""
+
+    matches: list[dict[str, Any]] = []
+    if SESSIONS_DIR.exists():
+        for path in SESSIONS_DIR.glob("*.json"):
+            item = read_conversation_file(path)
+            if item and str(item.get("conversationId") or "") == conversation_id:
+                matches.append(item)
+    if not matches:
+        return None, ""
+    owned = [item for item in matches if conversation_matches_payload(item, payload)]
+    if len(matches) != 1 or len(owned) != 1:
+        return None, "来源工作区操作失败：该会话不属于当前文档或当前对象。"
+    return owned[0], ""
+
+
+def bound_conversation_payload(payload: dict[str, Any], item: dict[str, Any] | None) -> dict[str, Any]:
+    if not item:
+        return dict(payload)
+    bound = dict(payload)
+    bound.update(
+        {
+            "sessionId": str(item.get("sessionId") or ""),
+            "conversationId": str(item.get("conversationId") or ""),
+            "topicid": str(item.get("topicid") or ""),
+            "bookmd5": str(item.get("bookmd5") or ""),
+            "contextDocumentKey": str(item.get("contextDocumentKey") or ""),
+            "documentTitle": str(item.get("documentTitle") or ""),
+            "source": str(item.get("source") or ""),
+        }
+    )
+    object_ref = item.get("objectRef") if isinstance(item.get("objectRef"), dict) else {}
+    if object_ref_has_identity(object_ref):
+        bound["mnObject"] = object_ref
+    return bound
+
+
+def empty_source_workspace_status(conversation_id: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "active": False,
+        "conversationId": conversation_id,
+        "sourceCount": 0,
+        "sources": [],
+        "revision": "",
+        "errors": [],
+    }
+
+
+def persist_conversation_source_metadata(
+    payload: dict[str, Any],
+    item: dict[str, Any] | None,
+    source_ids: list[str],
+    follow_current_document: bool,
+    revision: str,
+    *,
+    create: bool = True,
+) -> None:
+    if item is None and not create:
+        return
+    bound = bound_conversation_payload(payload, item)
+    bound.update(
+        {
+            "sourceIds": source_ids,
+            "followCurrentDocument": bool(follow_current_document),
+            "sourceWorkspaceRevision": str(revision or ""),
+        }
+    )
+    save_history(bound, item.get("history", []) if item else [])
+
+
+def prepare_source_workspace(
+    payload: dict[str, Any], source_ids: list[str], follow_current_document: bool
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    candidates = source_workspace_candidates(payload)
+    candidate_by_id = {
+        str(source.get("id") or ""): source
+        for source in candidates.get("sources", [])
+        if isinstance(source, dict) and source.get("id")
+    }
+    errors: list[str] = []
+    if not source_ids:
+        errors.append("no selected source IDs")
+    unknown = [source_id for source_id in source_ids if source_id not in candidate_by_id]
+    if unknown:
+        errors.extend(f"unknown source ID: {source_id}" for source_id in unknown)
+    prepared: list[dict[str, Any]] = []
+    if not errors:
+        for source_id in source_ids:
+            candidate = candidate_by_id[source_id]
+            artifact = source_text_artifact(candidate)
+            if artifact.get("error"):
+                errors.append(f"source {source_id}: {artifact['error']}")
+                continue
+            prepared.append(
+                {
+                    "id": source_id,
+                    "title": str(candidate.get("title") or ""),
+                    "kind": str(candidate.get("kind") or ""),
+                    "path": str(candidate.get("path") or ""),
+                    "textPath": str(artifact.get("textPath") or ""),
+                    "sha256": str(candidate.get("sha256") or ""),
+                    "pageCount": artifact.get("pageCount"),
+                    "truncated": bool(artifact.get("truncated", False)),
+                }
+            )
+    conversation_id = normalize_conversation_id(payload)
+    if errors:
+        return candidates, {
+            "ok": False,
+            "active": False,
+            "conversationId": conversation_id,
+            "sourceCount": 0,
+            "sources": [],
+            "revision": "",
+            "errors": errors,
+        }
+    workspace = source_workspace.build_workspace(conversation_id, prepared, follow_current_document)
+    workspace["active"] = bool(workspace.get("ok") and workspace.get("sourceCount"))
+    return candidates, workspace
+
+
+def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    source_ids = unique_string_list(item.get("sourceIds"))
+    conversation_id = str(item.get("conversationId") or "")
+    if not source_ids:
+        return empty_source_workspace_status(conversation_id)
+    revision = str(item.get("sourceWorkspaceRevision") or "")
+    status = source_workspace.validate_workspace(conversation_id, revision)
+    if status.get("ok"):
+        status["active"] = True
+        if not revision:
+            persist_conversation_source_metadata(
+                payload,
+                item,
+                source_ids,
+                bool(item.get("followCurrentDocument", True)),
+                str(status.get("revision") or ""),
+            )
+            item["sourceWorkspaceRevision"] = str(status.get("revision") or "")
+        return status
+    bound = bound_conversation_payload(payload, item)
+    _, rebuilt = prepare_source_workspace(
+        bound,
+        source_ids,
+        bool(item.get("followCurrentDocument", True)),
+    )
+    if rebuilt.get("ok"):
+        rebuilt_revision = str(rebuilt.get("revision") or "")
+        persist_conversation_source_metadata(
+            bound,
+            item,
+            source_ids,
+            bool(item.get("followCurrentDocument", True)),
+            rebuilt_revision,
+        )
+        item["sourceWorkspaceRevision"] = rebuilt_revision
+    return rebuilt
+
+
+def source_workspace_action(payload: dict[str, Any], action: str) -> dict[str, Any]:
+    item, ownership_error = conversation_record_for_source_action(payload)
+    if ownership_error:
+        return {"ok": False, "message": ownership_error, "errors": [ownership_error]}
+    bound = bound_conversation_payload(payload, item)
+    conversation_id = normalize_conversation_id(bound)
+    candidates = source_workspace_candidates(bound)
+    stored = item or {}
+    source_ids = unique_string_list(
+        payload.get("sourceIds") if "sourceIds" in payload else stored.get("sourceIds")
+    )
+    follow_current_document = bool(
+        payload.get("followCurrentDocument")
+        if "followCurrentDocument" in payload
+        else stored.get("followCurrentDocument", True)
+    )
+    revision = str(
+        payload.get("sourceWorkspaceRevision")
+        if "sourceWorkspaceRevision" in payload
+        else stored.get("sourceWorkspaceRevision") or ""
+    )
+
+    if action == "source_workspace_update":
+        candidates, workspace = prepare_source_workspace(bound, source_ids, follow_current_document)
+        if workspace.get("ok"):
+            revision = str(workspace.get("revision") or "")
+            persist_conversation_source_metadata(
+                bound,
+                item,
+                source_ids,
+                follow_current_document,
+                revision,
+            )
+        return {
+            "ok": bool(workspace.get("ok")),
+            "message": "来源工作区已更新。" if workspace.get("ok") else "来源工作区更新失败。",
+            "errors": list(workspace.get("errors") or []),
+            "candidates": candidates,
+            "workspace": workspace,
+            "sourceIds": source_ids,
+            "followCurrentDocument": follow_current_document,
+            "sourceWorkspaceRevision": revision if workspace.get("ok") else "",
+        }
+
+    if action == "source_workspace_clear":
+        workspace = source_workspace.clear_workspace(conversation_id)
+        if workspace.get("ok"):
+            source_ids = []
+            revision = ""
+            persist_conversation_source_metadata(
+                bound,
+                item,
+                source_ids,
+                follow_current_document,
+                revision,
+                create=False,
+            )
+        workspace["active"] = False
+        workspace["revision"] = ""
+        workspace["sources"] = []
+        return {
+            "ok": bool(workspace.get("ok")),
+            "message": "来源工作区已清除。" if workspace.get("ok") else "来源工作区清除失败。",
+            "errors": list(workspace.get("errors") or []),
+            "candidates": candidates,
+            "workspace": workspace,
+            "sourceIds": source_ids,
+            "followCurrentDocument": follow_current_document,
+            "sourceWorkspaceRevision": revision,
+        }
+
+    if not source_ids:
+        workspace = empty_source_workspace_status(conversation_id)
+    elif action == "source_workspace_validate":
+        workspace = source_workspace.validate_workspace(conversation_id, revision)
+        workspace["active"] = True
+    else:
+        workspace = source_workspace.load_workspace(conversation_id)
+        workspace["active"] = bool(workspace.get("ok") and workspace.get("sourceCount"))
+    return {
+        "ok": bool(workspace.get("ok")),
+        "message": "已读取来源工作区。" if workspace.get("ok") else "来源工作区不可用。",
+        "errors": list(workspace.get("errors") or []),
+        "candidates": candidates,
+        "workspace": workspace,
+        "sourceIds": source_ids,
+        "followCurrentDocument": follow_current_document,
+        "sourceWorkspaceRevision": str(workspace.get("revision") or revision),
+    }
 
 
 def append_history(
@@ -14545,6 +14909,13 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             "transaction": transaction,
             "verification": verification,
         }
+    if action in {
+        "source_workspace_get",
+        "source_workspace_update",
+        "source_workspace_validate",
+        "source_workspace_clear",
+    }:
+        return source_workspace_action(payload, action)
     if action == "conversation_new":
         return new_conversation(payload)
     if action == "conversation_list":
