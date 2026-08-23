@@ -91,3 +91,98 @@ Static checks:
 
 - A queue item blocked by a source-workspace mismatch remains pending until the caller updates or acknowledges it; this preserves the specification's no-silent-rebinding rule.
 - Model execution from the managed workspace and Web UI source controls remain intentionally out of scope for Task 3.
+
+## Fix Round 1
+
+### Status and Commit
+
+Completed as `8b9bae7` (`Harden source workspace queue binding`).
+
+Changed files:
+
+- `source_workspace.py`
+- `companion.py`
+- `tests/test_source_workspace.py`
+- `tests/test_companion_controls.py`
+
+### Findings Addressed
+
+- Added a deterministic SHA-256 suffix derived from the original conversation ID to every managed workspace directory, while retaining a readable sanitized prefix. `A:B` and `A-B` no longer share storage or cleanup ownership.
+- Revision-mismatched generation records are now rejected with workspace-validation evidence, copied to `queue/rejected/<queue-file>.jsonl`, atomically removed from the active queue, and excluded from dispatch. Polling continues to later valid records.
+- This supersedes the original report concern that a mismatched item remained pending until manual acknowledgement.
+- Explicit inner commands now inherit `conversationId`, ordered `sourceIds`, `followCurrentDocument`, `sourceWorkspaceRevision`, and `contextDocumentKey` from the authoritative enqueue payload.
+- Workflow start persists the source binding in its run record. Workflow retry reconstructs its enqueue payload from that stored binding, so a retry request cannot drop or replace the original source revision.
+- No `workflow_engine.py` change was required because Companion workflow run records already accept and preserve additional JSON fields.
+
+### RED Evidence
+
+Command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace.SourceWorkspaceTests.test_distinct_conversation_ids_with_same_readable_prefix_use_distinct_workspaces tests.test_companion_controls.CompanionControlsTests.test_queue_revision_mismatch_quarantines_stale_item_and_dispatches_later_valid_work tests.test_companion_controls.CompanionControlsTests.test_explicit_queue_command_inherits_authoritative_source_binding tests.test_companion_controls.CompanionControlsTests.test_workflow_retry_preserves_source_binding_from_started_run -v
+```
+
+Output:
+
+```text
+Ran 4 tests in 6.094s
+
+FAILED (failures=2, errors=2)
+```
+
+Observed failures were exact reproductions of the review findings:
+
+- `A:B` and `A-B` returned the same workspace path.
+- The first stale queue record returned `source_workspace_revision_mismatch` with `pending: 2` and no later command.
+- The explicit command raised `KeyError: 'conversationId'`.
+- The workflow retry command raised `KeyError: 'conversationId'`.
+
+### GREEN Evidence
+
+Focused command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace.SourceWorkspaceTests.test_distinct_conversation_ids_with_same_readable_prefix_use_distinct_workspaces tests.test_companion_controls.CompanionControlsTests.test_queue_revision_mismatch_quarantines_stale_item_and_dispatches_later_valid_work tests.test_companion_controls.CompanionControlsTests.test_explicit_queue_command_inherits_authoritative_source_binding tests.test_companion_controls.CompanionControlsTests.test_workflow_retry_preserves_source_binding_from_started_run -v
+```
+
+Output:
+
+```text
+Ran 4 tests in 4.004s
+
+OK
+```
+
+Full regression command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace tests.test_companion_controls -q
+```
+
+Output:
+
+```text
+----------------------------------------------------------------------
+Ran 254 tests in 183.449s
+
+OK
+```
+
+Static verification:
+
+- `git diff --check`: passed with no output.
+- In-memory `compile()` of all four changed Python files: `syntax ok`.
+
+### Self-Review
+
+- Confirmed colliding readable prefixes produce different paths and clearing one leaves the other workspace intact.
+- Confirmed quarantine storage is outside the active queue glob and retains the rejected record, rejection reason, timestamp, and workspace validation evidence.
+- Confirmed the stale queue ID is removed before later valid commands are returned and cannot appear in the dispatch list.
+- Confirmed explicit command fields are overwritten by the authoritative outer payload rather than trusted from the inner command.
+- Confirmed workflow retry uses the binding persisted at workflow start even when the retry request carries no source metadata.
+- Confirmed existing unbound single-document queue commands retain their previous behavior.
+
+### Remaining Concerns
+
+- Queue file mutation retains the repository's existing single-process/no-lock assumption; this fix does not introduce a new queue concurrency model.
+- Model execution and Web UI integration remain intentionally outside Task 3.
