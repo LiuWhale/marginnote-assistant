@@ -145,6 +145,48 @@ class SourceWorkspaceTests(unittest.TestCase):
         self.assertTrue(source_path.exists())
         self.assertEqual(source_path.read_text(encoding="utf-8"), original_contents)
 
+    def test_clear_workspace_leaves_unrecognized_content_untouched(self):
+        source = self._source("owned.txt", "owned")
+        built = source_workspace.build_workspace("CONV-8", [source], False)
+        workspace = Path(built["workspacePath"])
+        unknown = workspace / "unexpected.txt"
+        unknown.write_text("keep me", encoding="utf-8")
+
+        result = source_workspace.clear_workspace("CONV-8")
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(unknown.exists())
+        self.assertTrue(workspace.exists())
+        self.assertTrue((workspace / built["sources"][0]["fileLink"]).is_symlink())
+
+    def test_validation_rejects_regular_file_substitution_for_declared_link(self):
+        source = self._source("declared.txt", "declared")
+        built = source_workspace.build_workspace("CONV-9", [source], False)
+        workspace = Path(built["workspacePath"])
+        link = workspace / built["sources"][0]["fileLink"]
+        link.unlink()
+        link.write_text("substituted", encoding="utf-8")
+
+        result = source_workspace.validate_workspace("CONV-9", built["revision"])
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("symlink" in error.lower() or "invalid" in error.lower() for error in result["errors"]))
+
+    def test_validation_rejects_redirected_symlink_for_declared_link(self):
+        first = self._source("first.txt", "first")
+        second = self._source("second.txt", "second")
+        built = source_workspace.build_workspace("CONV-10", [first, second], False)
+        workspace = Path(built["workspacePath"])
+        first_link = workspace / built["sources"][0]["fileLink"]
+        second_link = workspace / built["sources"][1]["fileLink"]
+        first_link.unlink()
+        first_link.symlink_to(second_link.resolve())
+
+        result = source_workspace.validate_workspace("CONV-10", built["revision"])
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("target" in error.lower() for error in result["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()

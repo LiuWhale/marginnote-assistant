@@ -65,14 +65,66 @@ def _json_write(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _remove_owned_tree(path: Path) -> None:
+def _workspace_owned_entries(path: Path) -> list[Path]:
     if not path.exists() and not path.is_symlink():
+        return []
+    if path.is_symlink() or not path.is_dir():
+        raise ValueError("workspace root is not a managed directory")
+    manifest_path = path / "manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("workspace manifest is missing or not a regular file")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"workspace manifest is invalid: {exc}") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema") != SOURCE_WORKSPACE_SCHEMA:
+        raise ValueError("workspace manifest schema is invalid")
+
+    top_entries = {child.name for child in path.iterdir()}
+    if top_entries != {"manifest.json", "SOURCES.md", "files", "text"}:
+        raise ValueError("workspace contains unrecognized content")
+    for directory_name in ("files", "text"):
+        directory = path / directory_name
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError(f"workspace {directory_name} is not a managed directory")
+
+    expected_links: set[Path] = set()
+    for source in manifest.get("sources", []):
+        if not isinstance(source, dict):
+            raise ValueError("workspace manifest contains an invalid source")
+        for field, directory_name in (("fileLink", "files"), ("textLink", "text")):
+            relative = str(source.get(field) or "")
+            if not relative:
+                continue
+            relative_path = Path(relative)
+            if relative_path.is_absolute() or relative_path.parts[:1] != (directory_name,) or len(relative_path.parts) != 2:
+                raise ValueError("workspace manifest contains an invalid managed link")
+            expected_links.add(relative_path)
+    actual_links = {
+        Path(directory_name) / child.name
+        for directory_name in ("files", "text")
+        for child in (path / directory_name).iterdir()
+    }
+    if actual_links != expected_links:
+        raise ValueError("workspace contains unrecognized content")
+    for relative in expected_links:
+        if not (path / relative).is_symlink():
+            raise ValueError("workspace contains a non-symlink managed link")
+    sources_file = path / "SOURCES.md"
+    if sources_file.is_symlink() or not sources_file.is_file():
+        raise ValueError("workspace SOURCES.md is missing or not a regular file")
+    return [manifest_path, sources_file, path / "files", path / "text", *[path / relative for relative in sorted(expected_links)]]
+
+
+def _remove_owned_tree(path: Path) -> None:
+    entries = _workspace_owned_entries(path)
+    if not entries:
         return
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-        return
-    for child in path.iterdir():
-        _remove_owned_tree(child)
+    for entry in entries:
+        if entry.is_symlink() or entry.is_file():
+            entry.unlink()
+    (path / "files").rmdir()
+    (path / "text").rmdir()
     path.rmdir()
 
 
@@ -174,6 +226,7 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             "displayName": item["displayName"],
             "kind": item["kind"],
             "originalPath": item["originalPath"],
+            "textOriginalPath": item["textOriginalPath"],
             "fileLink": f"files/{file_name}",
             "fileLinkName": file_name,
             "textLink": "",
@@ -224,7 +277,7 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             _remove_owned_tree(target)
         if backup.exists() and not target.exists():
             os.replace(backup, target)
-        if staging.exists():
+        if staging.exists() and (staging / "manifest.json").is_file():
             _remove_owned_tree(staging)
         result = _result(manifest, False, [f"workspace build failed: {exc}"])
         result["workspacePath"] = str(target)
@@ -263,18 +316,30 @@ def validate_workspace(conversation_id: str, expected_revision: str = "") -> dic
         file_link = workspace / str(source.get("fileLink") or "")
         try:
             file_link.lstat()
-            target = file_link.resolve(strict=True)
-            if not target.is_file() or not os.access(target, os.R_OK):
-                source_errors.append("file link target is not a readable regular file")
+            if not file_link.is_symlink():
+                source_errors.append("file link is not a symlink")
+            else:
+                target = file_link.resolve(strict=True)
+                expected_target = Path(str(source.get("originalPath") or "")).expanduser().resolve(strict=False)
+                if target != expected_target:
+                    source_errors.append("file link target does not match the manifest source")
+                elif not target.is_file() or not os.access(target, os.R_OK):
+                    source_errors.append("file link target is not a readable regular file")
         except (OSError, RuntimeError):
             source_errors.append("file link is missing or invalid")
         if source.get("textLink"):
             text_link = workspace / str(source["textLink"])
             try:
                 text_link.lstat()
-                text_target = text_link.resolve(strict=True)
-                if not text_target.is_file() or not os.access(text_target, os.R_OK):
-                    source_errors.append("text link target is not a readable regular file")
+                if not text_link.is_symlink():
+                    source_errors.append("text link is not a symlink")
+                else:
+                    text_target = text_link.resolve(strict=True)
+                    expected_text_target = Path(str(source.get("textOriginalPath") or "")).expanduser().resolve(strict=False)
+                    if not source.get("textOriginalPath") or text_target != expected_text_target:
+                        source_errors.append("text link target does not match the manifest source")
+                    elif not text_target.is_file() or not os.access(text_target, os.R_OK):
+                        source_errors.append("text link target is not a readable regular file")
             except (OSError, RuntimeError):
                 source_errors.append("text link is missing or invalid")
         item["valid"] = not source_errors
@@ -292,6 +357,6 @@ def clear_workspace(conversation_id: str) -> dict:
     path = workspace_path(conversation_id)
     try:
         _remove_owned_tree(path)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
     return {"ok": True, "errors": [], "sourceCount": 0, "workspacePath": str(path), "conversationId": safe_conversation_id(conversation_id)}
