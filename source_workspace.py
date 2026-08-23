@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -32,6 +33,59 @@ def workspace_path(conversation_id: str) -> Path:
         raise ValueError("missing valid conversationId")
     digest = hashlib.sha256(str(conversation_id).encode("utf-8")).hexdigest()[:16]
     return SOURCE_WORKSPACES_DIR / f"{safe_id[:96]}--{digest}"
+
+
+def legacy_workspace_path(conversation_id: str) -> Path:
+    safe_id = safe_conversation_id(conversation_id)
+    if not safe_id:
+        raise ValueError("missing valid conversationId")
+    return SOURCE_WORKSPACES_DIR / safe_id
+
+
+def _legacy_workspace_ownership(path: Path, conversation_id: str) -> tuple[dict[str, Any] | None, str]:
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError:
+        return None, ""
+    except OSError as exc:
+        return None, f"legacy workspace cannot be inspected: {exc}"
+    if not stat.S_ISDIR(path_stat.st_mode):
+        return None, "legacy workspace is not a real directory"
+    manifest_path = path / "manifest.json"
+    try:
+        manifest_stat = manifest_path.lstat()
+    except OSError as exc:
+        return None, f"legacy workspace manifest cannot be inspected: {exc}"
+    if not stat.S_ISREG(manifest_stat.st_mode):
+        return None, "legacy workspace manifest is not a regular file"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"legacy workspace manifest is invalid: {exc}"
+    if not isinstance(manifest, dict) or manifest.get("schema") != SOURCE_WORKSPACE_SCHEMA:
+        return None, "legacy workspace manifest schema is invalid"
+    if str(manifest.get("conversationId") or "") != str(conversation_id):
+        return None, "legacy workspace conversation ownership does not match"
+    return manifest, ""
+
+
+def _migrate_legacy_workspace(conversation_id: str) -> tuple[Path, str]:
+    target = workspace_path(conversation_id)
+    if target.exists() or target.is_symlink():
+        return target, ""
+    legacy = legacy_workspace_path(conversation_id)
+    if not legacy.exists() and not legacy.is_symlink():
+        return target, ""
+    _, ownership_error = _legacy_workspace_ownership(legacy, conversation_id)
+    if ownership_error:
+        return target, ownership_error
+    if target.exists() or target.is_symlink():
+        return target, "legacy workspace migration destination already exists"
+    try:
+        os.rename(legacy, target)
+    except OSError as exc:
+        return target, f"legacy workspace migration failed: {exc}"
+    return target, ""
 
 
 def _now() -> str:
@@ -201,7 +255,7 @@ def _sources_markdown(manifest: dict[str, Any]) -> str:
 def build_workspace(conversation_id: str, sources: list[dict], follow_current_document: bool) -> dict:
     target = workspace_path(conversation_id)
     if not isinstance(sources, list):
-        return _result({"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": safe_conversation_id(conversation_id), "sources": []}, False, ["sources must be a list"])
+        return _result({"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": str(conversation_id), "sources": []}, False, ["sources must be a list"])
     normalized: list[dict[str, Any]] = []
     errors: list[str] = []
     seen: set[str] = set()
@@ -214,7 +268,15 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             seen.add(item["sourceId"])
             normalized.append(item)
     if errors:
-        return _result({"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": safe_conversation_id(conversation_id), "sources": []}, False, errors)
+        return _result({"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": str(conversation_id), "sources": []}, False, errors)
+
+    target, migration_error = _migrate_legacy_workspace(conversation_id)
+    if migration_error:
+        return _result(
+            {"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": str(conversation_id), "sources": []},
+            False,
+            [migration_error],
+        )
 
     revision = _revision(normalized, follow_current_document)
     manifest_sources: list[dict[str, Any]] = []
@@ -248,7 +310,7 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
 
     manifest = {
         "schema": SOURCE_WORKSPACE_SCHEMA,
-        "conversationId": safe_conversation_id(conversation_id),
+        "conversationId": str(conversation_id),
         "followCurrentDocument": bool(follow_current_document),
         "revision": revision,
         "updatedAt": _now(),
@@ -289,7 +351,9 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
 
 
 def load_workspace(conversation_id: str) -> dict:
-    path = workspace_path(conversation_id)
+    path, migration_error = _migrate_legacy_workspace(conversation_id)
+    if migration_error:
+        return {"ok": False, "errors": [migration_error], "sourceCount": 0}
     manifest_path = path / "manifest.json"
     if not manifest_path.is_file():
         return {"ok": False, "errors": ["workspace manifest is missing"], "sourceCount": 0}
@@ -356,8 +420,21 @@ def validate_workspace(conversation_id: str, expected_revision: str = "") -> dic
 
 def clear_workspace(conversation_id: str) -> dict:
     path = workspace_path(conversation_id)
+    if not path.exists() and not path.is_symlink():
+        legacy = legacy_workspace_path(conversation_id)
+        if legacy.exists() or legacy.is_symlink():
+            _, ownership_error = _legacy_workspace_ownership(legacy, conversation_id)
+            if ownership_error:
+                return {"ok": False, "errors": [ownership_error], "sourceCount": 0}
+            if path.exists() or path.is_symlink():
+                return {
+                    "ok": False,
+                    "errors": ["legacy workspace cleanup destination already exists"],
+                    "sourceCount": 0,
+                }
+            path = legacy
     try:
         _remove_owned_tree(path)
     except (OSError, ValueError) as exc:
         return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
-    return {"ok": True, "errors": [], "sourceCount": 0, "workspacePath": str(path), "conversationId": safe_conversation_id(conversation_id)}
+    return {"ok": True, "errors": [], "sourceCount": 0, "workspacePath": str(path), "conversationId": str(conversation_id)}

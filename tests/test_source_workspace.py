@@ -84,6 +84,50 @@ class SourceWorkspaceTests(unittest.TestCase):
         self.assertFalse(Path(colon["workspacePath"]).exists())
         self.assertTrue(Path(dash["workspacePath"]).is_dir())
 
+    def test_valid_legacy_workspace_migrates_to_digest_path_without_touching_source(self):
+        source = self._source("legacy-owned.txt", "legacy-owned")
+        original_contents = Path(source["path"]).read_text(encoding="utf-8")
+        built = source_workspace.build_workspace("CONV-LEGACY", [source], False)
+        digest_path = Path(built["workspacePath"])
+        legacy_path = source_workspace.SOURCE_WORKSPACES_DIR / source_workspace.safe_conversation_id("CONV-LEGACY")
+        digest_path.rename(legacy_path)
+
+        loaded = source_workspace.load_workspace("CONV-LEGACY")
+
+        self.assertTrue(loaded["ok"], loaded)
+        self.assertFalse(legacy_path.exists())
+        self.assertTrue(digest_path.is_dir())
+        self.assertEqual(loaded["sources"][0]["sourceId"], "legacy-owned")
+        self.assertEqual(Path(source["path"]).read_text(encoding="utf-8"), original_contents)
+
+    def test_alias_cannot_migrate_or_clear_another_conversation_legacy_workspace(self):
+        source = self._source("alias-owned.txt", "alias-owned")
+        source_path = Path(source["path"])
+        original_contents = source_path.read_text(encoding="utf-8")
+        owner_id = "A:B"
+        alias_id = "A-B"
+        built = source_workspace.build_workspace(owner_id, [source], False)
+        owner_digest_path = Path(built["workspacePath"])
+        legacy_path = source_workspace.SOURCE_WORKSPACES_DIR / source_workspace.safe_conversation_id(owner_id)
+        owner_digest_path.rename(legacy_path)
+
+        loaded_as_alias = source_workspace.load_workspace(alias_id)
+        cleared_as_alias = source_workspace.clear_workspace(alias_id)
+
+        self.assertFalse(loaded_as_alias["ok"])
+        self.assertFalse(cleared_as_alias["ok"])
+        self.assertTrue(legacy_path.is_dir())
+        self.assertFalse(source_workspace.workspace_path(alias_id).exists())
+        self.assertTrue(source_path.is_file())
+        self.assertEqual(source_path.read_text(encoding="utf-8"), original_contents)
+
+        cleared_as_owner = source_workspace.clear_workspace(owner_id)
+
+        self.assertTrue(cleared_as_owner["ok"], cleared_as_owner)
+        self.assertFalse(legacy_path.exists())
+        self.assertTrue(source_path.is_file())
+        self.assertEqual(source_path.read_text(encoding="utf-8"), original_contents)
+
     def test_missing_source_and_duplicate_source_id_fail_without_workspace(self):
         missing = self.root / "missing.pdf"
         result = source_workspace.build_workspace(

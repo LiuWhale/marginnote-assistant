@@ -6049,6 +6049,48 @@ class CompanionControlsTests(unittest.TestCase):
             quarantined = [json.loads(line) for line in quarantine_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(quarantined[-1]["id"], queued["queued"]["id"])
 
+    def test_matching_queued_command_dispatches_after_legacy_workspace_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "legacy-queue.md"
+            source.write_text("legacy queue source", encoding="utf-8")
+            conversation_id = "CONV-LEGACY-QUEUE"
+            workspace = companion.source_workspace.build_workspace(
+                conversation_id,
+                [{"id": "src-legacy", "title": source.name, "kind": "text", "path": str(source)}],
+                False,
+            )
+            digest_path = Path(workspace["workspacePath"])
+            legacy_path = (
+                companion.source_workspace.SOURCE_WORKSPACES_DIR
+                / companion.source_workspace.safe_conversation_id(conversation_id)
+            )
+            digest_path.rename(legacy_path)
+            queued = companion.enqueue_command(
+                {
+                    "action": "chat",
+                    "_queue_raw": True,
+                    "prompt": "dispatch after upgrade",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "conversationId": conversation_id,
+                    "sourceIds": ["src-legacy"],
+                    "followCurrentDocument": False,
+                    "sourceWorkspaceRevision": workspace["revision"],
+                }
+            )
+
+            polled = companion.poll_commands("T1", "B1")
+
+            self.assertTrue(queued["ok"], queued)
+            self.assertTrue(polled["ok"], polled)
+            self.assertEqual(polled["rejectedCount"], 0)
+            self.assertEqual([item["prompt"] for item in polled["commands"]], ["dispatch after upgrade"])
+            self.assertFalse(legacy_path.exists())
+            self.assertTrue(digest_path.is_dir())
+            self.assertEqual(source.read_text(encoding="utf-8"), "legacy queue source")
+
     def test_explicit_queue_command_inherits_authoritative_source_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
