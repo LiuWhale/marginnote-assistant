@@ -6049,7 +6049,7 @@ class CompanionControlsTests(unittest.TestCase):
             quarantined = [json.loads(line) for line in quarantine_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(quarantined[-1]["id"], queued["queued"]["id"])
 
-    def test_matching_queued_command_dispatches_after_legacy_workspace_migration(self) -> None:
+    def test_matching_queued_command_dispatches_from_owned_legacy_workspace_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             companion = load_companion(root)
@@ -6087,8 +6087,10 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(polled["ok"], polled)
             self.assertEqual(polled["rejectedCount"], 0)
             self.assertEqual([item["prompt"] for item in polled["commands"]], ["dispatch after upgrade"])
-            self.assertFalse(legacy_path.exists())
-            self.assertTrue(digest_path.is_dir())
+            validated = companion.source_workspace.validate_workspace(conversation_id, workspace["revision"])
+            self.assertEqual(Path(validated["workspacePath"]), legacy_path)
+            self.assertTrue(legacy_path.is_dir())
+            self.assertFalse(digest_path.exists())
             self.assertEqual(source.read_text(encoding="utf-8"), "legacy queue source")
 
     def test_explicit_queue_command_inherits_authoritative_source_binding(self) -> None:

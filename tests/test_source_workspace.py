@@ -84,7 +84,7 @@ class SourceWorkspaceTests(unittest.TestCase):
         self.assertFalse(Path(colon["workspacePath"]).exists())
         self.assertTrue(Path(dash["workspacePath"]).is_dir())
 
-    def test_valid_legacy_workspace_migrates_to_digest_path_without_touching_source(self):
+    def test_valid_legacy_workspace_falls_back_without_touching_source_or_digest_path(self):
         source = self._source("legacy-owned.txt", "legacy-owned")
         original_contents = Path(source["path"]).read_text(encoding="utf-8")
         built = source_workspace.build_workspace("CONV-LEGACY", [source], False)
@@ -95,10 +95,89 @@ class SourceWorkspaceTests(unittest.TestCase):
         loaded = source_workspace.load_workspace("CONV-LEGACY")
 
         self.assertTrue(loaded["ok"], loaded)
-        self.assertFalse(legacy_path.exists())
-        self.assertTrue(digest_path.is_dir())
+        self.assertEqual(Path(loaded["workspacePath"]), legacy_path)
+        self.assertTrue(legacy_path.is_dir())
+        self.assertFalse(digest_path.exists())
         self.assertEqual(loaded["sources"][0]["sourceId"], "legacy-owned")
         self.assertEqual(Path(source["path"]).read_text(encoding="utf-8"), original_contents)
+
+    def test_preexisting_digest_destination_is_never_replaced_by_legacy_fallback(self):
+        source = self._source("preexisting-destination.txt", "preexisting")
+        conversation_id = "CONV-PREEXISTING"
+        built = source_workspace.build_workspace(conversation_id, [source], False)
+        digest_path = Path(built["workspacePath"])
+        legacy_path = source_workspace.legacy_workspace_path(conversation_id)
+        digest_path.rename(legacy_path)
+        digest_path.mkdir()
+        marker = digest_path / "destination-marker.txt"
+        marker.write_text("do not replace", encoding="utf-8")
+        destination_inode = digest_path.stat().st_ino
+
+        loaded = source_workspace.load_workspace(conversation_id)
+
+        self.assertFalse(loaded["ok"])
+        self.assertEqual(digest_path.stat().st_ino, destination_inode)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "do not replace")
+        self.assertTrue(legacy_path.is_dir())
+        self.assertTrue(Path(source["path"]).is_file())
+
+    def test_destination_appearing_during_fallback_is_never_replaced(self):
+        source = self._source("racing-destination.txt", "racing")
+        conversation_id = "CONV-RACING"
+        built = source_workspace.build_workspace(conversation_id, [source], False)
+        digest_path = Path(built["workspacePath"])
+        legacy_path = source_workspace.legacy_workspace_path(conversation_id)
+        digest_path.rename(legacy_path)
+        original_ownership = source_workspace._legacy_workspace_ownership
+        destination_inode = 0
+
+        def ownership_with_conflict(path, requested_id):
+            nonlocal destination_inode
+            result = original_ownership(path, requested_id)
+            digest_path.mkdir()
+            (digest_path / "race-marker.txt").write_text("keep race winner", encoding="utf-8")
+            destination_inode = digest_path.stat().st_ino
+            return result
+
+        source_workspace._legacy_workspace_ownership = ownership_with_conflict
+        try:
+            loaded = source_workspace.load_workspace(conversation_id)
+        finally:
+            source_workspace._legacy_workspace_ownership = original_ownership
+
+        self.assertFalse(loaded["ok"])
+        self.assertEqual(digest_path.stat().st_ino, destination_inode)
+        self.assertEqual((digest_path / "race-marker.txt").read_text(encoding="utf-8"), "keep race winner")
+        self.assertTrue(legacy_path.is_dir())
+        self.assertTrue(Path(source["path"]).is_file())
+
+    def test_legacy_fallback_never_invokes_overwrite_capable_rename(self):
+        source = self._source("rename-race.txt", "rename-race")
+        conversation_id = "CONV-RENAME-RACE"
+        built = source_workspace.build_workspace(conversation_id, [source], False)
+        digest_path = Path(built["workspacePath"])
+        legacy_path = source_workspace.legacy_workspace_path(conversation_id)
+        digest_path.rename(legacy_path)
+        original_rename = source_workspace.os.rename
+        rename_calls = []
+
+        def conflicting_rename(source_path, destination_path):
+            rename_calls.append((source_path, destination_path))
+            Path(destination_path).mkdir()
+            original_rename(source_path, destination_path)
+
+        source_workspace.os.rename = conflicting_rename
+        try:
+            loaded = source_workspace.load_workspace(conversation_id)
+        finally:
+            source_workspace.os.rename = original_rename
+
+        self.assertTrue(loaded["ok"], loaded)
+        self.assertEqual(rename_calls, [])
+        self.assertEqual(Path(loaded["workspacePath"]), legacy_path)
+        self.assertTrue(legacy_path.is_dir())
+        self.assertFalse(digest_path.exists())
+        self.assertTrue(Path(source["path"]).is_file())
 
     def test_alias_cannot_migrate_or_clear_another_conversation_legacy_workspace(self):
         source = self._source("alias-owned.txt", "alias-owned")

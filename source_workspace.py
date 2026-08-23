@@ -69,7 +69,7 @@ def _legacy_workspace_ownership(path: Path, conversation_id: str) -> tuple[dict[
     return manifest, ""
 
 
-def _migrate_legacy_workspace(conversation_id: str) -> tuple[Path, str]:
+def _workspace_path_for_read(conversation_id: str) -> tuple[Path, str]:
     target = workspace_path(conversation_id)
     if target.exists() or target.is_symlink():
         return target, ""
@@ -80,12 +80,8 @@ def _migrate_legacy_workspace(conversation_id: str) -> tuple[Path, str]:
     if ownership_error:
         return target, ownership_error
     if target.exists() or target.is_symlink():
-        return target, "legacy workspace migration destination already exists"
-    try:
-        os.rename(legacy, target)
-    except OSError as exc:
-        return target, f"legacy workspace migration failed: {exc}"
-    return target, ""
+        return target, "digest workspace appeared during legacy fallback"
+    return legacy, ""
 
 
 def _now() -> str:
@@ -270,14 +266,6 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
     if errors:
         return _result({"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": str(conversation_id), "sources": []}, False, errors)
 
-    target, migration_error = _migrate_legacy_workspace(conversation_id)
-    if migration_error:
-        return _result(
-            {"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": str(conversation_id), "sources": []},
-            False,
-            [migration_error],
-        )
-
     revision = _revision(normalized, follow_current_document)
     manifest_sources: list[dict[str, Any]] = []
     for index, item in enumerate(normalized, 1):
@@ -351,9 +339,9 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
 
 
 def load_workspace(conversation_id: str) -> dict:
-    path, migration_error = _migrate_legacy_workspace(conversation_id)
-    if migration_error:
-        return {"ok": False, "errors": [migration_error], "sourceCount": 0}
+    path, fallback_error = _workspace_path_for_read(conversation_id)
+    if fallback_error:
+        return {"ok": False, "errors": [fallback_error], "sourceCount": 0}
     manifest_path = path / "manifest.json"
     if not manifest_path.is_file():
         return {"ok": False, "errors": ["workspace manifest is missing"], "sourceCount": 0}
@@ -363,7 +351,9 @@ def load_workspace(conversation_id: str) -> dict:
         return {"ok": False, "errors": [f"workspace manifest is invalid: {exc}"], "sourceCount": 0}
     if not isinstance(manifest, dict) or manifest.get("schema") != SOURCE_WORKSPACE_SCHEMA:
         return {"ok": False, "errors": ["workspace manifest schema is invalid"], "sourceCount": 0}
-    return _result(manifest, True)
+    result = _result(manifest, True)
+    result["workspacePath"] = str(path)
+    return result
 
 
 def validate_workspace(conversation_id: str, expected_revision: str = "") -> dict:
@@ -373,7 +363,7 @@ def validate_workspace(conversation_id: str, expected_revision: str = "") -> dic
     errors: list[str] = []
     if expected_revision and loaded.get("revision") != expected_revision:
         errors.append("workspace revision does not match expected revision")
-    workspace = workspace_path(conversation_id)
+    workspace = Path(str(loaded.get("workspacePath") or workspace_path(conversation_id)))
     checked_sources: list[dict[str, Any]] = []
     for source in loaded.get("sources", []):
         item = dict(source)
@@ -419,22 +409,35 @@ def validate_workspace(conversation_id: str, expected_revision: str = "") -> dic
 
 
 def clear_workspace(conversation_id: str) -> dict:
-    path = workspace_path(conversation_id)
-    if not path.exists() and not path.is_symlink():
-        legacy = legacy_workspace_path(conversation_id)
-        if legacy.exists() or legacy.is_symlink():
-            _, ownership_error = _legacy_workspace_ownership(legacy, conversation_id)
-            if ownership_error:
-                return {"ok": False, "errors": [ownership_error], "sourceCount": 0}
-            if path.exists() or path.is_symlink():
-                return {
-                    "ok": False,
-                    "errors": ["legacy workspace cleanup destination already exists"],
-                    "sourceCount": 0,
-                }
-            path = legacy
+    digest = workspace_path(conversation_id)
+    legacy = legacy_workspace_path(conversation_id)
+    paths = [
+        path
+        for path in (digest, legacy)
+        if path.exists() or path.is_symlink()
+    ]
+    if not paths:
+        paths = [digest]
+    for path in paths:
+        if not path.exists() and not path.is_symlink():
+            continue
+        _, ownership_error = _legacy_workspace_ownership(path, conversation_id)
+        if ownership_error:
+            return {"ok": False, "errors": [ownership_error], "sourceCount": 0}
+        try:
+            _workspace_owned_entries(path)
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
     try:
-        _remove_owned_tree(path)
+        for path in paths:
+            _remove_owned_tree(path)
     except (OSError, ValueError) as exc:
         return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
-    return {"ok": True, "errors": [], "sourceCount": 0, "workspacePath": str(path), "conversationId": str(conversation_id)}
+    return {
+        "ok": True,
+        "errors": [],
+        "sourceCount": 0,
+        "workspacePath": str(paths[0]),
+        "workspacePaths": [str(path) for path in paths],
+        "conversationId": str(conversation_id),
+    }
