@@ -42,3 +42,6 @@ SHA256SUMS.txt
 # Local screenshots and ad-hoc captures
 mn4_screenshot.png
 *.mov
+
+# Isolated implementation worktrees
+.worktrees/
