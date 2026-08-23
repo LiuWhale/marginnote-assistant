@@ -6093,6 +6093,284 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(digest_path.exists())
             self.assertEqual(source.read_text(encoding="utf-8"), "legacy queue source")
 
+    def test_multi_file_cli_uses_workspace_cwd_and_one_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id, name in (("src-a", "a.md"), ("src-b", "b.md")):
+                path = root / name
+                path.write_text(f"content for {source_id}", encoding="utf-8")
+                sources.append({"id": source_id, "title": name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-1", sources, False)
+            companion.save_runtime_settings({"aiBackend": "codex_cli", "codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.effective_codex_cli_model = lambda settings=None: "gpt-test"
+            calls: list[tuple[list[str], dict[str, Any]]] = []
+
+            class FakeProcess:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, command: list[str], **kwargs: Any) -> None:
+                    calls.append((command, kwargs))
+                    output_path = Path(command[command.index("--output-last-message") + 1])
+                    output_path.write_text(
+                        "comparison\n资料读取：src-a=read; src-b=read",
+                        encoding="utf-8",
+                    )
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_popen = companion.subprocess.Popen
+            companion.subprocess.Popen = FakeProcess
+            try:
+                text, backend = companion.call_codex_cli(
+                    {
+                        "prompt": "比较这些文件",
+                        "conversationId": "CONV-1",
+                        "sourceIds": ["src-a", "src-b"],
+                        "sourceWorkspaceRevision": workspace["revision"],
+                    },
+                    "chat",
+                )
+            finally:
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual(backend, "codex-cli")
+            self.assertIn("comparison", text or "")
+            codex_calls = [call for call in calls if call[0][:2] == ["/tmp/codex", "exec"]]
+            self.assertEqual(len(codex_calls), 1)
+            self.assertEqual(Path(codex_calls[0][1]["cwd"]), Path(workspace["workspacePath"]))
+            self.assertIn("--sandbox", codex_calls[0][0])
+            self.assertIn("read-only", codex_calls[0][0])
+
+    def test_single_document_cli_keeps_root_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.save_runtime_settings({"aiBackend": "codex_cli", "codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.effective_codex_cli_model = lambda settings=None: "gpt-test"
+            calls: list[tuple[list[str], dict[str, Any]]] = []
+
+            class FakeProcess:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, command: list[str], **kwargs: Any) -> None:
+                    calls.append((command, kwargs))
+                    output_path = Path(command[command.index("--output-last-message") + 1])
+                    output_path.write_text("single document answer", encoding="utf-8")
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            old_document_context = companion.document_context_for_model
+            old_popen = companion.subprocess.Popen
+            companion.document_context_for_model = lambda payload, query: {"ok": True, "text": "single document context"}
+            companion.subprocess.Popen = FakeProcess
+            try:
+                text, backend = companion.call_codex_cli(
+                    {"prompt": "解释当前文件", "sourceIds": ["src-a"]},
+                    "chat",
+                )
+            finally:
+                companion.document_context_for_model = old_document_context
+                companion.subprocess.Popen = old_popen
+
+            self.assertEqual((text, backend), ("single document answer", "codex-cli"))
+            codex_calls = [call for call in calls if call[0][:2] == ["/tmp/codex", "exec"]]
+            self.assertEqual(len(codex_calls), 1)
+            self.assertEqual(Path(codex_calls[0][1]["cwd"]), companion.ROOT)
+
+    def test_multi_file_model_input_uses_compact_workspace_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id, name, content in (
+                ("src-a", "a.md", "SOURCE_A_BODY_MUST_NOT_BE_CONCATENATED"),
+                ("src-b", "b.md", "SOURCE_B_BODY_MUST_NOT_BE_CONCATENATED"),
+            ):
+                path = root / name
+                path.write_text(content, encoding="utf-8")
+                sources.append({"id": source_id, "title": name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-PROMPT", sources, False)
+
+            old_document_context = companion.document_context_for_model
+            companion.document_context_for_model = lambda *args, **kwargs: self.fail(
+                "multi-file prompt must not use document_context_for_model"
+            )
+            try:
+                model_input = companion.build_model_input(
+                    {
+                        "prompt": "比较两份资料",
+                        "selectionText": "selected evidence",
+                        "selectedNoteTitle": "Current node",
+                        "selectedNoteText": "node details",
+                        "conversationId": "CONV-PROMPT",
+                        "sourceIds": ["src-a", "src-b"],
+                        "sourceWorkspaceRevision": workspace["revision"],
+                    },
+                    "chat",
+                )
+            finally:
+                companion.document_context_for_model = old_document_context
+
+            self.assertIn(f"资料工作区：{workspace['workspacePath']}", model_input)
+            self.assertIn("完整读取 SOURCES.md", model_input)
+            self.assertIn("资料读取：src-a=read; src-b=read", model_input)
+            self.assertIn("selected evidence", model_input)
+            self.assertIn("Current node", model_input)
+            self.assertNotIn("SOURCE_A_BODY_MUST_NOT_BE_CONCATENATED", model_input)
+            self.assertNotIn("SOURCE_B_BODY_MUST_NOT_BE_CONCATENATED", model_input)
+
+    def test_multi_file_auto_does_not_fall_back_after_cli_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id in ("src-a", "src-b"):
+                path = root / f"{source_id}.md"
+                path.write_text(source_id, encoding="utf-8")
+                sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-AUTO", sources, False)
+            payload = {
+                "prompt": "compare",
+                "conversationId": "CONV-AUTO",
+                "sourceIds": ["src-a", "src-b"],
+                "sourceWorkspaceRevision": workspace["revision"],
+            }
+            calls: list[str] = []
+            companion.save_runtime_settings({"aiBackend": "auto"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.call_codex_cli = lambda payload, task: calls.append("cli") or ("cli failed", "codex-cli-error")
+            companion.call_openai = lambda payload, task: calls.append("openai") or ("unsafe fallback", "openai:test")
+
+            text, backend = companion.generate_reply(payload, "chat")
+
+            self.assertEqual((text, backend), ("cli failed", "codex-cli-error"))
+            self.assertEqual(calls, ["cli"])
+
+    def test_multi_file_openai_only_blocks_before_api_invocation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id in ("src-a", "src-b"):
+                path = root / f"{source_id}.md"
+                path.write_text(source_id, encoding="utf-8")
+                sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-OPENAI", sources, False)
+            payload = {
+                "prompt": "compare",
+                "conversationId": "CONV-OPENAI",
+                "sourceIds": ["src-a", "src-b"],
+                "sourceWorkspaceRevision": workspace["revision"],
+            }
+            calls: list[str] = []
+            companion.save_runtime_settings({"aiBackend": "openai_api"})
+            companion.call_codex_cli = lambda payload, task: calls.append("cli") or ("unexpected", "codex-cli")
+            companion.call_openai = lambda payload, task: calls.append("openai") or ("unexpected", "openai:test")
+
+            text, backend = companion.generate_reply(payload, "chat")
+
+            self.assertEqual(backend, "multi-file-workspace-cli-required")
+            self.assertIn("Codex CLI", text)
+            self.assertEqual(calls, [])
+
+    def test_multi_file_unavailable_cli_returns_required_error_before_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id in ("src-a", "src-b"):
+                path = root / f"{source_id}.md"
+                path.write_text(source_id, encoding="utf-8")
+                sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-NO-CLI", sources, False)
+            payload = {
+                "prompt": "compare",
+                "conversationId": "CONV-NO-CLI",
+                "sourceIds": ["src-a", "src-b"],
+                "sourceWorkspaceRevision": workspace["revision"],
+            }
+            calls: list[str] = []
+            companion.save_runtime_settings({"aiBackend": "auto"})
+            companion.codex_cli_status = lambda settings: {"available": False, "path": ""}
+            companion.call_openai = lambda payload, task: calls.append("openai") or ("unexpected", "openai:test")
+
+            text, backend = companion.generate_reply(payload, "chat")
+
+            self.assertEqual(backend, "multi-file-workspace-cli-required")
+            self.assertIn("Codex CLI", text)
+            self.assertEqual(calls, [])
+
+    def test_missing_source_acknowledgement_marks_answer_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id in ("src-a", "src-b"):
+                path = root / f"{source_id}.md"
+                path.write_text(source_id, encoding="utf-8")
+                sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-USAGE", sources, False)
+            payload = {
+                "prompt": "compare",
+                "conversationId": "CONV-USAGE",
+                "sourceIds": ["src-a", "src-b"],
+                "sourceWorkspaceRevision": workspace["revision"],
+            }
+            companion.generate_reply = lambda payload, task: (
+                "answer\n资料读取：src-a=read",
+                "codex-cli",
+            )
+
+            result = companion.chat(payload)
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["sourceUsage"]["read"], ["src-a"])
+            self.assertEqual(result["sourceUsage"]["unread"], [])
+            self.assertEqual(result["sourceUsage"]["missing"], ["src-b"])
+            self.assertFalse(result["sourceUsage"]["complete"])
+            self.assertFalse(result["answerDerivedWritesEligible"])
+
+    def test_unread_source_suppresses_generated_card_write_eligibility(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            sources = []
+            for source_id in ("src-a", "src-b"):
+                path = root / f"{source_id}.md"
+                path.write_text(source_id, encoding="utf-8")
+                sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
+            workspace = companion.source_workspace.build_workspace("CONV-CARD", sources, False)
+            payload = {
+                "prompt": "make cards",
+                "conversationId": "CONV-CARD",
+                "sourceIds": ["src-a", "src-b"],
+                "sourceWorkspaceRevision": workspace["revision"],
+            }
+            companion.generate_reply = lambda payload, task: (
+                "## comparison\nresult\n资料读取：src-a=read; src-b=unread",
+                "codex-cli",
+            )
+
+            result = companion.generate_card(payload)
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["sourceUsage"]["unread"], ["src-b"])
+            self.assertFalse(result["sourceUsage"]["complete"])
+            self.assertFalse(result["answerDerivedWritesEligible"])
+
     def test_explicit_queue_command_inherits_authoritative_source_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

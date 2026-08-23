@@ -10693,6 +10693,11 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
         raise
     if not isinstance(result, dict):
         result = {"ok": False, "message": "生成动作没有返回可用结果。"}
+    result = with_generation_source_usage(
+        payload,
+        str(result.get("reply") or ""),
+        result,
+    )
     ok = bool(result.get("ok"))
     stopped = bool(result.get("stopped"))
     detail = str(result.get("message") or result.get("reply") or ("动作完成。" if ok else "动作失败。"))[:500]
@@ -13237,15 +13242,131 @@ def document_context_for_model(
     }
 
 
+def generation_source_workspace(payload: dict[str, Any]) -> dict[str, Any]:
+    source_ids = unique_string_list(payload.get("sourceIds"))
+    if len(source_ids) <= 1:
+        return {
+            "active": False,
+            "ok": True,
+            "sourceCount": len(source_ids),
+            "sources": [],
+            "errors": [],
+        }
+    conversation_id = normalize_conversation_id(payload)
+    revision = str(payload.get("sourceWorkspaceRevision") or "").strip()
+    binding_errors = []
+    if not conversation_id:
+        binding_errors.append("multi-file source workspace requires a conversation ID")
+    if not revision:
+        binding_errors.append("multi-file source workspace requires a revision")
+    if binding_errors:
+        return {
+            "active": True,
+            "ok": False,
+            "sourceCount": len(source_ids),
+            "sources": [],
+            "errors": binding_errors,
+        }
+    status = source_workspace.validate_workspace(conversation_id, revision)
+    result = {"active": True, **status}
+    errors = list(result.get("errors") or [])
+    workspace_sources = [source for source in result.get("sources", []) if isinstance(source, dict)]
+    workspace_source_ids = [str(source.get("sourceId") or "") for source in workspace_sources]
+    if result.get("ok") and workspace_source_ids != source_ids:
+        errors.append("workspace source IDs do not match generation source IDs")
+    for source in workspace_sources:
+        if source.get("readable") is False or source.get("valid") is False:
+            source_id = str(source.get("sourceId") or "source")
+            errors.append(f"workspace source is unreadable: {source_id}")
+    result["errors"] = errors
+    result["ok"] = bool(result.get("ok")) and not errors
+    return result
+
+
+def source_workspace_model_contract(workspace: dict[str, Any]) -> str:
+    sources = [source for source in workspace.get("sources", []) if isinstance(source, dict)]
+    source_ids = [str(source.get("sourceId") or "") for source in sources if source.get("sourceId")]
+    acknowledgement = "; ".join(f"{source_id}=read" for source_id in source_ids)
+    return (
+        f"资料工作区：{workspace.get('workspacePath') or ''}\n"
+        f"本次共有 {len(source_ids)} 个文件。先完整读取 SOURCES.md，再检查其中列出的每个 files/ 或 text/ 条目。\n"
+        f"回答末尾必须按清单中的实际 ID 输出，例如：资料读取：{acknowledgement}\n"
+        "无法读取的文件必须把对应状态改为 unread；不得把 unread 文件作为结论依据。"
+    )
+
+
+def source_usage_for_reply(payload: dict[str, Any], reply: str) -> dict[str, Any]:
+    workspace = generation_source_workspace(payload)
+    source_ids = unique_string_list(payload.get("sourceIds"))
+    if not workspace.get("active"):
+        return {
+            "schema": "codex.mn.sourceUsage.v1",
+            "active": False,
+            "sourceCount": len(source_ids),
+            "read": [],
+            "unread": [],
+            "missing": [],
+            "complete": True,
+        }
+    statuses: dict[str, str] = {}
+    acknowledgement_lines = re.findall(r"(?m)^\s*资料读取\s*[:：]\s*(.*?)\s*$", str(reply or ""))
+    if acknowledgement_lines:
+        for item in re.split(r"[;；]", acknowledgement_lines[-1]):
+            source_id, separator, status = item.strip().partition("=")
+            source_id = source_id.strip()
+            status = status.strip().lower()
+            if separator and source_id in source_ids and status in {"read", "unread"}:
+                statuses[source_id] = status
+    read = [source_id for source_id in source_ids if statuses.get(source_id) == "read"]
+    unread = [source_id for source_id in source_ids if statuses.get(source_id) == "unread"]
+    missing = [source_id for source_id in source_ids if source_id not in statuses]
+    complete = bool(workspace.get("ok")) and len(read) == len(source_ids) and not unread and not missing
+    return {
+        "schema": "codex.mn.sourceUsage.v1",
+        "active": True,
+        "sourceCount": len(source_ids),
+        "read": read,
+        "unread": unread,
+        "missing": missing,
+        "complete": complete,
+        "errors": list(workspace.get("errors") or []),
+    }
+
+
+def with_generation_source_usage(
+    payload: dict[str, Any],
+    reply: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    usage = source_usage_for_reply(payload, reply)
+    if not usage.get("active"):
+        return result
+    return {
+        **result,
+        "sourceUsage": usage,
+        "answerDerivedWritesEligible": bool(usage.get("complete")),
+    }
+
+
 def build_model_input(payload: dict[str, Any], task: str) -> str:
     requested_scope = normalize_context_scope(payload)
     scope = effective_context_scope(payload, task)
     prompt_context = user_prompt_context(payload)
     material_context = selected_material_context(payload)
+    workspace = (
+        payload.get("_generationSourceWorkspace")
+        if isinstance(payload.get("_generationSourceWorkspace"), dict)
+        else generation_source_workspace(payload)
+    )
+    workspace_active = bool(workspace.get("active") and workspace.get("ok"))
     context_blocks: list[str] = []
     if prompt_context:
         context_blocks.append(prompt_context)
-    if scope == "selection":
+    if workspace_active:
+        if material_context:
+            context_blocks.append(material_context)
+        context_blocks.append(source_workspace_model_contract(workspace))
+    elif scope == "selection":
         if material_context:
             context_blocks.append(material_context)
         elif not prompt_context:
@@ -13314,7 +13435,9 @@ def build_model_input(payload: dict[str, Any], task: str) -> str:
     sections.append("\n\n".join(context_blocks).strip() or "没有选中文本。")
     if knowledge_context:
         sections.append(knowledge_context)
-    if files_context and (scope != "document" or truthy_payload_flag(payload.get("includeUploadedContext"))):
+    if workspace_active:
+        pass
+    elif files_context and (scope != "document" or truthy_payload_flag(payload.get("includeUploadedContext"))):
         sections.append(f"用户上传文件：\n{files_context}")
     elif files_context and scope == "document":
         sections.append("用户上传文件：本次选择全文模式，已忽略历史上传文件；如需结合上传文件，请在问题里明确说明。")
@@ -13379,17 +13502,32 @@ def codex_cli_timeout_seconds(
 
 
 def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]:
+    workspace = generation_source_workspace(payload)
+    if workspace.get("active") and not workspace.get("ok"):
+        detail = "; ".join(str(item) for item in workspace.get("errors") or [])
+        return f"多文件资料工作区不可用：{detail or '验证失败'}", "multi-file-workspace-error"
     settings = runtime_settings()
     cli = codex_cli_status(settings)
     path = str(cli.get("path") or "")
     if not cli.get("available"):
         detail = f"Codex CLI 不可用：{path or '未找到 codex 可执行文件'}。请确认 Codex CLI 已安装并已登录。"
         return detail, "codex-cli-error"
-    prompt = (
-        "你是 MarginNote 4 插件中的 Codex 助手。"
-        "本次调用只输出中文回答文本，不要修改本机文件，不要运行命令，不要创建补丁。"
-        "请区分材料事实、推断和解释，不要编造页码或实验数值。\n\n"
-        + build_model_input(payload, task)
+    if workspace.get("active"):
+        system_prompt = (
+            "你是 MarginNote 4 插件中的 Codex 助手。"
+            "本次调用只输出中文回答文本。可以运行只读命令检查当前资料工作区内的 SOURCES.md 及其列出的文件；"
+            "禁止修改、创建或删除文件，禁止创建补丁，禁止网络或其他外部副作用，禁止访问与所选资料无关的文件系统位置。"
+            "请区分材料事实、推断和解释，不要编造页码或实验数值。\n\n"
+        )
+    else:
+        system_prompt = (
+            "你是 MarginNote 4 插件中的 Codex 助手。"
+            "本次调用只输出中文回答文本，不要修改本机文件，不要运行命令，不要创建补丁。"
+            "请区分材料事实、推断和解释，不要编造页码或实验数值。\n\n"
+        )
+    prompt = system_prompt + build_model_input(
+        {**payload, "_generationSourceWorkspace": workspace},
+        task,
     )
     speed = sanitize_speed(settings.get("speed"))
     timeout = codex_cli_timeout_seconds(speed, task, payload)
@@ -13412,7 +13550,9 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
     CONTROL_DIR.mkdir(parents=True, exist_ok=True)
     retried_startup_error = False
     last_detail = "Codex CLI 返回为空。"
-    for attempt in range(2):
+    attempts = 1 if workspace.get("active") else 2
+    working_directory = str(workspace.get("workspacePath") or ROOT) if workspace.get("active") else str(ROOT)
+    for attempt in range(attempts):
         output_path = CONTROL_DIR / f"codex-cli-output-{uuid.uuid4().hex}.txt"
         stdout_path = CONTROL_DIR / f"codex-cli-stdout-{uuid.uuid4().hex}.log"
         stderr_path = CONTROL_DIR / f"codex-cli-stderr-{uuid.uuid4().hex}.log"
@@ -13427,7 +13567,7 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
                     stdout=stdout_handle,
                     stderr=stderr_handle,
                     text=True,
-                    cwd=str(ROOT),
+                    cwd=working_directory,
                     env=codex_cli_env(settings),
                     start_new_session=True,
                 )
@@ -13443,6 +13583,8 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
                     temp_log.unlink()
                 except FileNotFoundError:
                     pass
+            if workspace.get("active"):
+                return f"Codex CLI 调用超时（{timeout}s）。多文件资料不会回退到 OpenAI API，请检查 CLI 登录状态后重试。", "codex-cli-error"
             return f"Codex CLI 调用超时（{timeout}s）。自动模式会回退到其他后端；强制 CLI 时请检查 CLI 登录状态。", "codex-cli-error"
         except Exception as exc:
             for temp_log in (output_path, stdout_path, stderr_path):
@@ -13474,7 +13616,7 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
         if returncode == 0 and stdout and "stream error:" not in stdout and "requires a newer version of Codex" not in stdout:
             return stdout, "codex-cli"
         last_detail = stdout or stderr or "Codex CLI 返回为空。"
-        if attempt == 0 and is_retryable_codex_cli_startup_error(last_detail):
+        if attempt == 0 and attempts > 1 and is_retryable_codex_cli_startup_error(last_detail):
             retried_startup_error = True
             continue
         return format_codex_cli_failure(last_detail, settings, retried=retried_startup_error), "codex-cli-error"
@@ -13538,6 +13680,23 @@ def urlopen_with_proxy(req: request.Request, settings: dict[str, str], timeout: 
 def generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
     settings = runtime_settings()
     backend_choice = sanitize_ai_backend(settings.get("aiBackend"))
+    workspace = generation_source_workspace(payload)
+    if workspace.get("active") and not workspace.get("ok"):
+        detail = "; ".join(str(item) for item in workspace.get("errors") or [])
+        return f"多文件资料工作区验证失败：{detail or '工作区不可用'}", "multi-file-workspace-error"
+    if workspace.get("active"):
+        if backend_choice not in {"codex_cli", "auto"}:
+            return (
+                "多文件资料位于本地只读工作区，必须使用 Codex CLI；OpenAI API 无法读取这些本地资料。",
+                "multi-file-workspace-cli-required",
+            )
+        if not codex_cli_status(settings).get("available"):
+            return (
+                "多文件资料位于本地只读工作区，但 Codex CLI 当前不可用；请安装或登录 Codex CLI 后重试。",
+                "multi-file-workspace-cli-required",
+            )
+        text, backend = call_codex_cli(payload, task)
+        return text or "Codex CLI 未返回内容。", backend
     cli_error_text = ""
     unavailable = (
         "真实 AI 后端不可用：当前没有可用的 Codex CLI 或 OpenAI API。"
@@ -13566,7 +13725,10 @@ def generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
 
 
 def generation_backend_unavailable(backend: str) -> bool:
-    return backend == "ai-unavailable" or backend == "local" or backend.endswith("-error")
+    return (
+        backend in {"ai-unavailable", "local", "multi-file-workspace-cli-required"}
+        or backend.endswith("-error")
+    )
 
 
 def chat(payload: dict[str, Any]) -> dict[str, Any]:
@@ -13577,19 +13739,19 @@ def chat(payload: dict[str, Any]) -> dict[str, Any]:
         return stopped
     if generation_backend_unavailable(backend):
         append_history(payload, text, reply, assistant_kind="error")
-        return {
+        return with_generation_source_usage(payload, reply, {
             "ok": False,
             "message": f"对话生成失败（{backend}）。",
             "reply": reply,
             "backend": backend,
-        }
+        })
     append_history(payload, text, reply)
-    return {
+    return with_generation_source_usage(payload, reply, {
         "ok": True,
         "message": f"已生成对话回复（{backend}）。",
         "reply": reply,
         "backend": backend,
-    }
+    })
 
 
 def goal_text(goal: dict[str, str], payload: dict[str, Any]) -> str:
@@ -13898,17 +14060,17 @@ def generate_card(payload: dict[str, Any]) -> dict[str, Any]:
     if generation_backend_unavailable(backend):
         message = "未生成卡片：需要可用的 Codex CLI 或 OpenAI 后端。"
         append_history(payload, text, message, assistant_kind="error")
-        return {
+        return with_generation_source_usage(payload, reply or message, {
             "ok": False,
             "message": message,
             "reply": f"{message}\n\n后端状态：{backend}\n\n{reply}",
             "backend": backend,
-        }
+        })
     cards = build_short_cards(text, reply, backend, payload)
     card_factory = card_factory_summary(cards, card_factory_source_ref(payload, text))
     card_quality = operation_runtime.audit_card_quality(cards)
     append_history(payload, text, reply)
-    return with_mn_object(payload, {
+    result = with_mn_object(payload, {
         "ok": True,
         "message": f"已返回 {len(cards)} 张可写入 MN4 的短卡片（{backend}）。",
         "reply": reply,
@@ -13917,6 +14079,7 @@ def generate_card(payload: dict[str, Any]) -> dict[str, Any]:
         "cardFactory": card_factory,
         "cardQuality": card_quality,
     })
+    return with_generation_source_usage(payload, reply, result)
 
 
 def clean_mindmap_node_title(text: str, limit: int = 64) -> str:
