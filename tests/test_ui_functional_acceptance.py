@@ -72,6 +72,19 @@ class UiFunctionalAcceptanceTests(unittest.TestCase):
         self.assertEqual(checks["notebook_workspace_kernels"]["evidence"]["taskDraftCount"], 7)
         self.assertFalse(checks["native_scope_guards"]["evidence"]["noScopeAutoPlanCanRun"])
 
+    def test_source_workspace_buttons_are_classified_by_real_interaction_type(self) -> None:
+        module = load_module()
+
+        check = module.check_button_coverage(ROOT)
+
+        self.assertEqual(check["status"], "PASS", check)
+        evidence = check["evidence"]
+        self.assertIn("sourceWorkspaceButton", evidence["interactionButtons"])
+        self.assertIn("sourceWorkspaceBackButton", evidence["interactionButtons"])
+        self.assertIn("sourceWorkspaceValidateButton", evidence["panelControlButtons"])
+        self.assertIn("sourceWorkspaceDoneButton", evidence["panelControlButtons"])
+        self.assertIn("sourceWorkspaceClearButton", evidence["formOrDestructiveButtons"])
+
     def test_cli_writes_json_report(self) -> None:
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:

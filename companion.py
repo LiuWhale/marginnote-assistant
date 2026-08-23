@@ -7537,10 +7537,29 @@ def list_conversations(payload: dict[str, Any]) -> dict[str, Any]:
 
 def new_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     conversation = conversation_payload_for_new(payload)
+    persisted_payload = {
+        **payload,
+        "conversationId": conversation["conversationId"],
+        "sourceIds": conversation["sourceIds"],
+        "followCurrentDocument": conversation["followCurrentDocument"],
+        "sourceWorkspaceRevision": conversation["sourceWorkspaceRevision"],
+    }
+    session_path = SESSIONS_DIR / f"{conversation['sessionId']}.json"
+    try:
+        save_history(persisted_payload, [])
+        persisted = read_conversation_file(session_path)
+        if not persisted:
+            raise OSError("持久化会话无法读回")
+    except OSError as exc:
+        return {
+            "ok": False,
+            "message": f"创建新对话失败：{exc}",
+            "history": [],
+        }
     return {
         "ok": True,
         "message": "已创建新对话。",
-        "conversation": conversation,
+        "conversation": conversation_summary(persisted),
         "history": [],
     }
 

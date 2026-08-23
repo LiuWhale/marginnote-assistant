@@ -509,6 +509,82 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(relisted["conversation_count"], 1)
             self.assertEqual(relisted["conversations"][0]["title"], "第二轮问题")
 
+    def test_new_conversation_persists_empty_owned_session_before_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            mn_object = {
+                "schema": "codex.mn.mnObject.v1",
+                "objectId": "mnobj:document:new-empty",
+                "kind": "document",
+                "title": "Current.pdf",
+                "sourceRef": {"documentTitle": "Current.pdf"},
+            }
+            base = {
+                "topicid": "T-NEW",
+                "bookmd5": "B-NEW",
+                "contextDocumentKey": "T-NEW|B-NEW|/papers/current.pdf",
+                "documentTitle": "Current.pdf",
+                "source": "unittest",
+                "mnObject": mn_object,
+            }
+
+            created = companion.handle_action({**base, "action": "conversation_new"})
+
+            self.assertTrue(created["ok"], created)
+            conversation = created["conversation"]
+            session_path = companion.SESSIONS_DIR / f"{conversation['sessionId']}.json"
+            self.assertTrue(session_path.is_file())
+            saved = json.loads(session_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["conversationId"], conversation["conversationId"])
+            self.assertEqual(saved["topicid"], "T-NEW")
+            self.assertEqual(saved["bookmd5"], "B-NEW")
+            self.assertEqual(saved["contextDocumentKey"], base["contextDocumentKey"])
+            self.assertEqual(saved["objectRef"]["objectId"], mn_object["objectId"])
+            self.assertEqual(saved["history"], [])
+
+            owned = {
+                **base,
+                "conversationId": conversation["conversationId"],
+                "sessionId": conversation["sessionId"],
+            }
+            workspace = companion.handle_action({**owned, "action": "source_workspace_get"})
+            listed = companion.handle_action({**base, "action": "conversation_list"})
+            loaded = companion.handle_action({**owned, "action": "conversation_load"})
+
+            self.assertTrue(workspace["ok"], workspace)
+            self.assertEqual(workspace["workspace"]["sourceCount"], 0)
+            self.assertEqual(listed["conversation_count"], 1)
+            self.assertEqual(listed["conversations"][0]["sessionId"], conversation["sessionId"])
+            self.assertEqual(listed["conversations"][0]["messageCount"], 0)
+            self.assertEqual(listed["conversations"][0]["title"], "新对话")
+            self.assertTrue(loaded["ok"], loaded)
+            self.assertEqual(loaded["history"], [])
+
+            deleted = companion.handle_action({**owned, "action": "conversation_delete"})
+            self.assertTrue(deleted["ok"], deleted)
+            self.assertFalse(session_path.exists())
+
+    def test_new_conversation_write_failure_is_atomic_and_returns_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {
+                "topicid": "T-FAIL",
+                "bookmd5": "B-FAIL",
+                "contextDocumentKey": "T-FAIL|B-FAIL|/papers/fail.pdf",
+                "source": "unittest",
+            }
+            original_replace = companion.os.replace
+            companion.os.replace = lambda source, target: (_ for _ in ()).throw(OSError("disk full"))
+            try:
+                result = companion.handle_action({**base, "action": "conversation_new"})
+            finally:
+                companion.os.replace = original_replace
+
+            self.assertFalse(result["ok"], result)
+            self.assertIn("创建新对话失败", result["message"])
+            self.assertNotIn("conversation", result)
+            self.assertEqual(list(companion.SESSIONS_DIR.glob("*")), [])
+
     def test_conversations_with_same_bookmd5_are_isolated_by_current_document_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

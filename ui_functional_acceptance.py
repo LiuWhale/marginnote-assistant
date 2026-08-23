@@ -448,6 +448,8 @@ BUTTON_COVERAGE_INTERACTION_BUTTONS = [
     "conversationHistoryAllButton",
     "conversationHistoryCloseButton",
     "conversationHistoryObjectButton",
+    "sourceWorkspaceButton",
+    "sourceWorkspaceBackButton",
     "workspaceNavigatorToggleButton",
     "notebookWorkspaceDetailsToggleButton",
     "notebookKnowledgeMatrixToggleButton",
@@ -480,6 +482,8 @@ BUTTON_COVERAGE_PANEL_CONTROL_BUTTONS = [
     "objectBrowserFilterButton",
     "objectGraphRefreshButton",
     "operationLedgerFilterButton",
+    "sourceWorkspaceDoneButton",
+    "sourceWorkspaceValidateButton",
 ]
 
 BUTTON_COVERAGE_DYNAMIC_BUTTONS = [
@@ -491,6 +495,7 @@ BUTTON_COVERAGE_FORM_OR_DESTRUCTIVE_BUTTONS = [
     "clearOpenAIKeyButton",
     "logsClearButton",
     "saveSettingsButton",
+    "sourceWorkspaceClearButton",
 ]
 
 BUTTON_COVERAGE_FILE_PICKER_BUTTONS = [
