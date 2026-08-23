@@ -73,6 +73,8 @@
     sourceWorkspaceStatus: {tone: 'neutral', text: '资料尚未验证'},
     sourceWorkspaceCurrentDocumentId: '',
     sourceWorkspaceCurrentDocumentIds: [],
+    sourceWorkspaceRequestToken: 0,
+    newConversationRequestToken: 0,
     conversationHistoryScope: 'document',
     conversations: [],
     notebookWorkspace: {schema: 'codex.mn.notebookWorkspace.v1', available: false},
@@ -2274,6 +2276,35 @@
     renderSourceWorkspaceDiagnostics();
   }
 
+  function invalidateSourceWorkspaceRequests() {
+    state.sourceWorkspaceRequestToken += 1;
+    state.sourceWorkspaceInFlight = false;
+  }
+
+  function beginSourceWorkspaceRequest() {
+    state.sourceWorkspaceRequestToken += 1;
+    return {
+      conversationId: String(state.conversationId || ''),
+      contextDocumentKey: String(state.contextDocumentKey || ''),
+      token: state.sourceWorkspaceRequestToken
+    };
+  }
+
+  function sourceWorkspaceRequestIsCurrent(identity) {
+    identity = identity || {};
+    return identity.token === state.sourceWorkspaceRequestToken &&
+      identity.conversationId === String(state.conversationId || '') &&
+      identity.contextDocumentKey === String(state.contextDocumentKey || '');
+  }
+
+  function postSourceWorkspace(action, extra, done) {
+    var requestIdentity = beginSourceWorkspaceRequest();
+    postCompanion(action, extra || {}, function(result) {
+      if (!sourceWorkspaceRequestIsCurrent(requestIdentity)) return;
+      if (done) done(result || {});
+    }, {showReply: false});
+  }
+
   function saveSourceWorkspaceSelection(closeAfterSave, done) {
     var sourceIds = sourceWorkspaceSelectionIds();
     if (!sourceIds.length) {
@@ -2283,7 +2314,7 @@
     ensureSourceWorkspaceConversation(function() {
       state.sourceWorkspaceInFlight = true;
       setSourceWorkspaceStatus('warning', '正在保存并验证资料...');
-      postCompanion('source_workspace_update', {
+      postSourceWorkspace('source_workspace_update', {
         conversationId: state.conversationId,
         sourceIds: sourceIds,
         followCurrentDocument: state.followCurrentDocument
@@ -2296,8 +2327,51 @@
           addFailureMessage('保存资料失败', result);
         }
         if (done) done(result || {});
-      }, {showReply: false});
+      });
     });
+  }
+
+  function newConversationRequestIsCurrent(identity) {
+    identity = identity || {};
+    return identity.token === state.newConversationRequestToken &&
+      identity.conversationId === String(state.conversationId || '') &&
+      identity.contextDocumentKey === String(state.contextDocumentKey || '');
+  }
+
+  function requestNewConversation(done) {
+    state.newConversationRequestToken += 1;
+    var requestIdentity = {
+      token: state.newConversationRequestToken,
+      conversationId: String(state.conversationId || ''),
+      contextDocumentKey: String(state.contextDocumentKey || '')
+    };
+    postCompanion('conversation_new', {}, function(result) {
+      if (!newConversationRequestIsCurrent(requestIdentity)) return;
+      if (done) done(result || {});
+    }, {showReply: false});
+  }
+
+  function initializeNewConversationState(conversation) {
+    conversation = conversation || {};
+    setCurrentConversation(conversation);
+    state.sourceWorkspace = {
+      schema: 'codex.mn.sourceWorkspace.v1',
+      sourceCount: 0,
+      sources: [],
+      revision: String(conversation.sourceWorkspaceRevision || ''),
+      active: false,
+      errors: []
+    };
+    state.sourceWorkspaceCandidates = [];
+    state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(conversation.sourceIds || []);
+    state.followCurrentDocument = conversation.followCurrentDocument !== false;
+    state.sourceWorkspaceCurrentDocumentId = '';
+    state.sourceWorkspaceCurrentDocumentIds = [];
+    setSourceWorkspaceStatus(
+      sourceWorkspaceSelectionIds().length ? 'warning' : 'neutral',
+      sourceWorkspaceSelectionIds().length ? '新对话资料等待验证' : '新对话将跟随当前文件'
+    );
+    renderSourceWorkspacePage();
   }
 
   function ensureSourceWorkspaceConversation(done) {
@@ -2305,16 +2379,16 @@
       done();
       return;
     }
-    postCompanion('conversation_new', {}, function(result) {
+    requestNewConversation(function(result) {
       if (!result || !result.ok) {
         state.sourceWorkspaceInFlight = false;
         setSourceWorkspaceStatus('error', '无法创建资料对话');
         addFailureMessage('创建资料对话失败', result);
         return;
       }
-      setCurrentConversation(result.conversation || {});
+      initializeNewConversationState(result.conversation || {});
       done();
-    }, {showReply: false});
+    });
   }
 
   function refreshSourceWorkspace(selectCurrentByDefault, options) {
@@ -2322,9 +2396,13 @@
     ensureSourceWorkspaceConversation(function() {
       state.sourceWorkspaceInFlight = true;
       setSourceWorkspaceStatus('warning', '正在读取资料列表...');
-      postCompanion('source_workspace_get', {conversationId: state.conversationId}, function(result) {
+      postSourceWorkspace('source_workspace_get', {conversationId: state.conversationId}, function(result) {
         state.sourceWorkspaceInFlight = false;
         applySourceWorkspaceResult(result || {}, options);
+        if (Object.prototype.hasOwnProperty.call(options, 'followCurrentDocumentOverride')) {
+          state.followCurrentDocument = !!options.followCurrentDocumentOverride;
+          renderSourceWorkspacePage();
+        }
         var current = currentDocumentSourceCandidate();
         if (result && result.ok && selectCurrentByDefault && current && !sourceWorkspaceSelectionIds().length && state.followCurrentDocument) {
           state.sourceWorkspaceSelection[String(current.id || '')] = true;
@@ -2332,7 +2410,7 @@
           return;
         }
         if (result && result.ok && options.after) options.after(result || {});
-      }, {showReply: false});
+      });
     });
   }
 
@@ -2341,7 +2419,7 @@
       if (!saved || !saved.ok || !sourceWorkspaceSelectionIds().length) return;
       state.sourceWorkspaceInFlight = true;
       setSourceWorkspaceStatus('warning', '正在验证资料...');
-      postCompanion('source_workspace_validate', {
+      postSourceWorkspace('source_workspace_validate', {
         conversationId: state.conversationId,
         sourceIds: sourceWorkspaceSelectionIds(),
         followCurrentDocument: state.followCurrentDocument,
@@ -2350,7 +2428,7 @@
         state.sourceWorkspaceInFlight = false;
         applySourceWorkspaceResult(result || {});
         if (!result || !result.ok) addFailureMessage('验证资料失败', result);
-      }, {showReply: false});
+      });
     });
   }
 
@@ -2359,7 +2437,7 @@
     ensureSourceWorkspaceConversation(function() {
       state.sourceWorkspaceInFlight = true;
       setSourceWorkspaceStatus('warning', '正在取消全部资料...');
-      postCompanion('source_workspace_clear', {
+      postSourceWorkspace('source_workspace_clear', {
         conversationId: state.conversationId,
         followCurrentDocument: false
       }, function(result) {
@@ -2368,7 +2446,7 @@
         if (result && result.ok && closeAfterClear) closeSourceWorkspacePage();
         if (!result || !result.ok) addFailureMessage('取消资料失败', result);
         if (done) done(result || {});
-      }, {showReply: false});
+      });
     });
   }
 
@@ -2387,8 +2465,9 @@
 
   function syncFollowCurrentDocumentMembership(previousDocumentKey, docKey) {
     if (!previousDocumentKey || !docKey || docKey === previousDocumentKey) return;
+    var preservedFollowCurrentDocument = state.followCurrentDocument;
     var preservedSelection = sourceWorkspaceSelectionMap(sourceWorkspaceSelectionIds());
-    if (state.followCurrentDocument) {
+    if (preservedFollowCurrentDocument) {
       for (var i = 0; i < state.sourceWorkspaceCurrentDocumentIds.length; i++) {
         delete preservedSelection[state.sourceWorkspaceCurrentDocumentIds[i]];
       }
@@ -2402,6 +2481,7 @@
     setSourceWorkspaceStatus('warning', '当前文件已切换，正在更新资料...');
     refreshSourceWorkspace(false, {
       selectionOverride: Object.keys(preservedSelection),
+      followCurrentDocumentOverride: preservedFollowCurrentDocument,
       after: function() {
         var current = state.followCurrentDocument ? currentDocumentSourceCandidate() : null;
         if (current) state.sourceWorkspaceSelection[String(current.id || '')] = true;
@@ -2432,6 +2512,8 @@
 
   function setCurrentConversation(conversation) {
     conversation = conversation || {};
+    invalidateSourceWorkspaceRequests();
+    state.newConversationRequestToken += 1;
     state.conversationId = String(conversation.conversationId || '');
     state.sessionId = String(conversation.sessionId || '');
     if (conversation.sourceIds !== undefined) {
@@ -2580,17 +2662,16 @@
   }
 
   function newConversation() {
-    postCompanion('conversation_new', {}, function(result) {
+    requestNewConversation(function(result) {
       if (!result || !result.ok) {
         addFailureMessage('新对话失败', result);
         return;
       }
-      setCurrentConversation(result.conversation || {});
+      initializeNewConversationState(result.conversation || {});
       renderNewConversationMessage();
       closeConversationHistory();
-      if (sourceWorkspaceSelectionIds().length) saveSourceWorkspaceSelection(false);
-      else refreshSourceWorkspace(true);
-    }, {showReply: false});
+      refreshSourceWorkspace(true);
+    });
   }
 
   function loadConversation(item) {
@@ -2623,8 +2704,13 @@
         return;
       }
       if (item.sessionId === state.sessionId) {
-        state.conversationId = '';
-        state.sessionId = '';
+        initializeNewConversationState({
+          conversationId: '',
+          sessionId: '',
+          sourceIds: [],
+          followCurrentDocument: true,
+          sourceWorkspaceRevision: ''
+        });
         renderNewConversationMessage();
       }
       refreshConversationHistory();
@@ -2700,12 +2786,20 @@
     for (var extraKey in extra) {
       if (Object.prototype.hasOwnProperty.call(extra, extraKey)) payload[extraKey] = extra[extraKey];
     }
-    if (!payload.conversationId && state.conversationId) payload.conversationId = state.conversationId;
-    if (!payload.sessionId && state.sessionId) payload.sessionId = state.sessionId;
-    if (!Object.prototype.hasOwnProperty.call(payload, 'sourceIds')) payload.sourceIds = sourceWorkspaceSelectionIds();
-    if (!Object.prototype.hasOwnProperty.call(payload, 'followCurrentDocument')) payload.followCurrentDocument = !!state.followCurrentDocument;
-    if (!Object.prototype.hasOwnProperty.call(payload, 'sourceWorkspaceRevision')) {
-      payload.sourceWorkspaceRevision = String((state.sourceWorkspace || {}).revision || '');
+    if (action === 'conversation_new') {
+      delete payload.conversationId;
+      delete payload.sessionId;
+      delete payload.sourceIds;
+      delete payload.sourceWorkspaceRevision;
+      payload.followCurrentDocument = true;
+    } else {
+      if (!payload.conversationId && state.conversationId) payload.conversationId = state.conversationId;
+      if (!payload.sessionId && state.sessionId) payload.sessionId = state.sessionId;
+      if (!Object.prototype.hasOwnProperty.call(payload, 'sourceIds')) payload.sourceIds = sourceWorkspaceSelectionIds();
+      if (!Object.prototype.hasOwnProperty.call(payload, 'followCurrentDocument')) payload.followCurrentDocument = !!state.followCurrentDocument;
+      if (!Object.prototype.hasOwnProperty.call(payload, 'sourceWorkspaceRevision')) {
+        payload.sourceWorkspaceRevision = String((state.sourceWorkspace || {}).revision || '');
+      }
     }
     var mnObject = state.agentOperation && state.agentOperation.mnObject ? state.agentOperation.mnObject : null;
     if (mnObject && mnObject.objectId && !payload.mnObject && !payload.mnObjectId) payload.mnObject = mnObject;
@@ -11165,6 +11259,8 @@
   }
 
   function resetConversationForDocumentChange(ctx) {
+    invalidateSourceWorkspaceRequests();
+    state.newConversationRequestToken += 1;
     state.conversationId = '';
     state.sessionId = '';
     state.conversations = [];

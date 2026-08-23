@@ -2284,6 +2284,64 @@ class WebControlsStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, conversation_body)
 
+    def test_new_conversation_payload_is_source_clean_and_failure_preserves_state(self) -> None:
+        payload_body = self.js.split("function companionPayload", 1)[1].split(
+            "\n  function parseCompanionResult", 1
+        )[0]
+        self.assertIn("if (action === 'conversation_new')", payload_body)
+        clean_branch = payload_body.partition("if (action === 'conversation_new')")[2].split(
+            "\n    } else {", 1
+        )[0]
+        new_body = self.js.split("function newConversation()", 1)[1].split(
+            "\n  function loadConversation", 1
+        )[0]
+        failure_branch = new_body.split("if (!result || !result.ok)", 1)[1].split("return;", 1)[0]
+
+        for marker in [
+            "delete payload.conversationId",
+            "delete payload.sessionId",
+            "delete payload.sourceIds",
+            "delete payload.sourceWorkspaceRevision",
+            "payload.followCurrentDocument = true",
+        ]:
+            self.assertIn(marker, clean_branch)
+        self.assertIn("initializeNewConversationState(result.conversation || {})", new_body)
+        self.assertIn("refreshSourceWorkspace(true)", new_body)
+        self.assertNotIn("saveSourceWorkspaceSelection", new_body)
+        self.assertNotIn("setCurrentConversation", failure_branch)
+        self.assertNotIn("state.sourceWorkspace", failure_branch)
+        self.assertNotIn("state.sourceWorkspaceSelection", failure_branch)
+
+    def test_source_workspace_callbacks_ignore_stale_conversation_or_document(self) -> None:
+        self.assertIn("function postSourceWorkspace", self.js)
+        guard_body = self.js.partition("function postSourceWorkspace")[2].split(
+            "\n  function saveSourceWorkspaceSelection", 1
+        )[0]
+        self.assertIn("beginSourceWorkspaceRequest", guard_body)
+        self.assertIn("sourceWorkspaceRequestIsCurrent(requestIdentity)", guard_body)
+        self.assertIn("if (!sourceWorkspaceRequestIsCurrent(requestIdentity)) return;", guard_body)
+
+        self.assertIn("function beginSourceWorkspaceRequest", self.js)
+        identity_body = self.js.partition("function beginSourceWorkspaceRequest")[2].split(
+            "\n  function postSourceWorkspace", 1
+        )[0]
+        for marker in [
+            "conversationId: String(state.conversationId || '')",
+            "contextDocumentKey: String(state.contextDocumentKey || '')",
+            "token: state.sourceWorkspaceRequestToken",
+            "identity.conversationId === String(state.conversationId || '')",
+            "identity.contextDocumentKey === String(state.contextDocumentKey || '')",
+        ]:
+            self.assertIn(marker, identity_body)
+
+        for action in [
+            "source_workspace_get",
+            "source_workspace_update",
+            "source_workspace_validate",
+            "source_workspace_clear",
+        ]:
+            self.assertIn("postSourceWorkspace('" + action + "'", self.js)
+
     def test_parity_matrix_document_tracks_builtin_ai_chat_requirements(self) -> None:
         doc = (Path(__file__).resolve().parents[1] / "docs/MN4_AI_CHAT_PARITY.md").read_text(encoding="utf-8")
         for marker in [

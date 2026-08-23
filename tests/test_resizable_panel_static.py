@@ -648,6 +648,30 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertNotIn("min-width: 420px", source_css)
         self.assertIn("@media (max-width: 520px)", source_css)
 
+    def test_minimum_width_header_reflows_without_horizontal_clipping(self) -> None:
+        minimum_css = self.css.rsplit("@media (max-width: 520px)", 1)[1].split(
+            "@media (max-width: 430px)", 1
+        )[0]
+
+        for marker in [
+            'grid-template-areas:',
+            '"identity modes"',
+            '"actions actions"',
+            "grid-template-columns: repeat(5, minmax(0, 1fr));",
+            ".topbar-identity",
+            "grid-area: identity;",
+            ".topbar-workspace-rail",
+            "grid-area: modes;",
+            ".topbar-actions",
+            "grid-area: actions;",
+            "width: 100%;",
+            "overflow-wrap: anywhere;",
+            "white-space: normal;",
+        ]:
+            self.assertIn(marker, minimum_css)
+        self.assertNotIn("width: 42px", minimum_css)
+        self.assertNotIn("width: 46px", minimum_css)
+
     def test_reply_mindmap_source_metadata_survives_direct_and_queued_execution(self) -> None:
         next_action_body = self.app.split("function runAgentNextAction", 1)[1].split(
             "\n  function buildReplyAgentActions", 1

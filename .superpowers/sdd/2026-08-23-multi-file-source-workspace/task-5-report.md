@@ -111,3 +111,66 @@ No screenshot artifact was produced. The responsive static suite verifies:
 
 - Verification is static plus JavaScript syntax checking; a live MarginNote WebView/Companion session was not available in this task, so native visual interaction and real source-candidate data were not exercised here.
 - The reviewed candidate response does not guarantee a byte-size field. The UI shows a formatted size when `size`, `byteSize`, or `fileSize` exists and otherwise displays `大小未知`.
+
+## Fix Round 1
+
+### Findings Addressed
+
+- **C1:** `conversation_new` previously inherited the active conversation's `sourceIds` and `sourceWorkspaceRevision` through the common payload builder.
+- **I1:** source-workspace callbacks could apply a response after the active conversation changed inside the same document.
+- **I2:** the minimum-width header depended on a tightly packed single row and could clip controls despite reduced fixed button widths.
+
+### RED Evidence
+
+Added these tests before production changes:
+
+```text
+test_new_conversation_payload_is_source_clean_and_failure_preserves_state
+test_source_workspace_callbacks_ignore_stale_conversation_or_document
+test_minimum_width_header_reflows_without_horizontal_clipping
+```
+
+Focused command:
+
+```text
+python3 -m unittest \
+  tests.test_web_controls_static.WebControlsStaticTests.test_new_conversation_payload_is_source_clean_and_failure_preserves_state \
+  tests.test_web_controls_static.WebControlsStaticTests.test_source_workspace_callbacks_ignore_stale_conversation_or_document \
+  tests.test_resizable_panel_static.ResizablePanelContractTest.test_minimum_width_header_reflows_without_horizontal_clipping \
+  -v
+```
+
+Observed before implementation: all three tests failed for the intended missing source-clean branch, missing async identity guard, and missing two-row minimum-width header contract.
+
+### Implementation
+
+- `companionPayload('conversation_new', ...)` now removes `conversationId`, `sessionId`, `sourceIds`, and `sourceWorkspaceRevision`, and forces `followCurrentDocument = true`.
+- Successful conversation creation goes through `initializeNewConversationState()`, which clears old candidates/workspace state and initializes selection and follow state only from the returned new-conversation summary before current-document auto-selection runs.
+- A failed `conversation_new` callback does not call conversation/source-state initializers, preserving the active conversation and source selection.
+- All four source actions now use `postSourceWorkspace()`. Each dispatch captures a monotonically increasing token, `conversationId`, and `contextDocumentKey`; the callback returns before any mutation unless all three still match.
+- Conversation loads, document changes, and active-conversation deletion invalidate prior source requests and clear their in-flight send gate.
+- At `max-width: 520px`, the topbar now has stable `identity modes` and `actions actions` rows. The action row uses five equal `minmax(0, 1fr)` tracks across the 366px content width, with normal wrapping and no fixed 42px/46px buttons.
+
+### GREEN Evidence
+
+Final verification:
+
+```text
+python3 -m unittest tests.test_web_controls_static tests.test_resizable_panel_static -q
+Ran 140 tests in 0.274s
+OK
+
+node --check extension/codex.mn.assistant/web/app.js
+exit 0
+
+git diff --check
+exit 0
+```
+
+### Self-Review and Concerns
+
+- Confirmed stale source callbacks cannot mutate selection, count, rows, status, revision, or send eligibility because the guard runs before the action callback.
+- Confirmed the source-clean branch affects only `conversation_new`; direct and queued generation payloads retain their source snapshot contract.
+- Confirmed document-switch follow behavior is reapplied only after a clean new conversation exists: enabled follow replaces old current-document members, while disabled follow restores the explicit selection through a subsequent guarded workspace update.
+- No backend file was changed.
+- Live MarginNote WebView timing and visual interaction remain unverified in this static fix round.
