@@ -186,3 +186,111 @@ Static verification:
 
 - Queue file mutation retains the repository's existing single-process/no-lock assumption; this fix does not introduce a new queue concurrency model.
 - Model execution and Web UI integration remain intentionally outside Task 3.
+
+## Fix Round 2
+
+### Status and Commit
+
+Completed as `bf7d7af` (`Migrate owned legacy source workspaces`).
+
+Changed files:
+
+- `source_workspace.py`
+- `tests/test_source_workspace.py`
+- `tests/test_companion_controls.py`
+
+### Finding Addressed
+
+- Added a constrained compatibility resolver for the single pre-digest workspace path derived from the requested conversation ID.
+- Migration is attempted only when the digest path is absent. The legacy root must be a real directory and `manifest.json` must be a real regular file with `codex.mn.sourceWorkspace.v1` and an exact `conversationId` match.
+- An owned legacy workspace is moved atomically with `os.rename()` to the digest path. Ownership mismatch, unsafe filesystem types, invalid manifests, or a migration destination race fail closed and leave legacy content untouched.
+- `clear_workspace()` may remove the legacy directory only after the same exact ownership proof and the existing managed-entry audit.
+- New manifests now retain the original conversation ID instead of the sanitized display prefix, enabling exact future ownership checks.
+- Queue validation uses the migrated workspace, so a valid pre-upgrade queued command remains dispatchable and is not quarantined.
+
+### RED Evidence
+
+Command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace.SourceWorkspaceTests.test_valid_legacy_workspace_migrates_to_digest_path_without_touching_source tests.test_source_workspace.SourceWorkspaceTests.test_alias_cannot_migrate_or_clear_another_conversation_legacy_workspace tests.test_companion_controls.CompanionControlsTests.test_matching_queued_command_dispatches_after_legacy_workspace_migration -v
+```
+
+Output:
+
+```text
+Ran 3 tests in 0.180s
+
+FAILED (failures=3)
+```
+
+Observed failures:
+
+- Valid legacy load returned `workspace manifest is missing`.
+- Alias clear returned success without proving legacy ownership.
+- Polling rejected and quarantined the matching queued command because the digest workspace was missing.
+
+### GREEN Evidence
+
+Focused command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace.SourceWorkspaceTests.test_valid_legacy_workspace_migrates_to_digest_path_without_touching_source tests.test_source_workspace.SourceWorkspaceTests.test_alias_cannot_migrate_or_clear_another_conversation_legacy_workspace tests.test_companion_controls.CompanionControlsTests.test_matching_queued_command_dispatches_after_legacy_workspace_migration -v
+```
+
+Output:
+
+```text
+Ran 3 tests in 0.162s
+
+OK
+```
+
+Source-workspace module command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace -q
+```
+
+Output:
+
+```text
+----------------------------------------------------------------------
+Ran 13 tests in 0.026s
+
+OK
+```
+
+Full regression command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace tests.test_companion_controls -q
+```
+
+Output:
+
+```text
+----------------------------------------------------------------------
+Ran 257 tests in 180.829s
+
+OK
+```
+
+Static verification:
+
+- `git diff --check`: passed with no output.
+- In-memory `compile()` of the three changed Python files: `syntax ok`.
+
+### Self-Review
+
+- Confirmed no directory scan or broad fallback is used; only `<source-workspaces>/<safe-id>` is considered.
+- Confirmed path and manifest filesystem types are inspected without accepting symlink roots or symlink manifests.
+- Confirmed exact manifest ownership is checked before rename or legacy cleanup.
+- Confirmed alias load and clear both fail, leave the legacy directory intact, and do not create an alias digest workspace.
+- Confirmed authorized legacy cleanup removes managed workspace links but leaves original source targets and contents unchanged.
+- Confirmed queue polling returns the valid matching command with zero rejected records after migration.
+
+### Remaining Concerns
+
+- A pre-release legacy manifest whose conversation ID was itself altered by the old sanitizer cannot satisfy exact ownership proof. It is intentionally left untouched and must be rebuilt rather than adopted ambiguously.
+- The existing queue single-process/no-lock assumption remains unchanged.
