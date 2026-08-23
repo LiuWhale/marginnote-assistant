@@ -224,3 +224,97 @@ Static verification:
 - Task 5 must render `sourceUsage.diagnostics` and enforce `answerDerivedWritesEligible`; this round provides the authoritative backend fields but does not alter Web UI.
 - The parser continues to use the final `资料读取：` line, consistent with the Task 4 contract; earlier acknowledgement-like prose is ignored.
 - Live end-to-end Codex CLI workspace reading remains outside this unit-level fix round.
+
+## Fix Round 2
+
+### Status and Commit
+
+Completed as `6904b63` (`Require one source acknowledgement line`).
+
+Changed files:
+
+- `companion.py`
+- `tests/test_companion_controls.py`
+
+### Findings Addressed
+
+- Replaced final-line-only acknowledgement parsing with an exact cardinality contract over the entire model answer.
+- The parser now recognizes only lines beginning exactly with `资料读取：` and requires exactly one such line.
+- Zero matching lines emit `missing-acknowledgement-line`; more than one emits `multiple-acknowledgement-lines` with `lineCount`. Both states are incomplete and do not parse any line as authoritative.
+- The single acknowledgement line is split without filtering empty segments. Leading, doubled, and trailing semicolon delimiters emit `malformed-token` with an empty token and one-based `tokenIndex`.
+- Existing exact known-ID, duplicate, conflict, unknown-ID, malformed-status, and `read|unread` checks remain unchanged after the line/cardinality gate.
+- One valid exact acknowledgement line still yields complete source usage.
+- This supersedes the Fix Round 1 note that only the final acknowledgement line was parsed.
+
+### RED Evidence
+
+Command:
+
+```sh
+python3 -m unittest -v \
+  tests.test_companion_controls.CompanionControlsTests.test_source_usage_requires_exactly_one_acknowledgement_line \
+  tests.test_companion_controls.CompanionControlsTests.test_source_usage_rejects_empty_delimiter_tokens \
+  tests.test_companion_controls.CompanionControlsTests.test_source_usage_accepts_one_exact_acknowledgement_line
+```
+
+Output:
+
+```text
+Ran 3 tests in 0.414s
+
+FAILED (failures=5)
+```
+
+Observed failures matched the open findings:
+
+- An invalid earlier acknowledgement followed by a clean final line returned `complete=true`.
+- Two clean acknowledgement lines returned `complete=true`.
+- Leading, doubled, and trailing semicolon delimiters were silently filtered and returned `complete=true`.
+- The valid single-line control already passed, preserving the intended success case before implementation.
+
+### GREEN Evidence
+
+Focused Fix Round 2 command: the same 3 tests ran in 0.594 seconds and all passed.
+
+Combined Task 4 command, covering the original behavior plus Fix Rounds 1 and 2:
+
+```text
+Ran 17 tests in 3.672s
+
+OK
+```
+
+Full Companion regression command:
+
+```sh
+python3 -m unittest tests.test_companion_controls -q
+```
+
+Output:
+
+```text
+Ran 261 tests in 186.480s
+
+OK
+```
+
+Static verification:
+
+- `git diff --check`: passed with no output before the implementation commit.
+- In-memory AST parsing of `companion.py` and `tests/test_companion_controls.py`: `AST parse OK`.
+
+### Self-Review
+
+- Confirmed line counting covers the entire answer instead of selecting the last match.
+- Confirmed the exact `资料读取：` prefix is anchored at the start of a line; alternate indentation or punctuation cannot become authoritative accidentally.
+- Confirmed multiple lines are rejected before any entry is accepted, so a clean final line cannot mask earlier acknowledgement output.
+- Confirmed every delimiter segment is inspected and empty segments remain visible as structured malformed-token diagnostics.
+- Confirmed one exact valid line has no diagnostics and remains complete.
+- Confirmed no CLI execution, backend routing, retry, or single-document behavior changed in this round.
+- Confirmed the implementation commit contains only the two Task 4 code/test files.
+
+### Remaining Concerns
+
+- Task 5 must display the new line-count and empty-token diagnostics and continue enforcing `answerDerivedWritesEligible`.
+- The exact prefix is intentionally strict; model output using an indented prefix or ASCII colon is incomplete under this contract.
+- Live end-to-end Codex CLI workspace reading remains outside this parser-focused fix round.
