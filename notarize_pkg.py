@@ -11,7 +11,18 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PKG = ROOT / "release/CodexCompanion-0.4.0-latest.pkg"
+EXTENSION_MANIFEST = ROOT / "extension/codex.mn.assistant/mnaddon.json"
+
+
+def current_plugin_version() -> str:
+    try:
+        return str(json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return "0.4.53"
+
+
+CURRENT_PLUGIN_VERSION = current_plugin_version()
+DEFAULT_PKG = ROOT / f"release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest.pkg"
 
 
 def resolve_credentials(

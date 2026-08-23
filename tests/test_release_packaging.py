@@ -4,6 +4,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,72 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(module.DEFAULT_VERSION, manifest["version"])
         self.assertIn(f"-{manifest['version']}-", module.DEFAULT_ZIP.name)
         self.assertIn(f"-{manifest['version']}-", module.DEFAULT_OUTPUT.name)
+
+    def test_shipped_maintenance_helpers_and_readme_first_match_manifest_version(self) -> None:
+        manifest_version = str(
+            json.loads(
+                (PACKAGE_ROOT / "extension/codex.mn.assistant/mnaddon.json").read_text(encoding="utf-8")
+            )["version"]
+        )
+
+        def load_script(filename: str, module_name: str):
+            spec = importlib.util.spec_from_file_location(module_name, PACKAGE_ROOT / filename)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        def versions(value: str) -> list[str]:
+            return sorted(set(re.findall(r"\b\d+\.\d+\.\d+\b", value)))
+
+        release_smoke = load_script("release_smoke_test.py", "codex_mn_release_version_contract_smoke")
+        handoff = load_script("prepare_release_handoff.py", "codex_mn_release_version_contract_handoff")
+        single_document = load_script(
+            "single_document_acceptance.py", "codex_mn_release_version_contract_single_document"
+        )
+        notarize = load_script("notarize_pkg.py", "codex_mn_release_version_contract_notarize")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            zip_path = root / f"CodexCompanion-{manifest_version}-latest-dist.zip"
+            pkg_path = root / f"CodexCompanion-{manifest_version}-latest.pkg"
+            zip_path.write_bytes(b"zip")
+            pkg_path.write_bytes(b"pkg")
+            handoff_path = root / "HANDOFF.md"
+            handoff.write_handoff_markdown(
+                handoff_path,
+                package_zip=zip_path,
+                package_pkg=pkg_path,
+                acceptance_report={"releasable": False, "blockers": [], "warnings": []},
+                included_files=[zip_path.name, pkg_path.name],
+            )
+            generated_handoff_versions = versions(handoff_path.read_text(encoding="utf-8"))
+
+        readme_first_versions = versions((PACKAGE_ROOT / "README-FIRST.txt").read_text(encoding="utf-8"))
+        actual = {
+            "release_smoke_default_zip": versions(release_smoke.DEFAULT_PACKAGE.name),
+            "release_smoke_default_mnaddon": versions(release_smoke.DEFAULT_MNADDON.name),
+            "release_smoke_changelog_marker": versions(release_smoke.MARKERS["CHANGELOG.md"]),
+            "handoff_current_plugin": [handoff.CURRENT_PLUGIN_VERSION],
+            "handoff_default_zip": versions(handoff.DEFAULT_PACKAGE_ZIP.name),
+            "handoff_default_pkg": versions(handoff.DEFAULT_PACKAGE_PKG.name),
+            "handoff_generated_commands": generated_handoff_versions,
+            "single_document_current_plugin": [single_document.CURRENT_PLUGIN_VERSION],
+            "notarize_default_pkg": versions(notarize.DEFAULT_PKG.name),
+            "readme_first_commands": readme_first_versions,
+        }
+        expected = {key: [manifest_version] for key in actual}
+
+        self.assertEqual(actual, expected)
+
+    def test_0453_changelog_records_empty_conversation_persistence_fix(self) -> None:
+        changelog = (PACKAGE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        section = changelog.partition("## 0.4.53")[2].split("\n## ", 1)[0]
+
+        self.assertIn("conversation_new", section)
+        self.assertIn("zero-message", section)
+        self.assertIn("source workspace", section)
 
     def test_release_excludes_private_env_but_keeps_example_template(self) -> None:
         module = self.load_module()
@@ -610,7 +677,7 @@ class ReleasePackagingTests(unittest.TestCase):
             entries = {
                 "CodexCompanion-test/README.md": "Codex Companion for MarginNote 4\n",
                 "CodexCompanion-test/README.zh-CN.md": "语言: [English](README.md) | **简体中文**\n",
-                "CodexCompanion-test/CHANGELOG.md": "## 0.4.41 - 2026-07-02\n",
+                "CodexCompanion-test/CHANGELOG.md": module.MARKERS["CHANGELOG.md"] + "\n",
                 "CodexCompanion-test/LICENSE": "MIT License\n",
                 "CodexCompanion-test/assets/cover.png": b"\x89PNG\r\n\x1a\n",
                 "CodexCompanion-test/README-FIRST.txt": "Double-click: Install Codex Companion.command\n",

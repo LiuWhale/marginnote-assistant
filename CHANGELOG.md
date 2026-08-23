@@ -16,6 +16,10 @@ All notable changes to Codex Companion are documented here.
 - Multi-file requests now require Codex CLI and never fall back to the OpenAI API, which cannot read local workspace links.
 - Read sources are independent of the single validated MarginNote write target; managed workspace cleanup removes only Companion metadata and links, never selected originals.
 
+### Fixed
+
+- `conversation_new` now atomically persists its zero-message session before returning, so opening the source workspace after starting a new conversation no longer fails with `会话不存在`; a persistence failure leaves the current UI conversation unchanged.
+
 ## 0.4.52 - 2026-08-01
 
 ### Fixed

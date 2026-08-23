@@ -14,8 +14,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE = ROOT / "release/CodexCompanion-0.4.41-latest-dist.zip"
-DEFAULT_MNADDON = ROOT / "release/CodexCompanion-0.4.41-latest.mnaddon"
+EXTENSION_MANIFEST = ROOT / "extension/codex.mn.assistant/mnaddon.json"
+
+
+def current_plugin_version() -> str:
+    try:
+        return str(json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return "0.4.53"
+
+
+CURRENT_PLUGIN_VERSION = current_plugin_version()
+DEFAULT_PACKAGE = ROOT / f"release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest-dist.zip"
+DEFAULT_MNADDON = ROOT / f"release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest.mnaddon"
 
 REQUIRED_SUFFIXES = [
     "README.md",
@@ -76,7 +87,7 @@ PRIVATE_PARTS = (
 MARKERS = {
     "README.md": "Codex Companion for MarginNote 4",
     "README.zh-CN.md": "语言: [English](README.md) | **简体中文**",
-    "CHANGELOG.md": "## 0.4.41 - 2026-07-02",
+    "CHANGELOG.md": f"## {CURRENT_PLUGIN_VERSION} -",
     "LICENSE": "MIT License",
     "README-FIRST.txt": "Double-click: Install Codex Companion.command",
     "Install Codex Companion.command": "install.sh",

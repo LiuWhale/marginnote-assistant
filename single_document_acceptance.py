@@ -14,7 +14,17 @@ EVENTS_PATH = ROOT / "events.jsonl"
 DEFAULT_ACTION_RESULTS_PATH = ROOT / "release/evidence/action-results.jsonl"
 SCHEMA = "codex-companion-single-document-acceptance-v1"
 NATIVE_HIGHLIGHT_SCHEMA = "codex-companion-native-highlight-v1"
-CURRENT_PLUGIN_VERSION = "0.4.41"
+EXTENSION_MANIFEST = ROOT / "extension/codex.mn.assistant/mnaddon.json"
+
+
+def current_plugin_version() -> str:
+    try:
+        return str(json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return "0.4.53"
+
+
+CURRENT_PLUGIN_VERSION = current_plugin_version()
 NATIVE_HIGHLIGHT_EVIDENCE_PATTERNS = [
     "codex-companion-native-highlight-evidence-current.json",
     "codex-companion-native-highlight-evidence-*.json",

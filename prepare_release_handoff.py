@@ -15,12 +15,22 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_PACKAGE_ZIP = ROOT / "release/CodexCompanion-0.4.41-latest-dist.zip"
-DEFAULT_PACKAGE_PKG = ROOT / "release/CodexCompanion-0.4.41-latest.pkg"
+EXTENSION_MANIFEST = ROOT / "extension/codex.mn.assistant/mnaddon.json"
+
+
+def current_plugin_version() -> str:
+    try:
+        return str(json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return "0.4.53"
+
+
+CURRENT_PLUGIN_VERSION = current_plugin_version()
+DEFAULT_PACKAGE_ZIP = ROOT / f"release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest-dist.zip"
+DEFAULT_PACKAGE_PKG = ROOT / f"release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest.pkg"
 DEFAULT_OUTPUT_PARENT = ROOT / "release/handoff"
 DEFAULT_ONEDRIVE_PARENT = Path.home() / "Library/CloudStorage/OneDrive-个人/Codex Companion/Release Handoff"
 LIVE_EXTENSION = Path.home() / "Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant"
-CURRENT_PLUGIN_VERSION = "0.4.41"
 CROSS_MACHINE_EVIDENCE_SCHEMA = "codex-companion-cross-machine-install-v1"
 NATIVE_HIGHLIGHT_EVIDENCE_SCHEMA = "codex-companion-native-highlight-v1"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
@@ -583,15 +593,15 @@ def write_handoff_markdown(
             "Cross-machine install evidence:",
             "",
             "```bash",
-            "python3 release_acceptance.py ./CodexCompanion-0.4.41-latest-dist.zip --collect-cross-machine-evidence ./cross-machine-evidence.json",
+            f"python3 release_acceptance.py ./CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest-dist.zip --collect-cross-machine-evidence ./cross-machine-evidence.json",
             "python3 release_acceptance.py --cross-machine-evidence ./cross-machine-evidence.json",
             "```",
             "",
             "Signing and notarization:",
             "",
             "```bash",
-            "python3 build_pkg.py release/CodexCompanion-0.4.41-latest-dist.zip --auto-sign --json",
-            "python3 notarize_pkg.py release/CodexCompanion-0.4.41-latest.pkg --keychain-profile <profile> --json",
+            f"python3 build_pkg.py release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest-dist.zip --auto-sign --json",
+            f"python3 notarize_pkg.py release/CodexCompanion-{CURRENT_PLUGIN_VERSION}-latest.pkg --keychain-profile <profile> --json",
             "```",
             "",
         ]
