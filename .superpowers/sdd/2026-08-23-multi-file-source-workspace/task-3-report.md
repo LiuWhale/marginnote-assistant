@@ -294,3 +294,111 @@ Static verification:
 
 - A pre-release legacy manifest whose conversation ID was itself altered by the old sanitizer cannot satisfy exact ownership proof. It is intentionally left untouched and must be rebuilt rather than adopted ambiguously.
 - The existing queue single-process/no-lock assumption remains unchanged.
+
+## Fix Round 3
+
+### Status and Commit
+
+Completed as `0d426b2` (`Use ownership-proven legacy workspace fallback`).
+
+Changed files:
+
+- `source_workspace.py`
+- `tests/test_source_workspace.py`
+- `tests/test_companion_controls.py`
+
+### Finding Addressed
+
+- Removed overwrite-style legacy migration completely. Production fallback no longer calls `os.rename()` or moves a legacy workspace onto a digest destination.
+- When the digest path is absent, reads may use only the exact sanitized legacy path after schema and original-conversation ownership proof.
+- `load_workspace()` and `validate_workspace()` now return and use the actual resolved `workspacePath`, allowing queue validation and later CLI consumers to operate on an owned legacy workspace in place.
+- A digest destination present before fallback is used as the authoritative path and is never replaced. A digest destination appearing during ownership proof causes fallback to fail closed without mutating either directory.
+- Ordinary builds target only the digest path and may create it later; they do not move or adopt legacy storage.
+- `clear_workspace()` audits exact manifest ownership and managed structure for every existing digest and legacy directory before deleting either.
+
+### RED Evidence
+
+Command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace.SourceWorkspaceTests.test_valid_legacy_workspace_falls_back_without_touching_source_or_digest_path tests.test_source_workspace.SourceWorkspaceTests.test_preexisting_digest_destination_is_never_replaced_by_legacy_fallback tests.test_source_workspace.SourceWorkspaceTests.test_destination_appearing_during_fallback_is_never_replaced tests.test_source_workspace.SourceWorkspaceTests.test_legacy_fallback_never_invokes_overwrite_capable_rename tests.test_source_workspace.SourceWorkspaceTests.test_alias_cannot_migrate_or_clear_another_conversation_legacy_workspace tests.test_companion_controls.CompanionControlsTests.test_matching_queued_command_dispatches_from_owned_legacy_workspace_fallback -v
+```
+
+Output:
+
+```text
+Ran 6 tests in 0.184s
+
+FAILED (failures=1, errors=2)
+```
+
+Observed failures:
+
+- Valid legacy load and queue validation omitted the actual `workspacePath`.
+- The overwrite-capable `os.rename()` hook was invoked and replaced the injected empty destination inode.
+- Pre-existing destination, during-proof destination, and alias-denial checks already failed closed and remained as compatibility guards.
+
+### GREEN Evidence
+
+Focused command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace.SourceWorkspaceTests.test_valid_legacy_workspace_falls_back_without_touching_source_or_digest_path tests.test_source_workspace.SourceWorkspaceTests.test_preexisting_digest_destination_is_never_replaced_by_legacy_fallback tests.test_source_workspace.SourceWorkspaceTests.test_destination_appearing_during_fallback_is_never_replaced tests.test_source_workspace.SourceWorkspaceTests.test_legacy_fallback_never_invokes_overwrite_capable_rename tests.test_source_workspace.SourceWorkspaceTests.test_alias_cannot_migrate_or_clear_another_conversation_legacy_workspace tests.test_companion_controls.CompanionControlsTests.test_matching_queued_command_dispatches_from_owned_legacy_workspace_fallback -v
+```
+
+Output:
+
+```text
+Ran 6 tests in 0.194s
+
+OK
+```
+
+Source-workspace module command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace -q
+```
+
+Output:
+
+```text
+----------------------------------------------------------------------
+Ran 16 tests in 0.035s
+
+OK
+```
+
+Full regression command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_source_workspace tests.test_companion_controls -q
+```
+
+Output:
+
+```text
+----------------------------------------------------------------------
+Ran 260 tests in 181.757s
+
+OK
+```
+
+Static verification:
+
+- `git diff --check`: passed with no output.
+- In-memory `compile()` of the three changed Python files: `syntax ok`.
+
+### Self-Review
+
+- Confirmed no production legacy fallback path invokes `os.rename()`, `os.replace()`, or another destination-writing operation.
+- Confirmed pre-existing and during-proof digest destination inodes and marker contents remain unchanged.
+- Confirmed valid legacy load and validation report the sanitized legacy path while leaving the digest path absent.
+- Confirmed the matching queued command dispatches with zero rejections from the in-place legacy workspace.
+- Confirmed alias load and clear remain denied by exact manifest ownership.
+- Confirmed authorized cleanup audits every existing workspace before deletion and preserves original source targets.
+
+### Remaining Concerns
+
+- Legacy manifests whose stored conversation ID was altered by the old sanitizer still cannot pass exact ownership proof and require rebuild.
+- Queue file locking remains outside this fix; the existing single-process assumption is unchanged.
