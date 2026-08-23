@@ -5686,6 +5686,133 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(axis_by_id["source_inventory"]["action"]["action"], "open_source_registry")
             self.assertEqual(axis_by_id["source_inventory"]["action"]["surface"], "source_registry")
 
+    def test_source_workspace_candidates_include_only_resolvable_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            explicit_pdf = root / "explicit.pdf"
+            available_pdf = root / "available.pdf"
+            cached_pdf = root / "uploads" / "pdf-cache" / "current.pdf"
+            upload_path = root / "uploads" / "notes.md"
+            for path in [explicit_pdf, available_pdf, cached_pdf]:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"%PDF-1.4\n")
+            upload_path.parent.mkdir(parents=True, exist_ok=True)
+            upload_path.write_text("uploaded notes", encoding="utf-8")
+            companion.save_uploaded_files(
+                [
+                    {
+                        "id": "uploaded-notes",
+                        "name": "notes.md",
+                        "path": str(upload_path),
+                        "size": upload_path.stat().st_size,
+                    },
+                    {"id": "missing-upload", "name": "missing.md", "path": str(root / "missing.md")},
+                ]
+            )
+            companion.save_pdf_cache_index(
+                {
+                    "CURRENT": {
+                        "bookmd5": "CURRENT",
+                        "documentTitle": "Current.pdf",
+                        "path": str(cached_pdf),
+                        "sha256": companion.sha256_file(cached_pdf),
+                        "size": cached_pdf.stat().st_size,
+                    },
+                    "CACHED-DOCUMENT": {
+                        "bookmd5": "CACHED-DOCUMENT",
+                        "documentTitle": "Cache only.pdf",
+                        "path": str(cached_pdf),
+                        "sha256": companion.sha256_file(cached_pdf),
+                        "size": cached_pdf.stat().st_size,
+                    },
+                }
+            )
+
+            result = companion.source_workspace_candidates(
+                {
+                    "topicid": "TOPIC",
+                    "bookmd5": "CURRENT",
+                    "documentTitle": "Current.pdf",
+                    "pdfPath": str(explicit_pdf),
+                    "availableDocuments": [
+                        {"id": "available", "bookmd5": "AVAILABLE", "title": "Available.pdf", "path": str(available_pdf)},
+                        {"id": "cached", "bookmd5": "CACHED-DOCUMENT", "title": "Cache only.pdf", "path": str(root / "missing.pdf")},
+                        {"id": "missing", "bookmd5": "MISSING", "title": "Missing.pdf", "path": str(root / "missing.pdf")},
+                    ],
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["schema"], "codex.mn.sourceWorkspaceCandidates.v1")
+            self.assertEqual(result["sourceCount"], len(result["sources"]))
+            titles = {item["title"] for item in result["sources"]}
+            self.assertIn("notes.md", titles)
+            self.assertIn("explicit.pdf", titles)
+            self.assertIn("Available.pdf", titles)
+            self.assertIn("Cache only.pdf", titles)
+            self.assertNotIn("Missing.pdf", titles)
+            self.assertTrue(all(Path(item["path"]).is_file() for item in result["sources"]))
+            self.assertTrue(all(item["id"] == companion.source_registry.stable_source_id(item["kind"], item["identity"]) for item in result["sources"]))
+
+    def test_source_text_artifact_reuses_page_aware_pdf_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source_path = root / "paper.pdf"
+            source_path.write_bytes(b"%PDF-1.4\n")
+            source = {
+                "id": "marginnote_pdf:abc",
+                "kind": "marginnote_pdf",
+                "title": "Paper.pdf",
+                "path": str(source_path),
+                "sha256": companion.sha256_file(source_path),
+                "bookmd5": "BOOK-1",
+            }
+            calls: list[dict[str, Any]] = []
+            old = companion.ensure_pdf_text_cache
+            companion.ensure_pdf_text_cache = lambda payload: (
+                calls.append(payload)
+                or (
+                    {
+                        "pageCount": 2,
+                        "chunks": [
+                            {"page": 1, "start": 0, "end": 5, "text": "first"},
+                            {"page": 2, "start": 0, "end": 6, "text": "second"},
+                        ],
+                    },
+                    None,
+                )
+            )
+            try:
+                artifact = companion.source_text_artifact(source)
+            finally:
+                companion.ensure_pdf_text_cache = old
+
+            self.assertEqual(Path(calls[0]["pdfPath"]), source_path.resolve())
+            self.assertEqual(calls[0]["bookmd5"], "BOOK-1")
+            self.assertEqual(artifact["pageCount"], 2)
+            self.assertFalse(artifact["truncated"])
+            self.assertEqual(artifact["error"], "")
+            text_path = Path(artifact["textPath"])
+            self.assertTrue(text_path.is_file())
+            self.assertIn("[第1页]", text_path.read_text(encoding="utf-8"))
+            self.assertIn("[第2页]", text_path.read_text(encoding="utf-8"))
+
+    def test_source_text_artifact_reuses_utf8_text_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source_path = root / "notes.md"
+            source_path.write_text("notes", encoding="utf-8")
+
+            artifact = companion.source_text_artifact(
+                {"id": "upload:notes", "kind": "upload", "title": "notes.md", "path": str(source_path)}
+            )
+
+            self.assertEqual(Path(artifact["textPath"]), source_path.resolve())
+            self.assertEqual(artifact["error"], "")
+
     def test_notebook_study_program_does_not_treat_missing_upload_as_readable_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

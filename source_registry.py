@@ -90,11 +90,25 @@ def _path_title(path: Any, fallback: str) -> str:
     return Path(text).name or text
 
 
+def stable_source_id(kind: str, identity: str) -> str:
+    digest = hashlib.sha256(f"{kind}|{identity}".encode("utf-8")).hexdigest()[:20]
+    return f"{kind}:{digest}"
+
+
+def _canonical_path_identity(path: str) -> str:
+    if not path:
+        return ""
+    try:
+        return str(Path(path).expanduser().resolve(strict=False))
+    except (OSError, RuntimeError):
+        return str(Path(path).expanduser())
+
+
 def _source_from_cache(item: dict[str, Any], index: int) -> dict[str, Any]:
     path = _clean(item.get("path") or item.get("cachePath") or item.get("pdfPath"), 900)
     readable = bool(item.get("readable") or item.get("ok"))
     return _source(
-        f"pdf-cache:{index}",
+        stable_source_id("pdf_cache", _canonical_path_identity(path) or _clean(item.get("sha256"), 160) or _path_title(path, "缓存 PDF")),
         "pdf_cache",
         _path_title(path, "缓存 PDF"),
         path=path,
@@ -124,7 +138,7 @@ def _source_from_path(item: Any, index: int, kind: str, evidence: str) -> dict[s
         detail = ""
         metadata = {}
     return _source(
-        f"{kind}:{index}",
+        stable_source_id(kind, _canonical_path_identity(path) or _path_title(path, kind)),
         kind,
         _path_title(path, kind),
         path=path,
@@ -212,7 +226,7 @@ def build_registry(
     mn_document_source: dict[str, Any] = {}
     if topicid or bookmd5 or document_title:
         mn_document_source = _source(
-            f"mn-document:{topicid or 'topic'}:{bookmd5 or 'book'}",
+            stable_source_id("mn_document", f"{topicid}|{bookmd5}|{document_title}"),
             "mn_document",
             document_title or bookmd5 or topicid or "当前 MN 文档",
             readable=False,

@@ -39,6 +39,7 @@ import object_kernel
 import object_task_composer
 import operation_runtime
 import source_registry
+import source_workspace
 import skill_marketplace
 import transaction_manager
 import verification_agent
@@ -96,6 +97,7 @@ STOP_PATH = CONTROL_DIR / "stop.json"
 WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 MINDMAP_TARGETS_PATH = CONTROL_DIR / "mindmap-targets.json"
+SOURCE_TEXT_DIR = CONTROL_DIR / "source-text"
 MINDMAP_TREES_DIR = CONTROL_DIR / "mindmap-trees"
 NOTEBOOK_RUNBOOK_PREFLIGHT_RUNS_PATH = CONTROL_DIR / "notebook-runbook-preflight-runs.json"
 OBJECT_GRAPH_RELATIONS_PATH = ROOT / "object-graph-relations.json"
@@ -368,6 +370,7 @@ external_gateway.configure(ROOT)
 knowledge_index.configure(ROOT)
 object_kernel.configure(ROOT)
 source_registry.configure(ROOT)
+source_workspace.configure(ROOT)
 skill_marketplace.configure(ROOT)
 transaction_manager.configure(ROOT)
 workflow_engine.configure(ROOT)
@@ -2166,6 +2169,254 @@ def source_registry_file_status(path: Path) -> dict[str, Any]:
         "status": "MISSING",
         "message": "path does not exist",
     }
+
+
+def source_workspace_canonical_file(raw_path: Any) -> Path | None:
+    text = str(raw_path or "").strip()
+    if not text:
+        return None
+    try:
+        path = pdf_path_from_raw_value(text).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    try:
+        if not path.is_file() or not os.access(path, os.R_OK):
+            return None
+    except OSError:
+        return None
+    return path
+
+
+def source_workspace_candidate(
+    *,
+    kind: str,
+    identity: str,
+    title: str,
+    path: Path,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    canonical = source_workspace_canonical_file(path)
+    if canonical is None:
+        return None
+    try:
+        source_sha = sha256_file(canonical)
+    except OSError:
+        return None
+    return {
+        "id": source_registry.stable_source_id(kind, identity),
+        "identity": identity,
+        "title": str(title or canonical.name),
+        "kind": kind,
+        "path": str(canonical),
+        "sha256": source_sha,
+        "readable": True,
+        "metadata": metadata if isinstance(metadata, dict) else {},
+    }
+
+
+def source_workspace_selected_search_paths(payload: dict[str, Any]) -> list[Path]:
+    values: list[Any] = []
+    for key in ("selectedSearchPaths", "searchResultPaths", "fileSearchResults"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            values.extend(value)
+    configured_roots: list[Path] = []
+    for root in configured_extra_pdf_roots():
+        try:
+            configured_roots.append(root.resolve(strict=True))
+        except (OSError, RuntimeError):
+            continue
+    selected: list[Path] = []
+    for value in values:
+        path = source_workspace_canonical_file(value)
+        if path is None:
+            continue
+        try:
+            if not any(path.is_relative_to(root) for root in configured_roots):
+                continue
+        except AttributeError:
+            if not any(str(path).startswith(f"{root}{os.sep}") for root in configured_roots):
+                continue
+        if path not in selected:
+            selected.append(path)
+    return selected
+
+
+def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    sources: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def add(candidate: dict[str, Any] | None) -> None:
+        if candidate is None or candidate["id"] in seen_ids:
+            return
+        seen_ids.add(candidate["id"])
+        sources.append(candidate)
+
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    document_title = str(payload.get("documentTitle") or payload.get("documentFileName") or "").strip()
+
+    cache_access = pdf_cache_access_status(book_md5, payload)
+    cache_path = source_workspace_canonical_file(cache_access.get("path"))
+    if cache_path is not None:
+        add(
+            source_workspace_candidate(
+                kind="pdf_cache",
+                identity=str(cache_path),
+                title=document_title or cache_path.name,
+                path=cache_path,
+                metadata={
+                    "topicid": topic_id,
+                    "bookmd5": book_md5,
+                    "sourcePdf": str(cache_access.get("sourcePdf") or ""),
+                    "cachePath": str(cache_path),
+                },
+            )
+        )
+
+    for key in ("pdfPath", "documentPath", "sourcePdfPath"):
+        path = source_workspace_canonical_file(payload.get(key))
+        if path is not None:
+            add(
+                source_workspace_candidate(
+                    kind="explicit_pdf",
+                    identity=str(path),
+                    title=path.name,
+                    path=path,
+                    metadata={"topicid": topic_id, "bookmd5": book_md5, "payloadKey": key},
+                )
+            )
+
+    for item in uploaded_files():
+        path = source_workspace_canonical_file(item.get("path"))
+        if path is not None:
+            add(
+                source_workspace_candidate(
+                    kind="upload",
+                    identity=str(path),
+                    title=str(item.get("name") or path.name),
+                    path=path,
+                    metadata={"uploadId": str(item.get("id") or "")},
+                )
+            )
+
+    documents = payload.get("availableDocuments")
+    if not isinstance(documents, list):
+        documents = []
+    for descriptor in documents:
+        if not isinstance(descriptor, dict):
+            continue
+        descriptor_book_md5 = str(descriptor.get("bookmd5") or descriptor.get("docmd5") or descriptor.get("id") or "").strip()
+        descriptor_title = str(
+            descriptor.get("title") or descriptor.get("documentTitle") or descriptor.get("documentFileName") or ""
+        ).strip()
+        path = source_workspace_canonical_file(
+            descriptor.get("path") or descriptor.get("pdfPath") or descriptor.get("documentPath")
+        )
+        cache_access: dict[str, Any] = {}
+        if path is None and descriptor_book_md5:
+            cache_payload = {
+                "topicid": topic_id,
+                "bookmd5": descriptor_book_md5,
+                "docmd5": descriptor_book_md5,
+                "documentTitle": descriptor_title,
+                "documentFileName": descriptor_title,
+                "contextDocumentKey": str(descriptor.get("contextDocumentKey") or ""),
+            }
+            cache_access = pdf_cache_access_status(descriptor_book_md5, cache_payload)
+            path = source_workspace_canonical_file(cache_access.get("path"))
+        if path is None:
+            continue
+        title = descriptor_title or path.name
+        identity = f"{topic_id}|{descriptor_book_md5}|{title}"
+        add(
+            source_workspace_candidate(
+                kind="marginnote_pdf",
+                identity=identity,
+                title=title,
+                path=path,
+                metadata={
+                    "topicid": topic_id,
+                    "bookmd5": descriptor_book_md5,
+                    "documentId": str(descriptor.get("id") or ""),
+                    "sourcePath": str(descriptor.get("path") or ""),
+                    "cachePath": str(cache_access.get("path") or ""),
+                },
+            )
+        )
+
+    for path in source_workspace_selected_search_paths(payload):
+        add(
+            source_workspace_candidate(
+                kind="search_result",
+                identity=str(path),
+                title=path.name,
+                path=path,
+                metadata={"searchRootSelected": True},
+            )
+        )
+
+    return {
+        "ok": True,
+        "schema": "codex.mn.sourceWorkspaceCandidates.v1",
+        "sources": sources,
+        "sourceCount": len(sources),
+    }
+
+
+def source_text_artifact(source: dict[str, Any]) -> dict[str, Any]:
+    source = source if isinstance(source, dict) else {}
+    path = source_workspace_canonical_file(source.get("path"))
+    result = {"textPath": "", "pageCount": None, "truncated": False, "error": ""}
+    if path is None:
+        result["error"] = "source path is not a readable regular file"
+        return result
+    if path.suffix.lower() != ".pdf":
+        try:
+            path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            result["error"] = "source is not UTF-8 text"
+            return result
+        result["textPath"] = str(path)
+        return result
+
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    book_md5 = str(source.get("bookmd5") or metadata.get("bookmd5") or "").strip()
+    title = str(source.get("title") or path.name).strip()
+    record, error_message = ensure_pdf_text_cache(
+        {
+            "pdfPath": str(path),
+            "documentPath": str(path),
+            "sourcePdfPath": str(path),
+            "bookmd5": book_md5,
+            "docmd5": book_md5,
+            "documentTitle": title,
+            "documentFileName": title,
+        }
+    )
+    if not isinstance(record, dict):
+        result["error"] = str(error_message or "PDF text extraction failed")
+        return result
+    text = full_document_context_from_cache(record)
+    if not text:
+        result["error"] = "PDF text extraction returned no readable text"
+        return result
+    source_id = re.sub(r"[^A-Za-z0-9._:-]+", "_", str(source.get("id") or "source"))[:160] or "source"
+    source_sha = str(record.get("sourceSha256") or source.get("sha256") or sha256_file(path))
+    source_sha = re.sub(r"[^A-Fa-f0-9]+", "", source_sha)[:64] or "unknown"
+    artifact_path = SOURCE_TEXT_DIR / f"{source_id}-{source_sha}.txt"
+    SOURCE_TEXT_DIR.mkdir(parents=True, exist_ok=True)
+    if not artifact_path.is_file() or artifact_path.read_text(encoding="utf-8") != text:
+        artifact_path.write_text(text, encoding="utf-8")
+    result.update(
+        {
+            "textPath": str(artifact_path),
+            "pageCount": record.get("pageCount"),
+            "truncated": text.startswith("当前文档全文（因输入长度限制截断）："),
+        }
+    )
+    return result
 
 
 def notebook_source_registry_actions(

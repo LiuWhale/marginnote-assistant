@@ -8,7 +8,12 @@ import source_registry
 class SourceRegistryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        source_registry.configure(Path(self.tmp.name))
+        self.root = Path(self.tmp.name)
+        source_registry.configure(self.root)
+        self.path_a = self.root / "first.pdf"
+        self.path_b = self.root / "second.pdf"
+        self.path_a.write_bytes(b"first")
+        self.path_b.write_bytes(b"second")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -41,6 +46,19 @@ class SourceRegistryTests(unittest.TestCase):
         self.assertEqual(registry["sources"][0]["kind"], "pdf_cache")
         self.assertEqual(registry["sources"][0]["metadata"]["sha256"], "abc")
         self.assertEqual(registry["gaps"], [])
+
+    def test_registry_source_id_is_stable_when_list_order_changes(self):
+        first = source_registry.build_registry({}, explicit_paths=[self.path_a, self.path_b])
+        second = source_registry.build_registry({}, explicit_paths=[self.path_b, self.path_a])
+
+        by_path_first = {item["path"]: item["id"] for item in first["sources"] if item.get("path")}
+        by_path_second = {item["path"]: item["id"] for item in second["sources"] if item.get("path")}
+
+        self.assertEqual(by_path_first, by_path_second)
+        self.assertEqual(
+            source_registry.stable_source_id("mn_document", "T1|B1|Paper.pdf"),
+            source_registry.stable_source_id("mn_document", "T1|B1|Paper.pdf"),
+        )
 
     def test_records_source_action_lifecycle_and_latest_run(self):
         run = source_registry.record_action_run(
