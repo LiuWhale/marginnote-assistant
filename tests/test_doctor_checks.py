@@ -10,6 +10,9 @@ import unittest
 import zipfile
 from pathlib import Path
 from typing import Any
+from unittest import mock
+
+from companion_url_security import TokenStrippingRedirectHandler, open_json_request
 
 
 DOCTOR_PATH = Path(__file__).resolve().parents[1] / "doctor.py"
@@ -25,6 +28,96 @@ def load_doctor() -> Any:
 
 
 class DoctorNativeApiChecks(unittest.TestCase):
+    def test_http_action_json_attaches_token_only_to_exact_loopback_companion_urls(self) -> None:
+        doctor = load_doctor()
+        token = "d" * 64
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"ok": true}'
+
+        cases = {
+            "http://127.0.0.1:48761": True,
+            "http://localhost:48761": True,
+            "http://[::1]:48761": True,
+            "https://127.0.0.1:48761": False,
+            "http://127.0.0.1.evil.test:48761": False,
+            "http://user@127.0.0.1:48761": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            token_path = Path(tmp) / "web-action-token"
+            token_path.write_text(token, encoding="ascii")
+            doctor.ACTION_TOKEN_PATH = token_path
+            for base_url, expects_token in cases.items():
+                with self.subTest(base_url=base_url):
+                    captured: dict[str, Any] = {}
+
+                    def fake_open(req, timeout=0):
+                        captured["request"] = req
+                        return Response()
+
+                    doctor.COMPANION_URL = base_url
+                    with (
+                        mock.patch.object(doctor, "open_json_request", side_effect=fake_open, create=True),
+                        mock.patch.object(doctor.request, "urlopen", side_effect=fake_open),
+                    ):
+                        result = doctor.http_action_json({"action": "health"})
+
+                    self.assertEqual(result, {"ok": True})
+                    headers = {key.lower(): value for key, value in captured["request"].header_items()}
+                    self.assertEqual("x-codex-action-token" in headers, expects_token)
+
+    def test_http_action_json_allows_custom_url_without_reading_token(self) -> None:
+        doctor = load_doctor()
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"ok": true}'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            doctor.COMPANION_URL = "http://127.0.0.1.evil.test:48761"
+            doctor.ACTION_TOKEN_PATH = Path(tmp) / "missing-token"
+            with (
+                mock.patch.object(doctor, "open_json_request", return_value=Response(), create=True),
+                mock.patch.object(doctor.request, "urlopen", return_value=Response()),
+            ):
+                self.assertEqual(doctor.http_action_json({"action": "health"}), {"ok": True})
+
+    def test_http_action_json_uses_shared_redirect_safe_opener(self) -> None:
+        doctor = load_doctor()
+        self.assertIs(doctor.open_json_request, open_json_request)
+
+        initial = doctor.request.Request(
+            "http://127.0.0.1:48761/marginnote/action",
+            data=b"{}",
+            headers={"X-Codex-Action-Token": "d" * 64},
+            method="POST",
+        )
+        redirected = TokenStrippingRedirectHandler().redirect_request(
+            initial,
+            None,
+            302,
+            "Found",
+            {},
+            "https://remote.example.test/marginnote/action",
+        )
+
+        self.assertIsNotNone(redirected)
+        headers = {key.lower(): value for key, value in redirected.header_items()}
+        self.assertNotIn("x-codex-action-token", headers)
+
     def test_required_native_handler_features_cover_v2_object_workbench_actions(self) -> None:
         doctor = load_doctor()
 

@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from urllib import request
 
+from companion_url_security import ACTION_TOKEN_HEADER, is_local_companion_url, open_json_request
+
 
 HOME = Path.home()
 ROOT = Path(os.environ.get("CODEX_MN_COMPANION_HOME", HOME / ".codex/marginnote-assistant")).expanduser()
@@ -308,20 +310,22 @@ def http_json(path: str, timeout: float = 5) -> dict[str, Any] | None:
 def http_action_json(payload: dict[str, Any], timeout: float = 8) -> dict[str, Any] | None:
     try:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
-        if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
-            return None
+        url = COMPANION_URL + "/marginnote/action"
         req = request.Request(
-            COMPANION_URL + "/marginnote/action",
+            url,
             data=data,
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "X-Codex-Action-Token": token,
             },
             method="POST",
         )
-        with request.urlopen(req, timeout=timeout) as resp:
+        if is_local_companion_url(url):
+            token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
+            if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+                return None
+            req.add_unredirected_header(ACTION_TOKEN_HEADER, token)
+        with open_json_request(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None

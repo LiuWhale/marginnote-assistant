@@ -10,6 +10,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from companion_url_security import ACTION_TOKEN_HEADER, is_local_companion_url, open_json_request
+
 
 HOME = Path.home()
 ROOT = Path(os.environ.get("CODEX_MN_COMPANION_HOME", HOME / ".codex/marginnote-assistant")).expanduser()
@@ -59,15 +61,17 @@ def current_mn_context() -> tuple[str, str]:
 def http_json(method: str, path: str, payload: dict | None = None, timeout: float = 8) -> dict:
     data = None
     headers = {"Accept": "application/json"}
+    url = COMPANION + path
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    if payload is not None and is_local_companion_url(url):
         token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
         if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
             raise RuntimeError("Companion Web action token is missing or invalid")
-        headers["X-Codex-Action-Token"] = token
-    req = urllib.request.Request(COMPANION + path, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        req.add_unredirected_header(ACTION_TOKEN_HEADER, token)
+    with open_json_request(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 

@@ -41,6 +41,24 @@ class ReleasePackagingTests(unittest.TestCase):
 
         self.assertIn("companion_url_security.py", package_release.ROOT_FILES)
         self.assertIn("companion_url_security.py", release_smoke.REQUIRED_SUFFIXES)
+        self.assertIn("companion/companion_url_security.py", release_smoke.REQUIRED_SUFFIXES)
+
+        for client in (
+            "send_action.py",
+            "refresh_mn_runtime.py",
+            "release_acceptance.py",
+            "doctor.py",
+            "verify_after_unlock.py",
+        ):
+            with self.subTest(client=client):
+                source = (PROJECT_ROOT / client).read_text(encoding="utf-8")
+                self.assertIn("from companion_url_security import", source)
+                self.assertNotIn(client, package_release.COMPANION_EXCLUDES)
+                self.assertIn(f"companion/{client}", release_smoke.REQUIRED_SUFFIXES)
+                self.assertEqual(
+                    release_smoke.MARKERS[f"companion/{client}"],
+                    "from companion_url_security import",
+                )
 
     def test_pkg_builder_default_version_matches_extension_manifest(self) -> None:
         spec = importlib.util.spec_from_file_location("codex_mn_build_pkg_version", PKG_BUILDER_PATH)
@@ -839,8 +857,12 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexCompanion-test/companion/diagnostic_log.py": "SENSITIVE_LOG_KEYS\n",
                 "CodexCompanion-test/companion/runtime_config.py": "DEFAULT_RUNTIME_SETTINGS = {}\n",
                 "CodexCompanion-test/companion/source_workspace.py": "SOURCE_WORKSPACE_SCHEMA = 'test'\n",
-                "CodexCompanion-test/companion/doctor.py": "installable clean zip\n",
-                "CodexCompanion-test/companion/refresh_mn_runtime.py": "MNRuntimeEvidence\n",
+                "CodexCompanion-test/companion/companion_url_security.py": "ACTION_TOKEN_HEADER = 'X-Codex-Action-Token'\n",
+                "CodexCompanion-test/companion/send_action.py": "from companion_url_security import ACTION_TOKEN_HEADER\n",
+                "CodexCompanion-test/companion/refresh_mn_runtime.py": "from companion_url_security import ACTION_TOKEN_HEADER\n",
+                "CodexCompanion-test/companion/release_acceptance.py": "from companion_url_security import ACTION_TOKEN_HEADER\n",
+                "CodexCompanion-test/companion/doctor.py": "from companion_url_security import ACTION_TOKEN_HEADER\n",
+                "CodexCompanion-test/companion/verify_after_unlock.py": "from companion_url_security import ACTION_TOKEN_HEADER\n",
                 "CodexCompanion-test/companion/install_companion.sh": "LEGACY_LABEL=\"com.liuwhale.codex-marginnote-assistant\"\n",
                 "CodexCompanion-test/companion/install_extension.sh": "#!/bin/zsh\n",
                 "CodexCompanion-test/extension/codex.mn.assistant/main.js": "appendSelectionPopupMenuActions\n",
