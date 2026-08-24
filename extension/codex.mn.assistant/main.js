@@ -3855,10 +3855,14 @@ JSB.newAddon = function(mainPath) {
     var objectRef = aiEditObjectRefFromDraft(json);
     var draftSummary = valueOf(json, 'draft') || {};
     var queueId = safeString(valueOf(json, 'queueId') || valueOf(draftSummary, 'queueId'));
+    var queueConfirmation = valueOf(json, 'queueConfirmation') || valueOf(draftSummary, 'queueConfirmation') || {};
     var transaction = {
       transactionId: 'ai-edit-' + now + '-' + String(Math.random()).substring(2, 8),
       draftId: safeString(draftId),
       queueId: queueId,
+      sessionId: safeString(valueOf(queueConfirmation, 'sessionId')),
+      sessionEpoch: safeString(valueOf(queueConfirmation, 'sessionEpoch')),
+      contextDocumentKey: safeString(valueOf(queueConfirmation, 'contextDocumentKey')),
       topicid: '',
       objectRef: objectRef,
       createdNotes: [],
@@ -3878,6 +3882,9 @@ JSB.newAddon = function(mainPath) {
       transactionId: transaction.transactionId,
       draftId: transaction.draftId,
       queueId: transaction.queueId,
+      sessionId: transaction.sessionId,
+      sessionEpoch: transaction.sessionEpoch,
+      contextDocumentKey: transaction.contextDocumentKey,
       topicid: transaction.topicid,
       hasMindmap: valueOf(json, 'mindmap') ? true : false,
       cards: countOf(valueOf(json, 'cards'))
@@ -3922,6 +3929,9 @@ JSB.newAddon = function(mainPath) {
       id: transaction.draftId,
       draftId: transaction.draftId,
       queueId: transaction.queueId,
+      sessionId: transaction.sessionId,
+      sessionEpoch: transaction.sessionEpoch,
+      contextDocumentKey: transaction.contextDocumentKey,
       transactionId: transaction.transactionId,
       createdCount: transaction.createdNoteIds.length,
       createdNoteIds: transaction.createdNoteIds,
@@ -3962,6 +3972,9 @@ JSB.newAddon = function(mainPath) {
         transactionId: transactionId,
         draftId: transaction ? transaction.draftId : safeString(valueOf(fallback, 'draftId')),
         queueId: transaction ? transaction.queueId : safeString(valueOf(fallback, 'queueId')),
+        sessionId: transaction ? transaction.sessionId : safeString(valueOf(fallback, 'sessionId')),
+        sessionEpoch: transaction ? transaction.sessionEpoch : safeString(valueOf(fallback, 'sessionEpoch')),
+        contextDocumentKey: transaction ? transaction.contextDocumentKey : safeString(valueOf(fallback, 'contextDocumentKey')),
         status: 'partial_failed',
         message: '写入未完整完成，仅可拒绝并回滚。'
       }, acceptedObjectRef);
@@ -3978,6 +3991,9 @@ JSB.newAddon = function(mainPath) {
       transactionId: transactionId,
       draftId: transaction ? transaction.draftId : safeString(valueOf(fallback, 'draftId')),
       queueId: transaction ? transaction.queueId : safeString(valueOf(fallback, 'queueId')),
+      sessionId: transaction ? transaction.sessionId : safeString(valueOf(fallback, 'sessionId')),
+      sessionEpoch: transaction ? transaction.sessionEpoch : safeString(valueOf(fallback, 'sessionEpoch')),
+      contextDocumentKey: transaction ? transaction.contextDocumentKey : safeString(valueOf(fallback, 'contextDocumentKey')),
       message: '已保留本次 AI 编辑结果。'
     }, acceptedObjectRef);
     this.postEvent('aiEditTransactionAccepted', payload);
@@ -4087,6 +4103,9 @@ JSB.newAddon = function(mainPath) {
       transactionId: transactionId,
       draftId: transaction.draftId,
       queueId: transaction.queueId,
+      sessionId: transaction.sessionId,
+      sessionEpoch: transaction.sessionEpoch,
+      contextDocumentKey: transaction.contextDocumentKey,
       deleted: deleted,
       failed: failed.length,
       deletedNoteIds: deletedNoteIds,

@@ -2643,11 +2643,81 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("renderDraft", restore_body)
         self.assertIn("renderAiEditOperation", restore_body)
         self.assertIn("queueGuardRestoreInFlight", drain_body)
-        self.assertIn("restoreQueuedWriteConfirmationGuard", set_conversation_body)
-        self.assertIn("restoreQueuedWriteConfirmationGuard", render_context_body)
+        self.assertIn("resetQueueRuntimeForConversationSwitch", set_conversation_body)
+        self.assertIn("prepareQueueRuntimeForActiveSession", set_conversation_body)
+        self.assertIn("prepareQueueRuntimeForActiveSession", render_context_body)
         self.assertNotIn("!state.queueGuardRestoreInFlight", render_context_body)
-        self.assertIn("restoreQueuedWriteConfirmationGuard(startQueuePump)", bind_body)
         self.assertNotIn("\n    startQueuePump();", bind_body)
+        self.assertNotIn("restoreQueuedWriteConfirmationGuard(startQueuePump)", bind_body)
+
+    def test_queue_runtime_ready_gates_pump_tick_drain_and_timer_start(self) -> None:
+        state_body = self.js.split("var state = {", 1)[1].split("};", 1)[0]
+        tick_body = self.js.split("function queuePumpTick", 1)[1].split(
+            "\n  function startQueuePump", 1
+        )[0]
+        start_body = self.js.split("function startQueuePump", 1)[1].split(
+            "\n  function stopQueuePump", 1
+        )[0]
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+
+        self.assertIn("queueRuntimeReady: false", state_body)
+        self.assertIn("if (!state.queueRuntimeReady) return;", tick_body)
+        self.assertIn("if (!state.queueRuntimeReady) return;", start_body)
+        self.assertIn("if (!state.queueRuntimeReady) return;", drain_body)
+        self.assertIn("queuePumpStartTimer", state_body)
+
+    def test_conversation_switch_removes_old_confirmation_controls_before_restore(self) -> None:
+        switch_body = self.js.split("function setCurrentConversation", 1)[1].split(
+            "\n  function currentMnObjectRef", 1
+        )[0]
+        clear_body = self.js.split("function clearQueuedWriteConfirmationUi", 1)[1].split(
+            "\n  function resetQueueRuntimeForConversationSwitch", 1
+        )[0]
+        accept_body = self.js.split("function acceptDraft", 1)[1].split(
+            "\n  function rejectDraft", 1
+        )[0]
+        reject_body = self.js.split("function rejectDraft", 1)[1].split(
+            "\n  function runToggle", 1
+        )[0]
+        ready_body = self.js.split("setAiEditOperationReady: function(payload)", 1)[1].split(
+            "\n    setAiEditOperationResult:", 1
+        )[0]
+
+        self.assertLess(
+            switch_body.index("resetQueueRuntimeForConversationSwitch"),
+            switch_body.index("state.sessionId ="),
+        )
+        for marker in [
+            "renderDraft(null)",
+            "pendingAiEditDrafts",
+            "querySelectorAll('.ai-edit-operation')",
+            "aiEditTransactionStatus",
+            "renderAiEditTransactionCenter",
+        ]:
+            self.assertIn(marker, clear_body)
+        self.assertIn("queuedDraftBindingMatchesActiveSession", accept_body)
+        self.assertIn("queuedDraftBindingMatchesActiveSession", reject_body)
+        self.assertIn("queuedConfirmationMatchesActiveSession", ready_body)
+        self.assertLess(
+            ready_body.index("queuedConfirmationMatchesActiveSession"),
+            ready_body.index("renderAiEditOperation"),
+        )
+
+    def test_guard_blocks_only_same_session_owned_write_commands(self) -> None:
+        lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
+
+        self.assertIn("function queuedWriteCommandMatchesConfirmation", lifecycle_js)
+        self.assertIn("queuedWriteCommandMatchesConfirmation(command", lifecycle_js)
+        for action in [
+            "generate_card",
+            "generate_mindmap",
+            "generate_full_reading",
+            "expand_node",
+            "reorganize_mindmap",
+        ]:
+            self.assertIn(action, lifecycle_js)
 
     def test_confirmation_resolution_requires_all_ids_and_exact_active_session(self) -> None:
         resolve_body = self.js.split("function resolveQueuedWriteConfirmation", 1)[1].split(

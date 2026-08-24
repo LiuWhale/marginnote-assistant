@@ -347,7 +347,13 @@ test('completed queue records are ack-only even while a write confirmation block
   );
   assert.equal(
     lifecycle.queuedExecutionDisposition(
-      {_queue_id: 'QUEUE-NEXT', rawAction: 'generate_card'},
+      {
+        _queue_id: 'QUEUE-NEXT',
+        rawAction: 'generate_card',
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
+      },
       {
         pendingQueuedWriteConfirmation: pending,
         sessionId: 'SESSION-A',
@@ -359,12 +365,36 @@ test('completed queue records are ack-only even while a write confirmation block
   );
   assert.equal(
     lifecycle.queuedExecutionDisposition(
-      {_queue_id: 'QUEUE-B', rawAction: 'generate_card'},
+      {
+        _queue_id: 'QUEUE-CHAT-A',
+        rawAction: 'chat',
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
+      },
       {
         pendingQueuedWriteConfirmation: pending,
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
+      },
+    ),
+    'execute',
+  );
+  assert.equal(
+    lifecycle.queuedExecutionDisposition(
+      {
+        _queue_id: 'QUEUE-B',
+        rawAction: 'generate_card',
         sessionId: 'SESSION-B',
         sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         contextDocumentKey: 'DOC-B',
+      },
+      {
+        pendingQueuedWriteConfirmation: pending,
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
       },
     ),
     'execute',
@@ -376,6 +406,43 @@ test('completed queue records are ack-only even while a write confirmation block
     ),
     'execute',
   );
+});
+
+test('queue runtime readiness requires exact conversation session epoch and context', () => {
+  assert.equal(lifecycle.queueRuntimeCanStart({}), false);
+  assert.equal(lifecycle.queueRuntimeCanStart({
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  }), false);
+  assert.equal(lifecycle.queueRuntimeCanStart({
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  }), true);
+});
+
+test('queued draft binding follows exact active session and context', () => {
+  const draft = {
+    id: 'DRAFT-A',
+    queueId: 'QUEUE-A',
+    queueConfirmation: {
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      contextDocumentKey: 'DOC-A',
+    },
+  };
+  assert.equal(lifecycle.queuedDraftBindingMatchesActiveSession(draft, {
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  }), true);
+  assert.equal(lifecycle.queuedDraftBindingMatchesActiveSession(draft, {
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    contextDocumentKey: 'DOC-B',
+  }), false);
 });
 
 function queueResultHarness(overrides) {
@@ -694,6 +761,117 @@ test('web reload restores exact durable guard before queue pump callback', () =>
     'render-confirmation',
     'start-pump',
   ]);
+});
+
+test('queue runtime starts only after exact durable guard restore succeeds', () => {
+  const events = [];
+  const state = {queueRuntimeReady: false};
+  const identity = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  };
+  const prepareQueueRuntimeForActiveSession = loadAppFunction(
+    'prepareQueueRuntimeForActiveSession',
+    'persistQueuedWriteConfirmationState',
+    {
+      state,
+      queuedSessionIdentity: () => identity,
+      queuedSessionIdentityKey: () => 'SESSION-A|EPOCH-A|DOC-A',
+      window: {SourceWorkspaceLifecycle: lifecycle},
+      stopQueuePump: () => events.push('stop'),
+      restoreQueuedWriteConfirmationGuard: (done) => {
+        events.push('restore');
+        done(true);
+      },
+      startQueuePump: () => events.push(['start', state.queueRuntimeReady]),
+    },
+  );
+
+  prepareQueueRuntimeForActiveSession();
+
+  assert.equal(state.queueRuntimeReady, true);
+  assert.deepEqual(events, ['stop', 'restore', ['start', true]]);
+});
+
+test('queue runtime remains disabled when durable guard restore fails', () => {
+  const events = [];
+  const state = {queueRuntimeReady: false};
+  const identity = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  };
+  const prepareQueueRuntimeForActiveSession = loadAppFunction(
+    'prepareQueueRuntimeForActiveSession',
+    'persistQueuedWriteConfirmationState',
+    {
+      state,
+      queuedSessionIdentity: () => identity,
+      queuedSessionIdentityKey: () => 'SESSION-A|EPOCH-A|DOC-A',
+      window: {SourceWorkspaceLifecycle: lifecycle},
+      stopQueuePump: () => events.push('stop'),
+      restoreQueuedWriteConfirmationGuard: (done) => {
+        events.push('restore-failed');
+        done(false);
+      },
+      startQueuePump: () => assert.fail('failed restore must not start pump'),
+    },
+  );
+
+  prepareQueueRuntimeForActiveSession();
+
+  assert.equal(state.queueRuntimeReady, false);
+  assert.deepEqual(events, ['stop', 'restore-failed']);
+});
+
+test('conversation switch clears queued controls before target restore', () => {
+  const events = [];
+  const panel = {parentNode: {removeChild: () => events.push('remove-panel')}};
+  const state = {
+    draft: {id: 'OLD-DRAFT'},
+    pendingAiEditDrafts: {'OLD-DRAFT': {}},
+    pendingQueuedWriteConfirmation: {queueId: 'OLD-QUEUE'},
+    aiEditTransactionStatus: {available: true},
+  };
+  const clearQueuedWriteConfirmationUi = loadAppFunction(
+    'clearQueuedWriteConfirmationUi',
+    'resetQueueRuntimeForConversationSwitch',
+    {
+      state,
+      renderDraft: () => events.push('render-empty-draft'),
+      renderAiEditTransactionCenter: () => events.push('render-empty-transaction'),
+      document: {querySelectorAll: () => [panel]},
+    },
+  );
+
+  clearQueuedWriteConfirmationUi();
+
+  assert.equal(state.pendingQueuedWriteConfirmation, null);
+  assert.deepEqual(state.pendingAiEditDrafts, {});
+  assert.equal(state.aiEditTransactionStatus.available, false);
+  assert.deepEqual(events, ['render-empty-draft', 'render-empty-transaction', 'remove-panel']);
+});
+
+test('stale queued draft controls cannot accept or reject after session switch', () => {
+  const state = {draft: {id: 'DRAFT-A', queueId: 'QUEUE-A'}};
+  const blocked = () => false;
+  const acceptDraft = loadAppFunction('acceptDraft', 'rejectDraft', {
+    state,
+    queuedDraftBindingMatchesActiveSession: blocked,
+    addMessage: () => assert.fail('stale accept must be a no-op'),
+    currentAiEditTransactionId: () => assert.fail('stale accept must not inspect transaction'),
+  });
+  const rejectDraft = loadAppFunction('rejectDraft', 'runToggle', {
+    state,
+    queuedDraftBindingMatchesActiveSession: blocked,
+    currentAiEditTransactionId: () => assert.fail('stale reject must not inspect transaction'),
+  });
+
+  acceptDraft({});
+  rejectDraft({});
 });
 
 test('runQueuedCommand persists A through exact background payload after switching to B', () => {

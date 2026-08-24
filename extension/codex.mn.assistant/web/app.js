@@ -69,7 +69,10 @@
     pendingQueuedWriteConfirmation: null,
     queueGuardRestoreToken: 0,
     queueGuardRestoreInFlight: false,
+    queueGuardRestoreIdentityKey: '',
     queueGuardRestoredIdentityKey: '',
+    queueRuntimeReady: false,
+    queuePumpStartTimer: null,
     update: {},
     updateAutoChecked: false,
     pluginVersion: '',
@@ -2806,8 +2809,32 @@
     addMessage('assistant', '已开启新对话。当前对话仍会绑定这篇文档；历史可从右上角“历史”恢复。');
   }
 
+  function clearQueuedWriteConfirmationUi() {
+    state.pendingQueuedWriteConfirmation = null;
+    state.pendingAiEditDrafts = {};
+    state.draft = null;
+    state.aiEditTransactionStatus = {schema: 'codex.mn.aiEditTransactionStatus.v1', available: false};
+    renderDraft(null);
+    renderAiEditTransactionCenter(state.aiEditTransactionStatus);
+    var panels = document.querySelectorAll('.ai-edit-operation');
+    for (var i = 0; i < panels.length; i++) {
+      if (panels[i] && panels[i].parentNode) panels[i].parentNode.removeChild(panels[i]);
+    }
+  }
+
+  function resetQueueRuntimeForConversationSwitch() {
+    state.queueRuntimeReady = false;
+    state.queueGuardRestoreToken += 1;
+    state.queueGuardRestoreInFlight = false;
+    state.queueGuardRestoreIdentityKey = '';
+    state.queueGuardRestoredIdentityKey = '';
+    stopQueuePump();
+    clearQueuedWriteConfirmationUi();
+  }
+
   function setCurrentConversation(conversation) {
     conversation = conversation || {};
+    resetQueueRuntimeForConversationSwitch();
     invalidateSourceWorkspaceRequests();
     state.newConversationRequestToken += 1;
     state.sourceWorkspaceConversationCreateInFlight = false;
@@ -2815,8 +2842,6 @@
     state.conversationId = String(conversation.conversationId || '');
     state.sessionId = String(conversation.sessionId || '');
     state.sessionEpoch = String(conversation.sessionEpoch || '');
-    state.queueGuardRestoredIdentityKey = '';
-    restoreQueuedWriteConfirmationGuard();
     if (conversation.sourceIds !== undefined) {
       state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(conversation.sourceIds || []);
     }
@@ -2827,6 +2852,7 @@
       state.sourceWorkspace.revision = String(conversation.sourceWorkspaceRevision || '');
     }
     renderSourceWorkspaceHeaderControl();
+    prepareQueueRuntimeForActiveSession();
   }
 
   function currentMnObjectRef() {
@@ -7975,21 +8001,30 @@
     if (!identityKey) {
       state.pendingQueuedWriteConfirmation = null;
       state.queueGuardRestoreInFlight = false;
+      state.queueGuardRestoreIdentityKey = '';
       state.queueGuardRestoredIdentityKey = '';
-      if (done) done();
+      if (done) done(false);
       return;
     }
     if (!state.queueGuardRestoreInFlight && state.queueGuardRestoredIdentityKey === identityKey) {
-      if (done) done();
+      if (done) done(true);
       return;
     }
     state.queueGuardRestoreToken += 1;
     var restoreToken = state.queueGuardRestoreToken;
     state.queueGuardRestoreInFlight = true;
+    state.queueGuardRestoreIdentityKey = identityKey;
     postCompanion('queued_write_confirmation_get', identity, function(result) {
       if (restoreToken !== state.queueGuardRestoreToken) return;
       if (identityKey !== queuedSessionIdentityKey()) return;
-      var confirmation = result && result.ok && result.confirmation ? result.confirmation : null;
+      if (!result || !result.ok) {
+        state.queueGuardRestoreInFlight = false;
+        state.queueGuardRestoreIdentityKey = '';
+        state.queueGuardRestoredIdentityKey = '';
+        if (done) done(false);
+        return;
+      }
+      var confirmation = result.confirmation || null;
       if (
         confirmation &&
         window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(confirmation, identity)
@@ -8004,9 +8039,33 @@
         state.pendingQueuedWriteConfirmation = null;
       }
       state.queueGuardRestoreInFlight = false;
+      state.queueGuardRestoreIdentityKey = '';
       state.queueGuardRestoredIdentityKey = identityKey;
-      if (done) done();
+      if (done) done(true);
     }, {showReply: false});
+  }
+
+  function prepareQueueRuntimeForActiveSession(done) {
+    state.queueRuntimeReady = false;
+    stopQueuePump();
+    var identity = queuedSessionIdentity();
+    var identityKey = queuedSessionIdentityKey(identity);
+    if (!window.SourceWorkspaceLifecycle.queueRuntimeCanStart(identity)) {
+      if (done) done(false);
+      return;
+    }
+    restoreQueuedWriteConfirmationGuard(function(restored) {
+      if (
+        !restored ||
+        identityKey !== queuedSessionIdentityKey()
+      ) {
+        if (done) done(false);
+        return;
+      }
+      state.queueRuntimeReady = true;
+      startQueuePump();
+      if (done) done(true);
+    });
   }
 
   function persistQueuedWriteConfirmationState(identity, status, done) {
@@ -8240,6 +8299,7 @@
 
   function drainNextQueuedAction(options) {
     options = options || {};
+    if (!state.queueRuntimeReady) return;
     if (state.queueGuardRestoreInFlight) return;
     var activeIdentityKey = queuedSessionIdentityKey();
     if (activeIdentityKey && state.queueGuardRestoredIdentityKey !== activeIdentityKey) {
@@ -11830,6 +11890,7 @@
   }
 
   function queuePumpTick() {
+    if (!state.queueRuntimeReady) return;
     if (isActiveRun() || state.drainingQueue) return;
     var ctx = state.context || {};
     if (!(ctx.topicid || ctx.notebookid)) return;
@@ -11857,9 +11918,24 @@
   }
 
   function startQueuePump() {
+    if (!state.queueRuntimeReady) return;
     if (state.queuePumpTimer) return;
     state.queuePumpTimer = window.setInterval(queuePumpTick, 3000);
-    window.setTimeout(queuePumpTick, 600);
+    state.queuePumpStartTimer = window.setTimeout(function() {
+      state.queuePumpStartTimer = null;
+      queuePumpTick();
+    }, 600);
+  }
+
+  function stopQueuePump() {
+    if (state.queuePumpTimer) {
+      window.clearInterval(state.queuePumpTimer);
+      state.queuePumpTimer = null;
+    }
+    if (state.queuePumpStartTimer) {
+      window.clearTimeout(state.queuePumpStartTimer);
+      state.queuePumpStartTimer = null;
+    }
   }
 
   function startContextAutoRefresh() {
@@ -11883,8 +11959,10 @@
         addFailureMessage('清空历史失败', result || {});
         return;
       }
+      resetQueueRuntimeForConversationSwitch();
       state.sessionEpoch = String(result.sessionEpoch || '');
       renderHistoryItems([]);
+      prepareQueueRuntimeForActiveSession();
     });
   }
 
@@ -11934,6 +12012,7 @@
   }
 
   function writeAcceptedDraft(draftId, panel) {
+    if (!queuedDraftBindingMatchesActiveSession(state.draft)) return;
     var pending = state.pendingQueuedWriteConfirmation;
     var queueId = pending && String(pending.draftId || '') === String(draftId || '')
       ? String(pending.queueId || '')
@@ -11983,7 +12062,23 @@
     return state.draft && state.draft.transactionId ? state.draft.transactionId : '';
   }
 
+  function queuedDraftBindingMatchesActiveSession(draft) {
+    draft = draft || {};
+    if (!draft.queueId) return true;
+    var confirmation = draft.queueConfirmation || {};
+    if (
+      !confirmation.sessionId &&
+      state.pendingQueuedWriteConfirmation &&
+      String(state.pendingQueuedWriteConfirmation.queueId || '') === String(draft.queueId || '')
+    ) confirmation = state.pendingQueuedWriteConfirmation;
+    return window.SourceWorkspaceLifecycle.queuedDraftBindingMatchesActiveSession(
+      Object.assign({}, draft, {queueConfirmation: confirmation}),
+      state
+    );
+  }
+
   function acceptDraft(panel) {
+    if (!queuedDraftBindingMatchesActiveSession(state.draft)) return;
     if (!state.draft || !state.draft.id) {
       addMessage('assistant', '没有待写入草稿。');
       return;
@@ -12020,6 +12115,7 @@
   }
 
   function rejectDraft(panel) {
+    if (!queuedDraftBindingMatchesActiveSession(state.draft)) return;
     var transactionId = currentAiEditTransactionId(panel);
     if (transactionId) {
       setAiEditOperationBusy(panel, true);
@@ -12429,10 +12525,12 @@
       state.contextDocumentKey = docKey || state.stableContextDocumentKey;
       if (state.documentSwitchPending) cancelAutomaticDocumentSwitch();
     }
+    var queueIdentityKey = queuedSessionIdentityKey();
     if (
-      state.sessionId && state.sessionEpoch &&
-      state.queueGuardRestoredIdentityKey !== queuedSessionIdentityKey()
-    ) restoreQueuedWriteConfirmationGuard();
+      queueIdentityKey &&
+      (!state.queueRuntimeReady || state.queueGuardRestoredIdentityKey !== queueIdentityKey) &&
+      state.queueGuardRestoreIdentityKey !== queueIdentityKey
+    ) prepareQueueRuntimeForActiveSession();
     renderContextSourceLine(state.context);
     var connected = state.context.topicid || state.context.notebookid || state.context.docmd5 || state.context.bookmd5;
     setText('contextLine', connected ? '已连接 MarginNote 上下文' : '等待 MarginNote 上下文');
@@ -12568,13 +12666,28 @@
         queueId = String(state.pendingQueuedWriteConfirmation.queueId || '');
       }
       if (queueId) {
-        draft.queueId = queueId;
-        state.pendingQueuedWriteConfirmation = Object.assign({}, state.pendingQueuedWriteConfirmation || {}, {
+        var knownConfirmation = {};
+        if (
+          state.pendingQueuedWriteConfirmation &&
+          String(state.pendingQueuedWriteConfirmation.queueId || '') === queueId &&
+          String(state.pendingQueuedWriteConfirmation.draftId || '') === String(draftId || '')
+        ) knownConfirmation = state.pendingQueuedWriteConfirmation;
+        var confirmationBinding = Object.assign({}, draft.queueConfirmation || {}, knownConfirmation, {
           queueId: queueId,
           draftId: String(draftId || ''),
           transactionId: String(payload.transactionId || ''),
+          sessionId: String(payload.sessionId || knownConfirmation.sessionId || ''),
+          sessionEpoch: String(payload.sessionEpoch || knownConfirmation.sessionEpoch || ''),
+          contextDocumentKey: String(payload.contextDocumentKey || knownConfirmation.contextDocumentKey || ''),
           status: 'transaction_confirmation'
         });
+        if (!window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(confirmationBinding, state)) {
+          if (draftId && state.pendingAiEditDrafts) delete state.pendingAiEditDrafts[draftId];
+          return;
+        }
+        draft.queueId = queueId;
+        state.pendingQueuedWriteConfirmation = confirmationBinding;
+        draft.queueConfirmation = Object.assign({}, state.pendingQueuedWriteConfirmation);
         persistQueuedWriteConfirmationState(
           state.pendingQueuedWriteConfirmation,
           'transaction_confirmation',
@@ -13059,7 +13172,6 @@
     refreshNotebookWorkspace(false);
     window.setTimeout(reportControlsReady, 80);
     refreshSettings();
-    restoreQueuedWriteConfirmationGuard(startQueuePump);
     startContextAutoRefresh();
   }
 

@@ -34,10 +34,43 @@
     command = command || {};
     runtime = runtime || {};
     if (command._queue_completed_ack_pending === true) return 'ack_only';
-    if (queuedConfirmationMatchesActiveSession(runtime.pendingQueuedWriteConfirmation, runtime)) {
+    if (
+      queuedConfirmationMatchesActiveSession(runtime.pendingQueuedWriteConfirmation, runtime) &&
+      queuedWriteCommandMatchesConfirmation(command, runtime.pendingQueuedWriteConfirmation)
+    ) {
       return 'confirmation_pending';
     }
     return 'execute';
+  }
+
+  function queueRuntimeCanStart(runtime) {
+    runtime = runtime || {};
+    return !!(
+      String(runtime.conversationId || '') &&
+      String(runtime.sessionId || '') &&
+      String(runtime.sessionEpoch || '') &&
+      String(runtime.contextDocumentKey || '')
+    );
+  }
+
+  function queuedWriteCommandMatchesConfirmation(command, confirmation) {
+    command = command || {};
+    confirmation = confirmation || {};
+    var action = String(command.rawAction || command.action || '');
+    var isWriteAction = action === 'generate_card' ||
+      action === 'generate_mindmap' ||
+      action === 'generate_full_reading' ||
+      action === 'expand_node' ||
+      action === 'reorganize_mindmap';
+    return !!(
+      isWriteAction &&
+      String(command.sessionId || '') &&
+      String(command.sessionEpoch || '') &&
+      String(command.contextDocumentKey || '') &&
+      String(command.sessionId || '') === String(confirmation.sessionId || '') &&
+      String(command.sessionEpoch || '') === String(confirmation.sessionEpoch || '') &&
+      String(command.contextDocumentKey || '') === String(confirmation.contextDocumentKey || '')
+    );
   }
 
   function queuedConfirmationMatchesActiveSession(confirmation, activeConversation) {
@@ -54,6 +87,13 @@
       sessionEpoch === String(activeConversation.sessionEpoch || '') &&
       contextDocumentKey === String(activeConversation.contextDocumentKey || '')
     );
+  }
+
+  function queuedDraftBindingMatchesActiveSession(draft, activeConversation) {
+    draft = draft || {};
+    if (!String(draft.queueId || '')) return true;
+    var confirmation = draft.queueConfirmation || {};
+    return queuedConfirmationMatchesActiveSession(confirmation, activeConversation || {});
   }
 
   function queuedResultFailureReason(command, result, routing) {
@@ -290,8 +330,11 @@
     createController: createController,
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
     handleQueuedResult: handleQueuedResult,
+    queueRuntimeCanStart: queueRuntimeCanStart,
+    queuedDraftBindingMatchesActiveSession: queuedDraftBindingMatchesActiveSession,
     queuedExecutionDisposition: queuedExecutionDisposition,
     queuedConfirmationMatchesActiveSession: queuedConfirmationMatchesActiveSession,
+    queuedWriteCommandMatchesConfirmation: queuedWriteCommandMatchesConfirmation,
     queuedSessionRouting: queuedSessionRouting,
     shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload

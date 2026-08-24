@@ -54,6 +54,9 @@ class NativeTransactionStaticTests(unittest.TestCase):
         self.assertIn("queueId: transaction.queueId", finish_body)
         self.assertIn("queueId: transaction ? transaction.queueId :", accept_body)
         self.assertIn("queueId: transaction.queueId", reject_body)
+        for marker in ["sessionId", "sessionEpoch", "contextDocumentKey"]:
+            self.assertIn(marker, begin_body)
+            self.assertIn(marker, finish_body)
 
     def test_mindmap_diff_apply_registers_rollbackable_ai_edit_transaction(self) -> None:
         body = self.main_js.split("CodexAssistantAddon.prototype.applyMindmapDiffOperations", 1)[1].split(
