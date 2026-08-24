@@ -326,19 +326,48 @@ test('queued A result stays background after the active session switches to B', 
 });
 
 test('completed queue records are ack-only even while a write confirmation blocks execution', () => {
+  const pending = {
+    queueId: 'QUEUE-WRITE',
+    draftId: 'DRAFT-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  };
   assert.equal(
     lifecycle.queuedExecutionDisposition(
       {_queue_id: 'QUEUE-DONE', _queue_completed_ack_pending: true},
-      {pendingQueuedWriteConfirmation: {queueId: 'QUEUE-WRITE'}},
+      {
+        pendingQueuedWriteConfirmation: pending,
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
+      },
     ),
     'ack_only',
   );
   assert.equal(
     lifecycle.queuedExecutionDisposition(
       {_queue_id: 'QUEUE-NEXT', rawAction: 'generate_card'},
-      {pendingQueuedWriteConfirmation: {queueId: 'QUEUE-WRITE'}},
+      {
+        pendingQueuedWriteConfirmation: pending,
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
+      },
     ),
     'confirmation_pending',
+  );
+  assert.equal(
+    lifecycle.queuedExecutionDisposition(
+      {_queue_id: 'QUEUE-B', rawAction: 'generate_card'},
+      {
+        pendingQueuedWriteConfirmation: pending,
+        sessionId: 'SESSION-B',
+        sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        contextDocumentKey: 'DOC-B',
+      },
+    ),
+    'execute',
   );
   assert.equal(
     lifecycle.queuedExecutionDisposition(
@@ -573,12 +602,18 @@ test('draft persistence failure defers with the draft response instead of genera
   assert.equal(deferredResult, draftFailure);
 });
 
-test('queued write confirmation resolves only for its bound draft or transaction', () => {
+test('queued write confirmation requires exact active session and every provided identifier', () => {
   const state = {
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
     pendingQueuedWriteConfirmation: {
       queueId: 'QUEUE-WRITE',
       draftId: 'DRAFT-1',
       transactionId: 'TX-1',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      contextDocumentKey: 'DOC-A',
     },
   };
   const drains = [];
@@ -591,11 +626,74 @@ test('queued write confirmation resolves only for its bound draft or transaction
     },
   );
 
-  assert.equal(resolveQueuedWriteConfirmation({draftId: 'OTHER'}), false);
+  assert.equal(resolveQueuedWriteConfirmation({}), false);
+  assert.equal(resolveQueuedWriteConfirmation({queueId: 'QUEUE-WRITE', draftId: 'OTHER'}), false);
   assert.ok(state.pendingQueuedWriteConfirmation);
-  assert.equal(resolveQueuedWriteConfirmation({transactionId: 'TX-1'}), true);
+  state.sessionId = 'SESSION-B';
+  assert.equal(resolveQueuedWriteConfirmation({queueId: 'QUEUE-WRITE'}), false);
+  state.sessionId = 'SESSION-A';
+  assert.equal(resolveQueuedWriteConfirmation({
+    queueId: 'QUEUE-WRITE',
+    draftId: 'DRAFT-1',
+    transactionId: 'TX-1',
+  }), true);
   assert.equal(state.pendingQueuedWriteConfirmation, null);
   assert.deepEqual(drains, ['drain']);
+});
+
+test('web reload restores exact durable guard before queue pump callback', () => {
+  const events = [];
+  const confirmation = {
+    queueId: 'QUEUE-WRITE',
+    draftId: 'DRAFT-1',
+    transactionId: 'TX-1',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+    status: 'transaction_confirmation',
+  };
+  const state = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+    queueGuardRestoreToken: 0,
+    queueGuardRestoreInFlight: false,
+    queueGuardRestoredIdentityKey: '',
+    pendingQueuedWriteConfirmation: null,
+  };
+  const restoreQueuedWriteConfirmationGuard = loadAppFunction(
+    'restoreQueuedWriteConfirmationGuard',
+    'persistQueuedWriteConfirmationState',
+    {
+      state,
+      queuedSessionIdentity: () => ({
+        conversationId: state.conversationId,
+        sessionId: state.sessionId,
+        sessionEpoch: state.sessionEpoch,
+        contextDocumentKey: state.contextDocumentKey,
+      }),
+      queuedSessionIdentityKey: () => 'SESSION-A|EPOCH-A|DOC-A',
+      postCompanion: (_action, _payload, done) => {
+        events.push('restore-request');
+        done({ok: true, confirmation, draft: {id: 'DRAFT-1', queueId: 'QUEUE-WRITE'}});
+      },
+      window: {SourceWorkspaceLifecycle: lifecycle},
+      renderDraft: () => events.push('render-draft'),
+      renderAiEditOperation: () => events.push('render-confirmation'),
+    },
+  );
+
+  restoreQueuedWriteConfirmationGuard(() => events.push('start-pump'));
+
+  assert.equal(state.queueGuardRestoreInFlight, false);
+  assert.deepEqual(state.pendingQueuedWriteConfirmation, confirmation);
+  assert.deepEqual(events, [
+    'restore-request',
+    'render-draft',
+    'render-confirmation',
+    'start-pump',
+  ]);
 });
 
 test('runQueuedCommand persists A through exact background payload after switching to B', () => {

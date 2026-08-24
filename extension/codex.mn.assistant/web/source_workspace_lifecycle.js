@@ -34,8 +34,26 @@
     command = command || {};
     runtime = runtime || {};
     if (command._queue_completed_ack_pending === true) return 'ack_only';
-    if (runtime.pendingQueuedWriteConfirmation) return 'confirmation_pending';
+    if (queuedConfirmationMatchesActiveSession(runtime.pendingQueuedWriteConfirmation, runtime)) {
+      return 'confirmation_pending';
+    }
     return 'execute';
+  }
+
+  function queuedConfirmationMatchesActiveSession(confirmation, activeConversation) {
+    confirmation = confirmation || {};
+    activeConversation = activeConversation || {};
+    var sessionId = String(confirmation.sessionId || '');
+    var sessionEpoch = String(confirmation.sessionEpoch || '');
+    var contextDocumentKey = String(confirmation.contextDocumentKey || '');
+    return !!(
+      sessionId &&
+      sessionEpoch &&
+      contextDocumentKey &&
+      sessionId === String(activeConversation.sessionId || '') &&
+      sessionEpoch === String(activeConversation.sessionEpoch || '') &&
+      contextDocumentKey === String(activeConversation.contextDocumentKey || '')
+    );
   }
 
   function queuedResultFailureReason(command, result, routing) {
@@ -273,6 +291,7 @@
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
     handleQueuedResult: handleQueuedResult,
     queuedExecutionDisposition: queuedExecutionDisposition,
+    queuedConfirmationMatchesActiveSession: queuedConfirmationMatchesActiveSession,
     queuedSessionRouting: queuedSessionRouting,
     shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload

@@ -1887,6 +1887,101 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(loaded["queueCommand"]["conversationId"], "CONV-A")
             self.assertEqual(loaded["draft"]["queueId"], "QUEUE-WRITE-1")
 
+    def test_pending_queued_write_confirmation_is_durable_and_exact_session_scoped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            binding = {
+                "conversationId": "CONV-A",
+                "sessionId": "a" * 24,
+                "sessionEpoch": "b" * 32,
+                "contextDocumentKey": "T1|B1|/papers/a.pdf",
+            }
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "queueId": "QUEUE-WRITE-A",
+                    "queueCommand": {**binding, "rawAction": "generate_card"},
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+
+            active_a = companion.pending_queued_write_confirmation(binding)
+            inactive_b = companion.pending_queued_write_confirmation(
+                {
+                    **binding,
+                    "conversationId": "CONV-B",
+                    "sessionId": "c" * 24,
+                    "sessionEpoch": "d" * 32,
+                }
+            )
+            reloaded = load_companion(root).pending_queued_write_confirmation(binding)
+
+            self.assertTrue(saved["ok"], saved)
+            self.assertEqual(active_a["confirmation"]["queueId"], "QUEUE-WRITE-A")
+            self.assertEqual(active_a["confirmation"]["draftId"], saved["draft"]["id"])
+            self.assertEqual(active_a["confirmation"]["sessionId"], "a" * 24)
+            self.assertEqual(active_a["confirmation"]["sessionEpoch"], "b" * 32)
+            self.assertEqual(active_a["confirmation"]["contextDocumentKey"], "T1|B1|/papers/a.pdf")
+            self.assertIsNone(inactive_b["confirmation"])
+            self.assertEqual(reloaded["confirmation"], active_a["confirmation"])
+            self.assertEqual(reloaded["draft"]["queueId"], "QUEUE-WRITE-A")
+
+    def test_native_ai_transaction_events_update_durable_queued_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            binding = {
+                "conversationId": "CONV-A",
+                "sessionId": "a" * 24,
+                "sessionEpoch": "b" * 32,
+                "contextDocumentKey": "T1|B1|/papers/a.pdf",
+            }
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "queueId": "QUEUE-WRITE-A",
+                    "queueCommand": {**binding, "rawAction": "generate_card"},
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+            draft_id = saved["draft"]["id"]
+
+            companion.append_event(
+                {
+                    "event": "aiEditOperationReady",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "queueId": "QUEUE-WRITE-A",
+                        "draftId": draft_id,
+                        "transactionId": "TX-A",
+                    },
+                }
+            )
+            restored = load_companion(root).pending_queued_write_confirmation(binding)
+
+            self.assertEqual(restored["confirmation"]["status"], "transaction_confirmation")
+            self.assertEqual(restored["confirmation"]["transactionId"], "TX-A")
+
+            companion.append_event(
+                {
+                    "event": "aiEditTransactionAccepted",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "extra": {
+                        "queueId": "QUEUE-WRITE-A",
+                        "draftId": draft_id,
+                        "transactionId": "TX-A",
+                    },
+                }
+            )
+            resolved = load_companion(root).pending_queued_write_confirmation(binding)
+
+            self.assertIsNone(resolved["confirmation"])
+
     def test_draft_update_rewrites_cards_from_editable_text_before_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

@@ -3960,6 +3960,7 @@ JSB.newAddon = function(mainPath) {
         ok: false,
         action: 'accept',
         transactionId: transactionId,
+        draftId: transaction ? transaction.draftId : safeString(valueOf(fallback, 'draftId')),
         queueId: transaction ? transaction.queueId : safeString(valueOf(fallback, 'queueId')),
         status: 'partial_failed',
         message: '写入未完整完成，仅可拒绝并回滚。'
@@ -3975,6 +3976,7 @@ JSB.newAddon = function(mainPath) {
       ok: true,
       action: 'accept',
       transactionId: transactionId,
+      draftId: transaction ? transaction.draftId : safeString(valueOf(fallback, 'draftId')),
       queueId: transaction ? transaction.queueId : safeString(valueOf(fallback, 'queueId')),
       message: '已保留本次 AI 编辑结果。'
     }, acceptedObjectRef);
@@ -4083,6 +4085,7 @@ JSB.newAddon = function(mainPath) {
       ok: ok,
       action: 'reject',
       transactionId: transactionId,
+      draftId: transaction.draftId,
       queueId: transaction.queueId,
       deleted: deleted,
       failed: failed.length,

@@ -354,6 +354,8 @@ READ_ONLY_ACTIONS = {
     "draft_save",
     "draft_get",
     "draft_delete",
+    "queued_write_confirmation_get",
+    "queued_write_confirmation_update",
 }
 NOTE_WRITE_ACTIONS = {
     "generate_card",
@@ -562,6 +564,38 @@ def save_runtime_settings(values: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
+PENDING_QUEUED_WRITE_CONFIRMATION_STATUSES = {
+    "draft_confirmation",
+    "native_write",
+    "transaction_confirmation",
+}
+
+
+def queued_write_confirmation_from_draft(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(draft, dict):
+        return {}
+    queue_id = str(draft.get("queueId") or "").strip()[:160]
+    if not queue_id:
+        return {}
+    queue_command = draft.get("queueCommand") if isinstance(draft.get("queueCommand"), dict) else {}
+    stored = draft.get("queueConfirmation") if isinstance(draft.get("queueConfirmation"), dict) else {}
+    status = str(stored.get("status") or "draft_confirmation")
+    return {
+        "schema": "codex.mn.queuedWriteConfirmation.v1",
+        "status": status,
+        "queueId": queue_id,
+        "draftId": str(stored.get("draftId") or draft_id),
+        "transactionId": str(stored.get("transactionId") or ""),
+        "conversationId": str(stored.get("conversationId") or queue_command.get("conversationId") or ""),
+        "sessionId": safe_session_id(stored.get("sessionId") or queue_command.get("sessionId")),
+        "sessionEpoch": safe_session_epoch(stored.get("sessionEpoch") or queue_command.get("sessionEpoch")),
+        "contextDocumentKey": str(
+            stored.get("contextDocumentKey") or queue_command.get("contextDocumentKey") or ""
+        ),
+        "updatedAt": str(stored.get("updatedAt") or draft.get("updated_at") or draft.get("created_at") or ""),
+    }
+
+
 def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
     cards = draft.get("cards") if isinstance(draft.get("cards"), list) else []
     mindmap = draft.get("mindmap") if isinstance(draft.get("mindmap"), dict) else None
@@ -612,6 +646,7 @@ def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
         "operation_manifest": operation_manifest,
         "mn_object": mn_object,
         "queueId": str(draft.get("queueId") or ""),
+        "queueConfirmation": queued_write_confirmation_from_draft(draft_id, draft),
         "created_at": str(draft.get("created_at") or ""),
     }
 
@@ -755,6 +790,18 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "sessionEpoch": safe_session_epoch(raw_queue_command.get("sessionEpoch") or raw_queue_command.get("session_epoch")),
         "contextDocumentKey": normalize_document_context_key(raw_queue_command),
     } if queue_id else {}
+    queue_confirmation = {
+        "schema": "codex.mn.queuedWriteConfirmation.v1",
+        "status": "draft_confirmation",
+        "queueId": queue_id,
+        "draftId": draft_id,
+        "transactionId": "",
+        "conversationId": str(queue_command.get("conversationId") or ""),
+        "sessionId": str(queue_command.get("sessionId") or ""),
+        "sessionEpoch": str(queue_command.get("sessionEpoch") or ""),
+        "contextDocumentKey": str(queue_command.get("contextDocumentKey") or ""),
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    } if queue_id else {}
     draft = {
         "ok": bool(draft_payload.get("ok", True)),
         "message": str(draft_payload.get("message") or "草稿已准备好。"),
@@ -785,6 +832,7 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "bookmd5": book_md5,
         "queueId": queue_id,
         "queueCommand": queue_command,
+        "queueConfirmation": queue_confirmation,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -818,6 +866,112 @@ def delete_draft(draft_id: str) -> dict[str, Any]:
         return {"ok": True, "message": "草稿已丢弃。", "id": clean_id}
     except FileNotFoundError:
         return {"ok": True, "message": "草稿已不存在。", "id": clean_id}
+
+
+def pending_queued_write_confirmation(payload: dict[str, Any]) -> dict[str, Any]:
+    session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+    session_epoch_value = safe_session_epoch(payload.get("sessionEpoch") or payload.get("session_epoch"))
+    context_document_key = normalize_document_context_key(payload)
+    if not session_id or not session_epoch_value or not context_document_key:
+        return {"ok": True, "confirmation": None, "draft": None}
+    try:
+        paths = sorted(DRAFTS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    except Exception:
+        paths = []
+    for path in paths:
+        draft = read_json_file(path, {})
+        if not isinstance(draft, dict) or not draft:
+            continue
+        confirmation = queued_write_confirmation_from_draft(path.stem, draft)
+        if str(confirmation.get("status") or "") not in PENDING_QUEUED_WRITE_CONFIRMATION_STATUSES:
+            continue
+        if (
+            str(confirmation.get("sessionId") or "") != session_id
+            or str(confirmation.get("sessionEpoch") or "") != session_epoch_value
+            or str(confirmation.get("contextDocumentKey") or "") != context_document_key
+        ):
+            continue
+        return {
+            "ok": True,
+            "confirmation": confirmation,
+            "draft": draft_summary(path.stem, draft),
+        }
+    return {"ok": True, "confirmation": None, "draft": None}
+
+
+def update_queued_write_confirmation(
+    payload: dict[str, Any], *, trusted_native_event: bool = False
+) -> dict[str, Any]:
+    clean_id = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("draftId") or payload.get("id") or ""))[:80]
+    queue_id = str(payload.get("queueId") or "").strip()[:160]
+    if not clean_id or not queue_id:
+        return {"ok": False, "message": "queued confirmation requires draftId and queueId"}
+    path = DRAFTS_DIR / f"{clean_id}.json"
+    draft = read_json_file(path, {})
+    if not isinstance(draft, dict) or not draft:
+        return {"ok": False, "message": "queued confirmation draft does not exist"}
+    current = queued_write_confirmation_from_draft(clean_id, draft)
+    if not current or queue_id != str(current.get("queueId") or ""):
+        return {"ok": False, "message": "queued confirmation ownership mismatch"}
+    if not trusted_native_event:
+        session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+        session_epoch_value = safe_session_epoch(payload.get("sessionEpoch") or payload.get("session_epoch"))
+        context_document_key = normalize_document_context_key(payload)
+        if (
+            not session_id
+            or not session_epoch_value
+            or not context_document_key
+            or session_id != str(current.get("sessionId") or "")
+            or session_epoch_value != str(current.get("sessionEpoch") or "")
+            or context_document_key != str(current.get("contextDocumentKey") or "")
+        ):
+            return {"ok": False, "message": "queued confirmation session binding mismatch"}
+    transaction_id = str(payload.get("transactionId") or "")
+    current_transaction_id = str(current.get("transactionId") or "")
+    if current_transaction_id and transaction_id and transaction_id != current_transaction_id:
+        return {"ok": False, "message": "queued confirmation transaction mismatch"}
+    status = str(payload.get("status") or current.get("status") or "")
+    if status not in PENDING_QUEUED_WRITE_CONFIRMATION_STATUSES | {"resolved"}:
+        return {"ok": False, "message": "unsupported queued confirmation status"}
+    updated = {
+        **current,
+        "status": status,
+        "transactionId": transaction_id or current_transaction_id,
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    draft["queueConfirmation"] = updated
+    draft["updated_at"] = updated["updatedAt"]
+    write_json_file(path, draft)
+    return {
+        "ok": True,
+        "message": "queued write confirmation updated",
+        "confirmation": updated,
+        "draft": draft_summary(clean_id, draft),
+    }
+
+
+def apply_queued_write_confirmation_event(record: dict[str, Any]) -> dict[str, Any] | None:
+    event_name = str(record.get("event") or "")
+    status_by_event = {
+        "aiEditOperationReady": "transaction_confirmation",
+        "aiEditTransactionAccepted": "resolved",
+        "aiEditTransactionRejected": "resolved",
+    }
+    status = status_by_event.get(event_name)
+    if not status:
+        return None
+    extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+    if not extra.get("queueId") or not extra.get("draftId"):
+        return None
+    return update_queued_write_confirmation(
+        {
+            "queueId": extra.get("queueId"),
+            "draftId": extra.get("draftId"),
+            "transactionId": extra.get("transactionId"),
+            "status": status,
+        },
+        trusted_native_event=True,
+    )
 
 
 def _excluded_mindmap_paths(payload: dict[str, Any]) -> list[str]:
@@ -11482,6 +11636,9 @@ def append_event(payload: dict[str, Any]) -> dict[str, Any]:
     transaction_result = transaction_manager.apply_native_event(record)
     if transaction_result.get("ok"):
         record["transaction"] = transaction_manager.transaction_summary(transaction_result["transaction"])
+    queued_confirmation_result = apply_queued_write_confirmation_event(record)
+    if queued_confirmation_result is not None:
+        record["queuedWriteConfirmation"] = queued_confirmation_result
     if record["event"] == "mindmapTreeReadFinished":
         cache_result = write_latest_mindmap_tree(record)
         if cache_result.get("ok"):
@@ -16007,6 +16164,10 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return update_draft(payload)
     if action == "draft_delete":
         return delete_draft(str(payload.get("id") or payload.get("draftId") or ""))
+    if action == "queued_write_confirmation_get":
+        return pending_queued_write_confirmation(payload)
+    if action == "queued_write_confirmation_update":
+        return update_queued_write_confirmation(payload)
     stopped = stopped_response_if_needed(action)
     if stopped:
         return stopped

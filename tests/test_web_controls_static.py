@@ -2610,6 +2610,83 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("resolveQueuedWriteConfirmation", result_body)
         self.assertIn("resolveQueuedWriteConfirmation", self.js)
 
+    def test_queued_confirmation_guard_is_exact_session_scoped_and_restored_before_pump(self) -> None:
+        lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
+        state_body = self.js.split("var state = {", 1)[1].split("};", 1)[0]
+        restore_body = self.js.split("function restoreQueuedWriteConfirmationGuard", 1)[1].split(
+            "\n  function persistQueuedWriteConfirmationState", 1
+        )[0]
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+        set_conversation_body = self.js.split("function setCurrentConversation", 1)[1].split(
+            "\n  function currentMnObjectRef", 1
+        )[0]
+        render_context_body = self.js.split("function renderContext(ctx)", 1)[1].split(
+            "\n  function renderContextSourceLine", 1
+        )[0]
+        bind_body = self.js.split("function bind()", 1)[1].split(
+            "\n  if (document.readyState", 1
+        )[0]
+
+        self.assertIn("function queuedConfirmationMatchesActiveSession", lifecycle_js)
+        for marker in ["sessionId", "sessionEpoch", "contextDocumentKey"]:
+            self.assertIn(marker, lifecycle_js)
+        for marker in [
+            "queueGuardRestoreInFlight",
+            "queueGuardRestoreToken",
+            "queueGuardRestoredIdentityKey",
+        ]:
+            self.assertIn(marker, state_body)
+        self.assertIn("queued_write_confirmation_get", restore_body)
+        self.assertIn("pendingQueuedWriteConfirmation", restore_body)
+        self.assertIn("renderDraft", restore_body)
+        self.assertIn("renderAiEditOperation", restore_body)
+        self.assertIn("queueGuardRestoreInFlight", drain_body)
+        self.assertIn("restoreQueuedWriteConfirmationGuard", set_conversation_body)
+        self.assertIn("restoreQueuedWriteConfirmationGuard", render_context_body)
+        self.assertNotIn("!state.queueGuardRestoreInFlight", render_context_body)
+        self.assertIn("restoreQueuedWriteConfirmationGuard(startQueuePump)", bind_body)
+        self.assertNotIn("\n    startQueuePump();", bind_body)
+
+    def test_confirmation_resolution_requires_all_ids_and_exact_active_session(self) -> None:
+        resolve_body = self.js.split("function resolveQueuedWriteConfirmation", 1)[1].split(
+            "\n  function writeAcceptedDraft", 1
+        )[0]
+
+        for marker in [
+            "pending.sessionId",
+            "state.sessionId",
+            "pending.sessionEpoch",
+            "state.sessionEpoch",
+            "pending.contextDocumentKey",
+            "state.contextDocumentKey",
+            "providedCount",
+            "matchedCount",
+            "providedCount !== matchedCount",
+        ]:
+            self.assertIn(marker, resolve_body)
+
+    def test_confirmation_transitions_are_persisted_before_local_resolution(self) -> None:
+        persist_body = self.js.split("function persistQueuedWriteConfirmationState", 1)[1].split(
+            "\n  function applyQueuedResultPolicy", 1
+        )[0]
+        write_body = self.js.split("function writeAcceptedDraft", 1)[1].split(
+            "\n  function currentAiEditTransactionId", 1
+        )[0]
+        result_body = self.js.split("setAiEditOperationResult: function(payload)", 1)[1].split(
+            "\n    setAiEditTransactionStatus:", 1
+        )[0]
+
+        self.assertIn("queued_write_confirmation_update", persist_body)
+        self.assertIn("native_write", write_body)
+        self.assertIn("persistQueuedWriteConfirmationState", write_body)
+        self.assertIn("persistQueuedWriteConfirmationState", result_body)
+        self.assertLess(
+            result_body.index("persistQueuedWriteConfirmationState"),
+            result_body.index("resolveQueuedWriteConfirmation"),
+        )
+
     def test_empty_queued_goal_and_draft_failure_use_shared_failure_policy(self) -> None:
         goal_body = self.js.split("function requestGoalAction", 1)[1].split(
             "\n  function requestDraftAction", 1
