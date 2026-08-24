@@ -293,6 +293,23 @@ class SourceWorkspaceTests(unittest.TestCase):
         self.assertTrue(source_path.exists())
         self.assertEqual(source_path.read_text(encoding="utf-8"), original_contents)
 
+    def test_missing_backup_never_deletes_the_current_workspace_during_restore(self):
+        conversation_id = "CONV-MISSING-BACKUP"
+        original = self._source("backup-original.txt", "backup-original")
+        replacement = self._source("backup-replacement.txt", "backup-replacement")
+        first = source_workspace.build_workspace(conversation_id, [original], False)
+        transaction = source_workspace.backup_workspace(conversation_id)
+        second = source_workspace.build_workspace(conversation_id, [replacement], False)
+        discarded = source_workspace.discard_workspace_backup(conversation_id, transaction)
+
+        restored = source_workspace.restore_workspace_backup(conversation_id, transaction)
+        current = source_workspace.validate_workspace(conversation_id, second["revision"])
+
+        self.assertTrue(first["ok"] and transaction["ok"] and second["ok"] and discarded["ok"])
+        self.assertFalse(restored["ok"], restored)
+        self.assertTrue(current["ok"], current)
+        self.assertEqual([item["sourceId"] for item in current["sources"]], ["backup-replacement"])
+
     def test_clear_workspace_leaves_unrecognized_content_untouched(self):
         source = self._source("owned.txt", "owned")
         built = source_workspace.build_workspace("CONV-8", [source], False)

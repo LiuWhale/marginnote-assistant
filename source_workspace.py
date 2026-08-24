@@ -729,6 +729,100 @@ def clear_workspace(conversation_id: str) -> dict:
     }
 
 
+def backup_workspace(conversation_id: str) -> dict[str, Any]:
+    digest = workspace_path(conversation_id)
+    legacy = legacy_workspace_path(conversation_id)
+    paths = [path for path in (digest, legacy) if path.exists() or path.is_symlink()]
+    entries: list[dict[str, str]] = []
+    try:
+        for path in paths:
+            _workspace_cleanup_plan(path, str(conversation_id), allow_legacy_contract=True)
+        SOURCE_WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
+        for path in paths:
+            backup = SOURCE_WORKSPACES_DIR / f".backup-{uuid.uuid4().hex}"
+            os.replace(path, backup)
+            entries.append({"path": str(path), "backupPath": str(backup)})
+    except (OSError, ValueError) as exc:
+        for entry in reversed(entries):
+            original = Path(entry["path"])
+            backup = Path(entry["backupPath"])
+            if backup.exists() and not original.exists() and not original.is_symlink():
+                os.replace(backup, original)
+        return {
+            "ok": False,
+            "conversationId": str(conversation_id),
+            "entries": [],
+            "errors": [f"workspace backup failed: {exc}"],
+        }
+    return {
+        "ok": True,
+        "conversationId": str(conversation_id),
+        "entries": entries,
+        "errors": [],
+    }
+
+
+def _workspace_backup_entries(transaction: dict[str, Any], conversation_id: str) -> list[tuple[Path, Path]]:
+    if str(transaction.get("conversationId") or "") != str(conversation_id):
+        raise ValueError("workspace backup conversation ownership does not match")
+    expected_paths = {
+        workspace_path(conversation_id),
+        legacy_workspace_path(conversation_id),
+    }
+    entries: list[tuple[Path, Path]] = []
+    for raw in transaction.get("entries", []):
+        if not isinstance(raw, dict):
+            raise ValueError("workspace backup entry is invalid")
+        original = Path(str(raw.get("path") or ""))
+        backup = Path(str(raw.get("backupPath") or ""))
+        if original not in expected_paths:
+            raise ValueError("workspace backup target is not owned by this conversation")
+        if backup.parent != SOURCE_WORKSPACES_DIR or not backup.name.startswith(".backup-"):
+            raise ValueError("workspace backup path is outside the managed root")
+        if backup.exists() or backup.is_symlink():
+            _workspace_cleanup_plan(backup, str(conversation_id), allow_legacy_contract=True)
+        entries.append((original, backup))
+    return entries
+
+
+def restore_workspace_backup(conversation_id: str, transaction: dict[str, Any]) -> dict[str, Any]:
+    try:
+        entries = _workspace_backup_entries(transaction, conversation_id)
+        for _, backup in entries:
+            if not backup.exists() or backup.is_symlink():
+                raise ValueError("workspace backup is missing or invalid")
+        expected_paths = {
+            workspace_path(conversation_id),
+            legacy_workspace_path(conversation_id),
+        }
+        for path in expected_paths:
+            if path.exists() or path.is_symlink():
+                _remove_owned_tree(path, str(conversation_id), allow_legacy_contract=True)
+        for original, backup in entries:
+            if original.exists() or original.is_symlink():
+                raise ValueError("workspace restore target already exists")
+            os.replace(backup, original)
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "errors": [f"workspace restore failed: {exc}"]}
+    return {"ok": True, "errors": []}
+
+
+def discard_workspace_backup(conversation_id: str, transaction: dict[str, Any]) -> dict[str, Any]:
+    errors: list[str] = []
+    try:
+        entries = _workspace_backup_entries(transaction, conversation_id)
+    except ValueError as exc:
+        return {"ok": False, "errors": [f"workspace backup cleanup failed: {exc}"]}
+    for _, backup in entries:
+        if not backup.exists() and not backup.is_symlink():
+            continue
+        try:
+            _remove_owned_tree(backup, str(conversation_id), allow_legacy_contract=True)
+        except (OSError, ValueError) as exc:
+            errors.append(f"workspace backup cleanup failed: {exc}")
+    return {"ok": not errors, "errors": errors}
+
+
 def cleanup_orphans(
     active_conversation_ids: set[str] | list[str] | tuple[str, ...],
     *,

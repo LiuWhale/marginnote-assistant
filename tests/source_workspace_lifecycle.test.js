@@ -165,17 +165,18 @@ test('bulk removal of every unprotected member clears only conversation membersh
   assert.equal(actions.some((item) => /delete|upload/.test(item.action)), false);
 });
 
-test('bulk source removal rolls membership back after an update failure', () => {
+test('bulk source removal adopts authoritative membership after an initial CAS conflict', () => {
   const state = {
     conversationId: 'CONV-A',
     followCurrentDocument: false,
     sourceWorkspace: {revision: 'REV-OLD'},
-    sourceWorkspaceSelection: {current: true, 'upload-a': true, 'upload-b': true},
-    sourceWorkspaceRemovalSelection: {'upload-a': true},
+    sourceWorkspaceSelection: {'source-a': true, 'source-b': true},
+    sourceWorkspaceRemovalSelection: {'source-b': true},
     sourceWorkspaceBulkInFlight: false,
     sourceWorkspaceInFlight: false,
   };
   const actions = [];
+  let completed = null;
   const applyBulkSourceWorkspaceRemoval = loadAppFunction(
     'applyBulkSourceWorkspaceRemoval',
     'clearSourceWorkspace',
@@ -183,7 +184,7 @@ test('bulk source removal rolls membership back after an update failure', () => 
       state,
       sourceWorkspaceOperationAllowed: () => true,
       sourceWorkspaceControlsLocked: () => false,
-      sourceWorkspaceRemovalSelectionIds: () => ['upload-a'],
+      sourceWorkspaceRemovalSelectionIds: () => ['source-b'],
       sourceWorkspaceSelectionIds: () => Object.keys(state.sourceWorkspaceSelection),
       sourceWorkspaceSelectionMap: (ids) => Object.fromEntries(ids.map((id) => [id, true])),
       sourceWorkspaceResultRevision: (result, fallback) => String((result.workspace || {}).revision || fallback || ''),
@@ -192,25 +193,38 @@ test('bulk source removal rolls membership back after an update failure', () => 
       ensureSourceWorkspaceConversation: (done) => done(),
       postSourceWorkspace: (action, payload, done) => {
         actions.push({action, payload});
-        if (actions.length === 1) return done({ok: false, workspace: {revision: 'REV-FAILED'}});
-        if (actions.length === 2) return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
-        return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
+        return done({
+          ok: false,
+          blocked: 'source_workspace_revision_mismatch',
+          sourceIds: ['source-a', 'source-c'],
+          followCurrentDocument: false,
+          sourceWorkspaceRevision: 'REV-NEW',
+          workspace: {ok: true, revision: 'REV-NEW'},
+        });
       },
-      applySourceWorkspaceResult: () => {},
+      applySourceWorkspaceResult: (result) => {
+        state.sourceWorkspaceSelection = Object.fromEntries(
+          (result.sourceIds || []).map((id) => [id, true]),
+        );
+        state.sourceWorkspace.revision = result.sourceWorkspaceRevision || '';
+      },
       window: {SourceWorkspaceLifecycle: lifecycle, confirm: () => true},
       addFailureMessage: () => {},
     },
   );
 
-  applyBulkSourceWorkspaceRemoval();
+  applyBulkSourceWorkspaceRemoval((result) => { completed = result; });
 
   assert.equal(actions[0].action, 'source_workspace_update');
-  assert.deepEqual(actions[0].payload.sourceIds, ['current', 'upload-b']);
-  assert.equal(actions[1].action, 'source_workspace_update');
-  assert.deepEqual(actions[1].payload.sourceIds, ['current', 'upload-a', 'upload-b']);
-  assert.equal(actions[1].payload.sourceWorkspaceRevision, 'REV-FAILED');
-  assert.equal(actions[2].action, 'source_workspace_validate');
-  assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), ['current', 'upload-a', 'upload-b']);
+  assert.deepEqual(actions[0].payload.sourceIds, ['source-a']);
+  assert.equal(
+    actions.filter((item) => item.action === 'source_workspace_update').length,
+    1,
+    'the stale snapshot must never be submitted against REV-NEW',
+  );
+  assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), ['source-a', 'source-c']);
+  assert.equal(state.sourceWorkspace.revision, 'REV-NEW');
+  assert.equal(completed.blocked, 'source_workspace_revision_mismatch');
   assert.equal(state.sourceWorkspaceBulkInFlight, false);
 });
 
@@ -1723,6 +1737,7 @@ test('queued command dispatch captures an immutable exact session binding', () =
     contextDocumentKey: 'DOC-A',
   });
   let capturedBinding = null;
+  let capturedPayload = null;
   const runQueuedCommand = loadAppFunction('runQueuedCommand', 'drainNextQueuedAction', {
     state,
     window: {SourceWorkspaceLifecycle: lifecycle},
@@ -1743,7 +1758,8 @@ test('queued command dispatch captures an immutable exact session binding', () =
     applyQueuedResultPolicy: () => {},
     requestGoalAction: () => assert.fail('chat is not a goal'),
     requestDraftAction: () => assert.fail('chat is not a write'),
-    requestTextAction: (_action, _prompt, _label, _queueId, _extra, binding) => {
+    requestTextAction: (_action, _prompt, _label, _queueId, extra, binding) => {
+      capturedPayload = extra;
       capturedBinding = binding;
     },
   });
@@ -1767,6 +1783,8 @@ test('queued command dispatch captures an immutable exact session binding', () =
   assert.equal(capturedBinding.sessionEpoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   assert.equal(capturedBinding.contextDocumentKey, 'DOC-A');
   assert.equal(Object.isFrozen(capturedBinding), true);
+  assert.equal(capturedPayload.queueId, 'QUEUE-A');
+  assert.equal(capturedPayload._queue_id, 'QUEUE-A');
 });
 
 test('automatic document switch clears queue controls before migration or debounce', () => {

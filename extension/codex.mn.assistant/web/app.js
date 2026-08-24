@@ -2785,7 +2785,29 @@
         sourceWorkspaceRevision: snapshot.sourceWorkspaceRevision
       }, function(updateResult) {
         if (!updateResult || !updateResult.ok) {
-          restoreSnapshot(updateResult || {}, '保存');
+          if (
+            updateResult &&
+            updateResult.blocked === 'source_workspace_revision_mismatch' &&
+            Array.isArray(updateResult.sourceIds)
+          ) {
+            applySourceWorkspaceResult(updateResult);
+            state.sourceWorkspaceRemovalSelection = {};
+            state.sourceWorkspaceRemovalManagementActive = false;
+            finish(
+              updateResult,
+              'error',
+              '资料已被其他操作更新，已刷新当前成员；请重新选择要移除的资料。'
+            );
+            return;
+          }
+          state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(snapshot.sourceIds);
+          state.followCurrentDocument = snapshot.followCurrentDocument;
+          finish(
+            updateResult || {},
+            'error',
+            '资料移除保存失败，当前成员未改变；请刷新后重试。'
+          );
+          addFailureMessage('资料移除保存失败', updateResult || {});
           return;
         }
         applySourceWorkspaceResult(updateResult, {selectionOverride: reducedSourceIds});
@@ -8639,6 +8661,8 @@
       return;
     }
     var extraPayload = {
+      queueId: queueId,
+      _queue_id: queueId,
       replyDerivedMindmap: !!command.replyDerivedMindmap,
       sourceAnswerMarkdown: command.sourceAnswerMarkdown || '',
       sourceIds: command.sourceIds || [],

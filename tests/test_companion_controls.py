@@ -847,7 +847,7 @@ class CompanionControlsTests(unittest.TestCase):
             release_precheck = threading.Event()
             clear_calls: list[str] = []
             original_record = companion.conversation_record_for_source_action
-            original_clear = companion.source_workspace.clear_workspace
+            original_backup = companion.source_workspace.backup_workspace
 
             def blocking_record(*args: Any, **kwargs: Any) -> Any:
                 result = original_record(*args, **kwargs)
@@ -857,10 +857,10 @@ class CompanionControlsTests(unittest.TestCase):
 
             def counted_clear(*args: Any, **kwargs: Any) -> dict[str, Any]:
                 clear_calls.append("clear")
-                return original_clear(*args, **kwargs)
+                return original_backup(*args, **kwargs)
 
             with mock.patch.object(companion, "conversation_record_for_source_action", side_effect=blocking_record):
-                with mock.patch.object(companion.source_workspace, "clear_workspace", side_effect=counted_clear):
+                with mock.patch.object(companion.source_workspace, "backup_workspace", side_effect=counted_clear):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                         clearing_source = executor.submit(
                             companion.source_workspace_action, stale_payload, "source_workspace_clear"
@@ -891,10 +891,10 @@ class CompanionControlsTests(unittest.TestCase):
             )
             source_clear_started = threading.Event()
             release_source_clear = threading.Event()
-            original_clear = companion.source_workspace.clear_workspace
+            original_backup = companion.source_workspace.backup_workspace
 
             def blocking_clear(*args: Any, **kwargs: Any) -> dict[str, Any]:
-                result = original_clear(*args, **kwargs)
+                result = original_backup(*args, **kwargs)
                 source_clear_started.set()
                 self.assertTrue(release_source_clear.wait(5), "test did not release source clear")
                 return result
@@ -903,7 +903,7 @@ class CompanionControlsTests(unittest.TestCase):
                 **bound,
                 "sourceWorkspaceRevision": initial["sourceWorkspaceRevision"],
             }
-            with mock.patch.object(companion.source_workspace, "clear_workspace", side_effect=blocking_clear):
+            with mock.patch.object(companion.source_workspace, "backup_workspace", side_effect=blocking_clear):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                     clearing_source = executor.submit(
                         companion.source_workspace_action, payload, "source_workspace_clear"
@@ -2061,16 +2061,21 @@ class CompanionControlsTests(unittest.TestCase):
     def test_draft_persists_queued_confirmation_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            saved = companion.save_draft(
+            binding = self.owned_session_payload(
+                companion,
                 {
                     "topicid": "T1",
                     "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|draft-binding",
+                    "conversationId": "CONV-A",
+                    "source": "unittest",
+                },
+            )
+            saved = companion.save_draft(
+                {
+                    **binding,
                     "queueId": "QUEUE-WRITE-1",
-                    "queueCommand": {
-                        "conversationId": "CONV-A",
-                        "sessionId": "a" * 24,
-                        "sessionEpoch": "b" * 32,
-                    },
+                    "queueCommand": {**binding, "rawAction": "generate_card"},
                     "draft": {"cards": [{"title": "A", "body": "B"}]},
                 }
             )
@@ -2087,16 +2092,19 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             companion = load_companion(root)
-            binding = {
-                "conversationId": "CONV-A",
-                "sessionId": "a" * 24,
-                "sessionEpoch": "b" * 32,
-                "contextDocumentKey": "T1|B1|/papers/a.pdf",
-            }
-            saved = companion.save_draft(
+            binding = self.owned_session_payload(
+                companion,
                 {
                     "topicid": "T1",
                     "bookmd5": "B1",
+                    "conversationId": "CONV-A",
+                    "contextDocumentKey": "T1|B1|/papers/a.pdf",
+                    "source": "unittest",
+                },
+            )
+            saved = companion.save_draft(
+                {
+                    **binding,
                     "queueId": "QUEUE-WRITE-A",
                     "queueCommand": {**binding, "rawAction": "generate_card"},
                     "draft": {"cards": [{"title": "A", "body": "B"}]},
@@ -2117,8 +2125,8 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(saved["ok"], saved)
             self.assertEqual(active_a["confirmation"]["queueId"], "QUEUE-WRITE-A")
             self.assertEqual(active_a["confirmation"]["draftId"], saved["draft"]["id"])
-            self.assertEqual(active_a["confirmation"]["sessionId"], "a" * 24)
-            self.assertEqual(active_a["confirmation"]["sessionEpoch"], "b" * 32)
+            self.assertEqual(active_a["confirmation"]["sessionId"], binding["sessionId"])
+            self.assertEqual(active_a["confirmation"]["sessionEpoch"], binding["sessionEpoch"])
             self.assertEqual(active_a["confirmation"]["contextDocumentKey"], "T1|B1|/papers/a.pdf")
             self.assertIsNone(inactive_b["confirmation"])
             self.assertEqual(reloaded["confirmation"], active_a["confirmation"])
@@ -2128,16 +2136,19 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             companion = load_companion(root)
-            binding = {
-                "conversationId": "CONV-A",
-                "sessionId": "a" * 24,
-                "sessionEpoch": "b" * 32,
-                "contextDocumentKey": "T1|B1|/papers/a.pdf",
-            }
-            saved = companion.save_draft(
+            binding = self.owned_session_payload(
+                companion,
                 {
                     "topicid": "T1",
                     "bookmd5": "B1",
+                    "conversationId": "CONV-A",
+                    "contextDocumentKey": "T1|B1|/papers/a.pdf",
+                    "source": "unittest",
+                },
+            )
+            saved = companion.save_draft(
+                {
+                    **binding,
                     "queueId": "QUEUE-WRITE-A",
                     "queueCommand": {**binding, "rawAction": "generate_card"},
                     "draft": {"cards": [{"title": "A", "body": "B"}]},
@@ -7360,6 +7371,103 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(saved["followCurrentDocument"])
             self.assertEqual([item["content"] for item in saved["history"]], ["question", "answer"])
 
+    def test_source_workspace_update_session_write_failure_restores_previous_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-UPDATE-WRITE-FAIL"
+            )
+            session_path = companion.session_path(bound)
+            workspace_path = companion.source_workspace.workspace_path("CONV-UPDATE-WRITE-FAIL")
+            session_before = session_path.read_bytes()
+            manifest_before = (workspace_path / "manifest.json").read_bytes()
+            upload_index_before = companion.UPLOAD_INDEX_PATH.read_bytes()
+            source_bytes_before = {
+                path.name: path.read_bytes() for path in sorted((root / "uploads").glob("source-*.md"))
+            }
+
+            with mock.patch.object(
+                companion,
+                "_atomic_write_session_json",
+                side_effect=OSError("synthetic session replace failure"),
+            ):
+                try:
+                    result = companion.source_workspace_action(
+                        {
+                            **bound,
+                            "sourceIds": source_ids[1:],
+                            "followCurrentDocument": False,
+                            "sourceWorkspaceRevision": initial["sourceWorkspaceRevision"],
+                        },
+                        "source_workspace_update",
+                    )
+                except OSError as exc:
+                    result = {"ok": False, "blocked": "uncaught_oserror", "message": str(exc)}
+
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "session_write_failed")
+            self.assertEqual(session_path.read_bytes(), session_before)
+            self.assertEqual((workspace_path / "manifest.json").read_bytes(), manifest_before)
+            restored = companion.source_workspace.validate_workspace(
+                "CONV-UPDATE-WRITE-FAIL", initial["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(restored["ok"], restored)
+            self.assertEqual([item["sourceId"] for item in restored["sources"]], source_ids[:1])
+            self.assertEqual(companion.UPLOAD_INDEX_PATH.read_bytes(), upload_index_before)
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in sorted((root / "uploads").glob("source-*.md"))},
+                source_bytes_before,
+            )
+
+    def test_source_workspace_clear_session_write_failure_restores_previous_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-CLEAR-WRITE-FAIL"
+            )
+            session_path = companion.session_path(bound)
+            workspace_path = companion.source_workspace.workspace_path("CONV-CLEAR-WRITE-FAIL")
+            session_before = session_path.read_bytes()
+            manifest_before = (workspace_path / "manifest.json").read_bytes()
+            upload_index_before = companion.UPLOAD_INDEX_PATH.read_bytes()
+            source_bytes_before = {
+                path.name: path.read_bytes() for path in sorted((root / "uploads").glob("source-*.md"))
+            }
+
+            with mock.patch.object(
+                companion,
+                "_atomic_write_session_json",
+                side_effect=OSError("synthetic session replace failure"),
+            ):
+                try:
+                    result = companion.source_workspace_action(
+                        {
+                            **bound,
+                            "followCurrentDocument": False,
+                            "sourceWorkspaceRevision": initial["sourceWorkspaceRevision"],
+                        },
+                        "source_workspace_clear",
+                    )
+                except OSError as exc:
+                    result = {"ok": False, "blocked": "uncaught_oserror", "message": str(exc)}
+
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "session_write_failed")
+            self.assertEqual(session_path.read_bytes(), session_before)
+            self.assertEqual((workspace_path / "manifest.json").read_bytes(), manifest_before)
+            restored = companion.source_workspace.validate_workspace(
+                "CONV-CLEAR-WRITE-FAIL", initial["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(restored["ok"], restored)
+            self.assertEqual([item["sourceId"] for item in restored["sources"]], source_ids[:1])
+            self.assertEqual(companion.UPLOAD_INDEX_PATH.read_bytes(), upload_index_before)
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in sorted((root / "uploads").glob("source-*.md"))},
+                source_bytes_before,
+            )
+
     def test_conversation_load_restores_source_metadata_and_rebuilds_missing_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -8383,6 +8491,224 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(acknowledged["ok"], acknowledged)
             self.assertEqual(acknowledged["removed"], 1)
             self.assertEqual(reloaded.poll_commands("T1", "B1")["pending"], 0)
+
+    def test_queued_chat_replay_returns_durable_result_without_reinvoking_or_reappending(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|chat-replay",
+                    "conversationId": "CONV-CHAT-REPLAY",
+                    "source": "unittest",
+                },
+            )
+            queued = companion.enqueue_command(
+                {**bound, "action": "chat", "_queue_raw": True, "prompt": "execute chat once"}
+            )["queued"]
+            command = companion.poll_commands("T1", "B1")["command"]
+            execution = {
+                **bound,
+                **command,
+                "action": "chat",
+                "_queue_id": queued["id"],
+            }
+            invocations: list[str] = []
+            companion.generate_reply = lambda payload, task: (
+                invocations.append(task) or "durable chat answer",
+                "codex-cli",
+            )
+
+            first = companion.handle_action(execution)
+            replay = companion.handle_action(execution)
+            wrong_action = companion.handle_action({**execution, "action": "explain_selection"})
+            history = companion.history_payload(bound)["history"]
+
+            self.assertTrue(first["ok"], first)
+            self.assertTrue(replay["ok"], replay)
+            self.assertTrue(replay.get("queueReplay"), replay)
+            self.assertEqual(replay["reply"], "durable chat answer")
+            self.assertEqual(invocations, ["chat"])
+            self.assertEqual([item["content"] for item in history], ["execute chat once", "durable chat answer"])
+            self.assertFalse(wrong_action["ok"], wrong_action)
+            self.assertEqual(wrong_action.get("blocked"), "queue_effect_identity_mismatch")
+
+    def test_queued_write_replay_reuses_generation_result_and_exact_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|write-replay",
+                    "conversationId": "CONV-WRITE-REPLAY",
+                    "source": "unittest",
+                },
+            )
+            queued = companion.enqueue_command(
+                {
+                    **bound,
+                    "action": "generate_card",
+                    "_queue_raw": True,
+                    "prompt": "create one durable card",
+                }
+            )["queued"]
+            command = companion.poll_commands("T1", "B1")["command"]
+            execution = {
+                **bound,
+                **command,
+                "action": "generate_card",
+                "_queue_id": queued["id"],
+            }
+            invocations: list[str] = []
+            companion.generate_reply = lambda payload, task: (
+                invocations.append(task) or "## Durable card\nOne generated body.",
+                "codex-cli",
+            )
+
+            first = companion.handle_action(execution)
+            saved_first = companion.save_draft(
+                {
+                    **bound,
+                    "draft": first,
+                    "originalAction": "generate_card",
+                    "queueId": queued["id"],
+                    "queueCommand": command,
+                }
+            )
+            reloaded = load_companion(root)
+            reloaded.generate_reply = lambda payload, task: (_ for _ in ()).throw(
+                AssertionError("queued write replay invoked Codex again")
+            )
+            replay = reloaded.handle_action(execution)
+            saved_replay = reloaded.save_draft(
+                {
+                    **bound,
+                    "draft": replay,
+                    "originalAction": "generate_card",
+                    "queueId": queued["id"],
+                    "queueCommand": command,
+                }
+            )
+            history = reloaded.history_payload(bound)["history"]
+
+            self.assertTrue(first["ok"], first)
+            self.assertTrue(saved_first["ok"], saved_first)
+            self.assertTrue(replay["ok"], replay)
+            self.assertTrue(replay.get("queueReplay"), replay)
+            self.assertTrue(saved_replay["ok"], saved_replay)
+            self.assertEqual(saved_replay["draft"]["id"], saved_first["draft"]["id"])
+            self.assertEqual(invocations, ["generate_card"])
+            self.assertEqual(len(list(reloaded.DRAFTS_DIR.glob("*.json"))), 1)
+            self.assertEqual(len(history), 2)
+
+    def test_queued_write_draft_save_rejects_a_deleted_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|deleted-write-draft",
+                    "conversationId": "CONV-DELETED-WRITE-DRAFT",
+                    "source": "unittest",
+                },
+            )
+            queued = companion.enqueue_command(
+                {
+                    **bound,
+                    "action": "generate_card",
+                    "_queue_raw": True,
+                    "prompt": "create then delete",
+                }
+            )["queued"]
+            command = companion.poll_commands("T1", "B1")["command"]
+            execution = {
+                **bound,
+                **command,
+                "action": "generate_card",
+                "_queue_id": queued["id"],
+            }
+            companion.generate_reply = lambda payload, task: ("## Durable card\nBody.", "codex-cli")
+            generated = companion.handle_action(execution)
+            deleted = companion.delete_conversation(bound)
+
+            saved = companion.save_draft(
+                {
+                    **bound,
+                    "draft": generated,
+                    "originalAction": "generate_card",
+                    "queueId": queued["id"],
+                    "queueCommand": command,
+                }
+            )
+
+            self.assertTrue(generated["ok"], generated)
+            self.assertTrue(deleted["ok"], deleted)
+            self.assertFalse(saved["ok"], saved)
+            self.assertEqual(saved.get("blocked"), "session_deleted")
+            self.assertEqual(list(companion.DRAFTS_DIR.glob("*.json")), [])
+
+    def test_queue_completion_marker_failure_replays_durable_result_after_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|completion-replay",
+                    "conversationId": "CONV-COMPLETION-REPLAY",
+                    "source": "unittest",
+                },
+            )
+            queued = companion.enqueue_command(
+                {**bound, "action": "chat", "_queue_raw": True, "prompt": "persist before marker"}
+            )["queued"]
+            command = companion.poll_commands("T1", "B1")["command"]
+            execution = {
+                **bound,
+                **command,
+                "action": "chat",
+                "_queue_id": queued["id"],
+            }
+            companion.generate_reply = lambda payload, task: ("persisted before marker", "codex-cli")
+
+            first = companion.handle_action(execution)
+            with mock.patch.object(
+                companion,
+                "atomic_rewrite_queue",
+                side_effect=OSError("synthetic completion marker failure"),
+            ):
+                marker_failure = companion.mark_queue_commands_completed(
+                    {"topicid": "T1", "bookmd5": "B1", "ids": [queued["id"]]}
+                )
+
+            reloaded = load_companion(root)
+            reloaded.generate_reply = lambda payload, task: (_ for _ in ()).throw(
+                AssertionError("completion replay invoked Codex again")
+            )
+            replay = reloaded.handle_action(execution)
+            marked = reloaded.mark_queue_commands_completed(
+                {"topicid": "T1", "bookmd5": "B1", "ids": [queued["id"]]}
+            )
+            polled = reloaded.poll_commands("T1", "B1")
+
+            self.assertTrue(first["ok"], first)
+            self.assertFalse(marker_failure["ok"], marker_failure)
+            self.assertTrue(replay["ok"], replay)
+            self.assertTrue(replay.get("queueReplay"), replay)
+            self.assertEqual(replay["reply"], "persisted before marker")
+            self.assertTrue(marked["ok"], marked)
+            self.assertTrue(polled["command"]["_queue_completed_ack_pending"])
+            self.assertEqual(len(reloaded.history_payload(bound)["history"]), 2)
 
     def test_quarantine_rewrite_does_not_lose_concurrent_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

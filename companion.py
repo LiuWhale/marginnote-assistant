@@ -153,6 +153,7 @@ CURRENT_GENERATION_PROCESS: Any | None = None
 CURRENT_GENERATION_PROCESS_LABEL = ""
 HISTORY_LOCKS = tuple(threading.RLock() for _ in range(64))
 QUEUE_LOCKS = tuple(threading.RLock() for _ in range(64))
+DRAFT_LOCKS = tuple(threading.RLock() for _ in range(64))
 SOURCE_MUTATION_LOCKS = tuple(threading.RLock() for _ in range(64))
 SOURCE_CLEANUP_LOCK = threading.RLock()
 ACTIVE_CONVERSATIONS_LOCK = threading.RLock()
@@ -776,7 +777,6 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         write_target = mindmap["writeTarget"]
     if not cards and not mindmap:
         return {"ok": False, "message": "草稿没有卡片或脑图，不能写入。"}
-    draft_id = hashlib.sha256(f"{time.time()}|{uuid.uuid4()}".encode("utf-8")).hexdigest()[:20]
     topic_id = str(payload.get("topicid") or draft_payload.get("topicid") or "")
     book_md5 = str(payload.get("bookmd5") or draft_payload.get("bookmd5") or "")
     mn_object = (
@@ -793,6 +793,33 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "sessionEpoch": safe_session_epoch(raw_queue_command.get("sessionEpoch") or raw_queue_command.get("session_epoch")),
         "contextDocumentKey": normalize_document_context_key(raw_queue_command),
     } if queue_id else {}
+    queue_draft_identity = {
+        "queueId": queue_id,
+        "action": str(queue_command.get("rawAction") or payload.get("originalAction") or ""),
+        "conversationId": str(queue_command.get("conversationId") or ""),
+        "sessionId": str(queue_command.get("sessionId") or ""),
+        "sessionEpoch": str(queue_command.get("sessionEpoch") or ""),
+        "contextDocumentKey": str(queue_command.get("contextDocumentKey") or ""),
+    }
+    if queue_id:
+        queue_session_binding = {
+            **payload,
+            "conversationId": queue_draft_identity["conversationId"],
+            "sessionId": queue_draft_identity["sessionId"],
+            "sessionEpoch": queue_draft_identity["sessionEpoch"],
+            "contextDocumentKey": queue_draft_identity["contextDocumentKey"],
+        }
+        try:
+            mutate_session(queue_session_binding, None, persist=False)
+        except SessionMutationRejected as exc:
+            return exc.result()
+    durable_queue_draft = all(queue_draft_identity.values())
+    if durable_queue_draft:
+        draft_id = hashlib.sha256(
+            json.dumps(queue_draft_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:20]
+    else:
+        draft_id = hashlib.sha256(f"{time.time()}|{uuid.uuid4()}".encode("utf-8")).hexdigest()[:20]
     queue_confirmation = {
         "schema": "codex.mn.queuedWriteConfirmation.v1",
         "status": "draft_confirmation",
@@ -839,7 +866,32 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
-    write_json_file(DRAFTS_DIR / f"{draft_id}.json", draft)
+    draft_path = DRAFTS_DIR / f"{draft_id}.json"
+    with draft_lock(draft_path):
+        existing = read_json_file(draft_path, {})
+        if isinstance(existing, dict) and existing:
+            if durable_queue_draft:
+                existing_command = (
+                    existing.get("queueCommand") if isinstance(existing.get("queueCommand"), dict) else {}
+                )
+                existing_identity = {
+                    "queueId": str(existing.get("queueId") or ""),
+                    "action": str(existing_command.get("rawAction") or ""),
+                    "conversationId": str(existing_command.get("conversationId") or ""),
+                    "sessionId": str(existing_command.get("sessionId") or ""),
+                    "sessionEpoch": str(existing_command.get("sessionEpoch") or ""),
+                    "contextDocumentKey": str(existing_command.get("contextDocumentKey") or ""),
+                }
+                if existing_identity != queue_draft_identity:
+                    return {"ok": False, "message": "queued draft identity mismatch"}
+                return {
+                    "ok": True,
+                    "message": "已恢复此前保存的待写入草稿。",
+                    "draft": draft_summary(draft_id, existing),
+                    "draftReplay": True,
+                }
+            return {"ok": False, "message": "draft ID collision"}
+        _atomic_write_session_json(draft_path, draft)
     return {
         "ok": True,
         "message": "已生成待写入草稿，请预览后确认写入 MarginNote。",
@@ -4824,6 +4876,12 @@ def queue_lock(path: Path) -> threading.RLock:
     return QUEUE_LOCKS[index]
 
 
+def draft_lock(path: Path) -> threading.RLock:
+    key = str(path.expanduser().resolve(strict=False))
+    index = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % len(DRAFT_LOCKS)
+    return DRAFT_LOCKS[index]
+
+
 def atomic_rewrite_queue(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -7596,6 +7654,139 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
     }
 
 
+def queued_effect_identity(action: str, payload: dict[str, Any]) -> dict[str, str]:
+    return {
+        "queueId": str(payload.get("_queue_id") or payload.get("queue_id") or payload.get("queueId") or ""),
+        "action": str(action or ""),
+        "topicid": normalize_topic_id(payload),
+        "bookmd5": normalize_book_md5(payload),
+        "conversationId": normalize_conversation_id(payload),
+        "sessionId": safe_session_id(payload.get("sessionId") or payload.get("session_id")),
+        "sessionEpoch": session_epoch(payload),
+        "contextDocumentKey": normalize_document_context_key(payload),
+    }
+
+
+def queued_effect_identity_matches_record(
+    identity: dict[str, str], record: dict[str, Any], payload: dict[str, Any]
+) -> bool:
+    command = record.get("command") if isinstance(record.get("command"), dict) else {}
+    expected = {
+        "queueId": str(record.get("id") or ""),
+        "action": str(command.get("rawAction") or command.get("action") or ""),
+        "topicid": str(record.get("topicid") or ""),
+        "bookmd5": str(record.get("bookmd5") or ""),
+        "conversationId": normalize_conversation_id(command),
+        "sessionId": safe_session_id(command.get("sessionId") or command.get("session_id")),
+        "sessionEpoch": session_epoch(command),
+        "contextDocumentKey": normalize_document_context_key(command),
+    }
+    if identity != expected:
+        return False
+    if str(payload.get("prompt") or "") != str(command.get("prompt") or ""):
+        return False
+    if unique_string_list(payload.get("sourceIds")) != unique_string_list(command.get("sourceIds")):
+        return False
+    if str(payload.get("sourceWorkspaceRevision") or "") != str(command.get("sourceWorkspaceRevision") or ""):
+        return False
+    return bool(identity["queueId"] and identity["sessionId"] and identity["sessionEpoch"] and identity["action"])
+
+
+def execute_queued_generation_once(
+    action: str, payload: dict[str, Any], execute: Any
+) -> dict[str, Any]:
+    identity = queued_effect_identity(action, payload)
+    if not all(
+        identity.get(field)
+        for field in ("queueId", "topicid", "action", "conversationId", "sessionId", "sessionEpoch")
+    ):
+        return {
+            "ok": False,
+            "blocked": "queue_effect_identity_mismatch",
+            "message": "队列执行缺少完整的持久化身份绑定。",
+        }
+    path = queue_path(identity["topicid"], identity["bookmd5"])
+    with queue_lock(path):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            lines = []
+        except OSError as exc:
+            return {"ok": False, "blocked": "queue_effect_read_failed", "message": str(exc)}
+        target_index = -1
+        target_record: dict[str, Any] | None = None
+        for index, line in enumerate(lines):
+            try:
+                record = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(record, dict) or str(record.get("id") or "") != identity["queueId"]:
+                continue
+            target_index = index
+            target_record = record
+            break
+        if target_record is None:
+            return {
+                "ok": False,
+                "blocked": "queue_effect_identity_mismatch",
+                "message": "队列记录不存在或不再属于当前执行。",
+            }
+        if not queued_effect_identity_matches_record(identity, target_record, payload):
+            return {
+                "ok": False,
+                "blocked": "queue_effect_identity_mismatch",
+                "message": "队列 ID、动作或会话版本与持久化记录不匹配。",
+            }
+        effect = target_record.get("queuedEffect") if isinstance(target_record.get("queuedEffect"), dict) else {}
+        if effect and effect.get("identity") != identity:
+            return {
+                "ok": False,
+                "blocked": "queue_effect_identity_mismatch",
+                "message": "队列执行结果的持久化身份不匹配。",
+            }
+        if effect.get("state") == "completed" and isinstance(effect.get("result"), dict):
+            return {**dict(effect["result"]), "queueReplay": True, "queueId": identity["queueId"]}
+        if effect.get("state") == "started":
+            return {
+                "ok": False,
+                "blocked": "queue_effect_incomplete",
+                "message": "队列动作此前已开始但没有完整结果；为避免重复副作用，未再次执行。",
+                "queueId": identity["queueId"],
+            }
+        target_record["queuedEffect"] = {
+            "schema": "codex.mn.queuedEffect.v1",
+            "state": "started",
+            "identity": identity,
+            "startedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+        lines[target_index] = json.dumps(target_record, ensure_ascii=False)
+        try:
+            atomic_rewrite_queue(path, lines)
+        except OSError as exc:
+            return {"ok": False, "blocked": "queue_effect_claim_failed", "message": str(exc)}
+
+        result = execute()
+        if not isinstance(result, dict):
+            result = {"ok": False, "message": "生成动作没有返回可用结果。"}
+        if not result.get("ok"):
+            target_record.pop("queuedEffect", None)
+            lines[target_index] = json.dumps(target_record, ensure_ascii=False)
+            atomic_rewrite_queue(path, lines)
+            return result
+        durable_result = json.loads(json.dumps(result, ensure_ascii=False))
+        target_record["queuedEffect"] = {
+            "schema": "codex.mn.queuedEffect.v1",
+            "state": "completed",
+            "identity": identity,
+            "startedAt": str(target_record["queuedEffect"].get("startedAt") or ""),
+            "completedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "result": durable_result,
+        }
+        lines[target_index] = json.dumps(target_record, ensure_ascii=False)
+        atomic_rewrite_queue(path, lines)
+        return result
+
+
 def mark_queue_commands_completed(payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
@@ -8791,6 +8982,15 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
         operation: dict[str, Any] = {}
         current: dict[str, Any] = {}
 
+        def restore_workspace_after_failure() -> dict[str, Any]:
+            transaction = operation.get("workspaceBackup")
+            if not isinstance(transaction, dict):
+                return {"ok": True, "errors": []}
+            restored = source_workspace.restore_workspace_backup(conversation_id, transaction)
+            if restored.get("ok"):
+                operation.pop("workspaceBackup", None)
+            return restored
+
         def update_workspace_and_metadata(state: dict[str, Any]) -> dict[str, Any]:
             current.update(
                 {
@@ -8801,6 +9001,11 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
             )
             if expected_revision != current["sourceWorkspaceRevision"]:
                 raise SourceWorkspaceRevisionMismatch
+            transaction = source_workspace.backup_workspace(conversation_id)
+            if not transaction.get("ok"):
+                operation["workspace"] = transaction
+                raise SourceWorkspaceOperationFailed
+            operation["workspaceBackup"] = transaction
             prepared_candidates, workspace = prepare_source_workspace(
                 bound, source_ids, follow_current_document
             )
@@ -8817,6 +9022,14 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
         try:
             item = mutate_session(bound, update_workspace_and_metadata)
         except SessionMutationRejected as exc:
+            restored = restore_workspace_after_failure()
+            if not restored.get("ok"):
+                return {
+                    "ok": False,
+                    "blocked": "source_workspace_restore_failed",
+                    "message": "来源工作区会话校验失败，且旧工作区恢复失败。",
+                    "errors": list(restored.get("errors") or []),
+                }
             return {
                 **exc.result(),
                 "errors": [exc.message],
@@ -8839,7 +9052,15 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                 "currentRevision": str(current.get("sourceWorkspaceRevision") or ""),
             }
         except SourceWorkspaceOperationFailed:
+            restored = restore_workspace_after_failure()
             workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+            if not restored.get("ok"):
+                return {
+                    "ok": False,
+                    "blocked": "source_workspace_restore_failed",
+                    "message": "来源工作区更新失败，且旧工作区恢复失败。",
+                    "errors": list(workspace.get("errors") or []) + list(restored.get("errors") or []),
+                }
             return {
                 "ok": False,
                 "message": "来源工作区更新失败。",
@@ -8851,6 +9072,30 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                 "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
                 "sessionEpoch": session_epoch(item or stored),
             }
+        except OSError as exc:
+            restored = restore_workspace_after_failure()
+            if not restored.get("ok"):
+                return {
+                    "ok": False,
+                    "blocked": "source_workspace_restore_failed",
+                    "message": "会话保存失败，且旧工作区恢复失败。",
+                    "errors": [str(exc)] + list(restored.get("errors") or []),
+                }
+            return {
+                "ok": False,
+                "blocked": "session_write_failed",
+                "message": "会话保存失败，来源工作区已恢复。",
+                "errors": [str(exc)],
+                "candidates": operation.get("candidates") or candidates,
+                "sourceIds": unique_string_list(current.get("sourceIds")),
+                "followCurrentDocument": bool(current.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
+                "sessionEpoch": session_epoch(stored),
+            }
+        cleanup = source_workspace.discard_workspace_backup(
+            conversation_id,
+            operation.get("workspaceBackup") if isinstance(operation.get("workspaceBackup"), dict) else {},
+        )
         candidates = operation.get("candidates") or candidates
         workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
         revision = str(operation.get("revision") or "")
@@ -8864,12 +9109,22 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
             "followCurrentDocument": follow_current_document,
             "sourceWorkspaceRevision": revision,
             "sessionEpoch": session_epoch(item or stored),
+            "warnings": list(cleanup.get("errors") or []),
         }
 
     if action == "source_workspace_clear":
         expected_revision = str(payload.get("sourceWorkspaceRevision") or "")
         operation = {}
         current = {}
+
+        def restore_workspace_after_failure() -> dict[str, Any]:
+            transaction = operation.get("workspaceBackup")
+            if not isinstance(transaction, dict):
+                return {"ok": True, "errors": []}
+            restored = source_workspace.restore_workspace_backup(conversation_id, transaction)
+            if restored.get("ok"):
+                operation.pop("workspaceBackup", None)
+            return restored
 
         def clear_workspace_and_metadata(state: dict[str, Any]) -> dict[str, Any]:
             current.update(
@@ -8881,7 +9136,15 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
             )
             if expected_revision != current["sourceWorkspaceRevision"]:
                 raise SourceWorkspaceRevisionMismatch
-            workspace = source_workspace.clear_workspace(conversation_id)
+            transaction = source_workspace.backup_workspace(conversation_id)
+            operation["workspaceBackup"] = transaction
+            workspace = {
+                "ok": bool(transaction.get("ok")),
+                "errors": list(transaction.get("errors") or []),
+                "sourceCount": 0,
+                "workspacePath": str(source_workspace.workspace_path(conversation_id)),
+                "conversationId": conversation_id,
+            }
             operation["workspace"] = workspace
             if not workspace.get("ok"):
                 raise SourceWorkspaceOperationFailed
@@ -8893,6 +9156,14 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
         try:
             item = mutate_session(bound, clear_workspace_and_metadata)
         except SessionMutationRejected as exc:
+            restored = restore_workspace_after_failure()
+            if not restored.get("ok"):
+                return {
+                    "ok": False,
+                    "blocked": "source_workspace_restore_failed",
+                    "message": "来源工作区会话校验失败，且旧工作区恢复失败。",
+                    "errors": list(restored.get("errors") or []),
+                }
             return {
                 **exc.result(),
                 "errors": [exc.message],
@@ -8915,7 +9186,15 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                 "currentRevision": str(current.get("sourceWorkspaceRevision") or ""),
             }
         except SourceWorkspaceOperationFailed:
+            restored = restore_workspace_after_failure()
             workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+            if not restored.get("ok"):
+                return {
+                    "ok": False,
+                    "blocked": "source_workspace_restore_failed",
+                    "message": "来源工作区清除失败，且旧工作区恢复失败。",
+                    "errors": list(workspace.get("errors") or []) + list(restored.get("errors") or []),
+                }
             return {
                 "ok": False,
                 "message": "来源工作区清除失败。",
@@ -8927,6 +9206,30 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                 "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
                 "sessionEpoch": session_epoch(item or stored),
             }
+        except OSError as exc:
+            restored = restore_workspace_after_failure()
+            if not restored.get("ok"):
+                return {
+                    "ok": False,
+                    "blocked": "source_workspace_restore_failed",
+                    "message": "会话保存失败，且旧工作区恢复失败。",
+                    "errors": [str(exc)] + list(restored.get("errors") or []),
+                }
+            return {
+                "ok": False,
+                "blocked": "session_write_failed",
+                "message": "会话保存失败，来源工作区已恢复。",
+                "errors": [str(exc)],
+                "candidates": candidates,
+                "sourceIds": unique_string_list(current.get("sourceIds")),
+                "followCurrentDocument": bool(current.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
+                "sessionEpoch": session_epoch(stored),
+            }
+        cleanup = source_workspace.discard_workspace_backup(
+            conversation_id,
+            operation.get("workspaceBackup") if isinstance(operation.get("workspaceBackup"), dict) else {},
+        )
         source_ids = []
         revision = ""
         workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
@@ -8943,6 +9246,7 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
             "followCurrentDocument": follow_current_document,
             "sourceWorkspaceRevision": revision,
             "sessionEpoch": session_epoch(item or stored),
+            "warnings": list(cleanup.get("errors") or []),
         }
 
     if not source_ids:
@@ -11792,7 +12096,7 @@ def dispatch_generation_action(action: str, payload: dict[str, Any]) -> dict[str
     return {"ok": False, "message": f"未知生成动作：{action or '(empty)'}"}
 
 
-def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _handle_generation_action_once(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     topic_id = normalize_topic_id(payload)
     book_md5 = normalize_book_md5(payload)
     queue_id = str(payload.get("_queue_id") or payload.get("queue_id") or "")
@@ -11870,6 +12174,21 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
     )
     result["run"] = run
     return result
+
+
+def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    queue_id = str(payload.get("_queue_id") or payload.get("queue_id") or payload.get("queueId") or "")
+    if not queue_id:
+        return _handle_generation_action_once(action, payload)
+    try:
+        mutate_session(payload, None, persist=False)
+    except SessionMutationRejected as exc:
+        return {**exc.result(), "reply": exc.message}
+    return execute_queued_generation_once(
+        action,
+        payload,
+        lambda: _handle_generation_action_once(action, payload),
+    )
 
 
 def append_event(payload: dict[str, Any]) -> dict[str, Any]:
