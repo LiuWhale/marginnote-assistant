@@ -1862,6 +1862,31 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(quality["missingSourceCount"], 1)
             self.assertEqual(quality["status"], "warn")
 
+    def test_draft_persists_queued_confirmation_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            saved = companion.save_draft(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "queueId": "QUEUE-WRITE-1",
+                    "queueCommand": {
+                        "conversationId": "CONV-A",
+                        "sessionId": "a" * 24,
+                        "sessionEpoch": "b" * 32,
+                    },
+                    "draft": {"cards": [{"title": "A", "body": "B"}]},
+                }
+            )
+
+            loaded = companion.load_draft(saved["draft"]["id"])
+
+            self.assertTrue(saved["ok"], saved)
+            self.assertEqual(saved["draft"]["queueId"], "QUEUE-WRITE-1")
+            self.assertEqual(loaded["queueId"], "QUEUE-WRITE-1")
+            self.assertEqual(loaded["queueCommand"]["conversationId"], "CONV-A")
+            self.assertEqual(loaded["draft"]["queueId"], "QUEUE-WRITE-1")
+
     def test_draft_update_rewrites_cards_from_editable_text_before_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -8034,6 +8059,39 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(second["ok"], second)
             remaining_ids = [record["id"] for record in companion.read_queue_lines(path)]
             self.assertEqual(remaining_ids, [second["queued"]["id"]])
+
+    def test_completed_queue_marker_survives_reload_and_polls_for_ack_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            base = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-COMPLETE"},
+            )
+            queued = companion.enqueue_command(
+                {**base, "action": "chat", "_queue_raw": True, "prompt": "execute exactly once"}
+            )["queued"]
+
+            marked = companion.mark_queue_commands_completed(
+                {"topicid": "T1", "bookmd5": "B1", "ids": [queued["id"]]}
+            )
+            reloaded = load_companion(root)
+            polled = reloaded.poll_commands("T1", "B1")
+
+            self.assertTrue(marked["ok"], marked)
+            self.assertEqual(marked["updated"], 1)
+            self.assertEqual(polled["pending"], 1)
+            self.assertTrue(polled["command"]["_queue_completed_ack_pending"])
+            self.assertEqual(polled["command"]["_queue_id"], queued["id"])
+            self.assertEqual(polled["command"]["prompt"], "execute exactly once")
+
+            acknowledged = reloaded.ack_commands(
+                {"topicid": "T1", "bookmd5": "B1", "ids": [queued["id"]]}
+            )
+
+            self.assertTrue(acknowledged["ok"], acknowledged)
+            self.assertEqual(acknowledged["removed"], 1)
+            self.assertEqual(reloaded.poll_commands("T1", "B1")["pending"], 0)
 
     def test_quarantine_rewrite_does_not_lose_concurrent_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -325,6 +325,30 @@ test('queued A result stays background after the active session switches to B', 
   );
 });
 
+test('completed queue records are ack-only even while a write confirmation blocks execution', () => {
+  assert.equal(
+    lifecycle.queuedExecutionDisposition(
+      {_queue_id: 'QUEUE-DONE', _queue_completed_ack_pending: true},
+      {pendingQueuedWriteConfirmation: {queueId: 'QUEUE-WRITE'}},
+    ),
+    'ack_only',
+  );
+  assert.equal(
+    lifecycle.queuedExecutionDisposition(
+      {_queue_id: 'QUEUE-NEXT', rawAction: 'generate_card'},
+      {pendingQueuedWriteConfirmation: {queueId: 'QUEUE-WRITE'}},
+    ),
+    'confirmation_pending',
+  );
+  assert.equal(
+    lifecycle.queuedExecutionDisposition(
+      {_queue_id: 'QUEUE-NEXT', rawAction: 'chat'},
+      {},
+    ),
+    'execute',
+  );
+});
+
 function queueResultHarness(overrides) {
   const events = [];
   let finishWrite = null;
@@ -449,6 +473,129 @@ test('session epoch mismatch and tombstone results defer without acknowledgement
   assert.equal(tombstoned.disposition.reason, 'session_tombstoned');
   assert.deepEqual(mismatched.events.map((item) => Array.isArray(item) ? item[0] : item), ['deferred']);
   assert.deepEqual(tombstoned.events.map((item) => Array.isArray(item) ? item[0] : item), ['deferred']);
+});
+
+test('ack failure preserves completed-ack-pending and never pumps execution', () => {
+  const state = {
+    currentQueueId: 'QUEUE-A',
+    completedAckPendingQueueIds: {'QUEUE-A': true},
+  };
+  const events = [];
+  const ackQueueAndContinue = loadAppFunction('ackQueueAndContinue', 'ackAndSkipQueuedCommand', {
+    state,
+    ackQueuedCommands: (_ids, done) => done({ok: false, message: 'disk busy'}),
+    refreshQueue: () => events.push('refresh'),
+    drainNextQueuedAction: () => events.push('drain'),
+    window: {CodexPanel: {setStatus: () => events.push('status')}},
+  });
+
+  ackQueueAndContinue('QUEUE-A');
+
+  assert.equal(state.completedAckPendingQueueIds['QUEUE-A'], true);
+  assert.deepEqual(events, ['status']);
+});
+
+test('ack success clears completed marker before queue refresh and drain', () => {
+  const state = {
+    currentQueueId: 'QUEUE-A',
+    completedAckPendingQueueIds: {'QUEUE-A': true},
+  };
+  const events = [];
+  const ackQueueAndContinue = loadAppFunction('ackQueueAndContinue', 'ackAndSkipQueuedCommand', {
+    state,
+    ackQueuedCommands: (_ids, done) => done({ok: true, removed: 1}),
+    refreshQueue: () => events.push('refresh'),
+    drainNextQueuedAction: () => events.push('drain'),
+    window: {CodexPanel: {setStatus: () => events.push('status')}},
+  });
+
+  ackQueueAndContinue('QUEUE-A');
+
+  assert.equal(Object.hasOwn(state.completedAckPendingQueueIds, 'QUEUE-A'), false);
+  assert.deepEqual(events, ['refresh', 'drain']);
+});
+
+test('empty queued goal is failed through shared policy without acknowledgement', () => {
+  const policyCalls = [];
+  const state = {currentQueueId: ''};
+  const requestGoalAction = loadAppFunction('requestGoalAction', 'requestDraftAction', {
+    state,
+    generationLifecycleUnavailableReason: () => '',
+    deferQueuedGenerationForLifecycle: () => assert.fail('lifecycle is available'),
+    addMessage: () => {},
+    goalTextToPayload: () => ({title: '', detail: ''}),
+    applyQueuedResultPolicy: (command, result) => policyCalls.push({command, result}),
+    ackQueueAndContinue: () => assert.fail('empty goal must not be acknowledged'),
+  });
+
+  requestGoalAction('', '[queue goal]', 'QUEUE-GOAL', {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  });
+
+  assert.equal(policyCalls.length, 1);
+  assert.equal(policyCalls[0].command._queue_id, 'QUEUE-GOAL');
+  assert.equal(policyCalls[0].command.rawAction, 'goal_run');
+  assert.equal(policyCalls[0].result.ok, false);
+  assert.equal(policyCalls[0].result.blocked, 'empty_queued_goal');
+});
+
+test('draft persistence failure defers with the draft response instead of generation success', () => {
+  const generationResult = {ok: true, cards: [{title: 'A'}]};
+  const draftFailure = {ok: false, message: 'draft disk failed'};
+  let deferredResult = null;
+  const applyQueuedResultPolicy = loadAppFunction('applyQueuedResultPolicy', 'saveQueuedWriteForConfirmation', {
+    state: {
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      contextDocumentKey: 'DOC-A',
+      completedAckPendingQueueIds: {},
+    },
+    window: {
+      SourceWorkspaceLifecycle: {
+        handleQueuedResult: (options) => options.onDeferred({
+          status: 'deferred',
+          reason: 'result_failed',
+          routing: 'active',
+          result: draftFailure,
+        }),
+      },
+    },
+    isWriteAction: () => true,
+    deferQueuedResult: (_command, result) => { deferredResult = result; },
+    persistCompletedQueuedResult: () => assert.fail('failed draft must not persist completion'),
+  });
+
+  applyQueuedResultPolicy({_queue_id: 'QUEUE-WRITE'}, generationResult, {});
+
+  assert.equal(deferredResult, draftFailure);
+});
+
+test('queued write confirmation resolves only for its bound draft or transaction', () => {
+  const state = {
+    pendingQueuedWriteConfirmation: {
+      queueId: 'QUEUE-WRITE',
+      draftId: 'DRAFT-1',
+      transactionId: 'TX-1',
+    },
+  };
+  const drains = [];
+  const resolveQueuedWriteConfirmation = loadAppFunction(
+    'resolveQueuedWriteConfirmation',
+    'writeAcceptedDraft',
+    {
+      state,
+      drainNextQueuedAction: () => drains.push('drain'),
+    },
+  );
+
+  assert.equal(resolveQueuedWriteConfirmation({draftId: 'OTHER'}), false);
+  assert.ok(state.pendingQueuedWriteConfirmation);
+  assert.equal(resolveQueuedWriteConfirmation({transactionId: 'TX-1'}), true);
+  assert.equal(state.pendingQueuedWriteConfirmation, null);
+  assert.deepEqual(drains, ['drain']);
 });
 
 test('runQueuedCommand persists A through exact background payload after switching to B', () => {

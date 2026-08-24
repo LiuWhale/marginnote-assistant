@@ -2557,6 +2557,73 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("deferredQueueResults", drain_body)
         self.assertIn("drainNextQueuedAction({retryDeferred: true})", toggle_body)
 
+    def test_completed_queue_execution_is_persisted_before_ack_and_retried_as_ack_only(self) -> None:
+        policy_body = self.js.split("function applyQueuedResultPolicy", 1)[1].split(
+            "\n  function saveQueuedWriteForConfirmation", 1
+        )[0]
+        persist_body = self.js.split("function persistCompletedQueuedResult", 1)[1].split(
+            "\n  function applyQueuedResultPolicy", 1
+        )[0]
+        ack_body = self.js.split("function ackQueueAndContinue", 1)[1].split(
+            "\n  function ackAndSkipQueuedCommand", 1
+        )[0]
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+
+        self.assertIn("completedAckPendingQueueIds", self.js)
+        self.assertIn("postCompanionPath('/marginnote/queue-complete'", persist_body)
+        self.assertIn("persistCompletedQueuedResult", policy_body)
+        self.assertLess(policy_body.index("persistCompletedQueuedResult"), policy_body.index("ackQueueAndContinue"))
+        self.assertIn("if (!result || !result.ok)", ack_body)
+        self.assertIn("completedAckPendingQueueIds[queueId]", ack_body)
+        self.assertIn("delete state.completedAckPendingQueueIds[queueId]", ack_body)
+        self.assertIn("queuedExecutionDisposition", drain_body)
+        self.assertIn("ack_only", drain_body)
+        self.assertIn("ackQueueAndContinue(queueId)", drain_body)
+
+    def test_queued_write_confirmation_blocks_drain_and_binds_draft_transaction_to_queue(self) -> None:
+        save_body = self.js.split("function saveQueuedWriteForConfirmation", 1)[1].split(
+            "\n  function runQueuedCommand", 1
+        )[0]
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+        render_body = self.js.split("function buildAiEditOperationPanel", 1)[1].split(
+            "\n  function renderAiEditOperation", 1
+        )[0]
+        ready_body = self.js.split("setAiEditOperationReady: function(payload)", 1)[1].split(
+            "\n    setAiEditOperationResult:", 1
+        )[0]
+        result_body = self.js.split("setAiEditOperationResult: function(payload)", 1)[1].split(
+            "\n    setAiEditTransactionStatus:", 1
+        )[0]
+
+        self.assertIn("pendingQueuedWriteConfirmation", self.js)
+        self.assertIn("queueId: command._queue_id", save_body)
+        self.assertIn("queueCommand: command", save_body)
+        self.assertIn("state.pendingQueuedWriteConfirmation", save_body)
+        self.assertIn("confirmation_pending", drain_body)
+        self.assertIn("data-queue-id", render_body)
+        self.assertIn("queueId", ready_body)
+        self.assertIn("transactionId", ready_body)
+        self.assertIn("resolveQueuedWriteConfirmation", result_body)
+        self.assertIn("resolveQueuedWriteConfirmation", self.js)
+
+    def test_empty_queued_goal_and_draft_failure_use_shared_failure_policy(self) -> None:
+        goal_body = self.js.split("function requestGoalAction", 1)[1].split(
+            "\n  function requestDraftAction", 1
+        )[0]
+        empty_branch = goal_body.split("if (!goal.title && !goal.detail)", 1)[1].split("return;", 1)[0]
+        policy_body = self.js.split("function applyQueuedResultPolicy", 1)[1].split(
+            "\n  function saveQueuedWriteForConfirmation", 1
+        )[0]
+
+        self.assertIn("applyQueuedResultPolicy", empty_branch)
+        self.assertIn("empty_queued_goal", empty_branch)
+        self.assertNotIn("ackQueueAndContinue", empty_branch)
+        self.assertIn("detail.result || result", policy_body)
+
     def test_automatic_switch_readiness_uses_exported_lifecycle_predicate(self) -> None:
         lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
 

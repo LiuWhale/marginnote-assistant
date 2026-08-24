@@ -30,6 +30,14 @@
     ) ? 'active' : 'background';
   }
 
+  function queuedExecutionDisposition(command, runtime) {
+    command = command || {};
+    runtime = runtime || {};
+    if (command._queue_completed_ack_pending === true) return 'ack_only';
+    if (runtime.pendingQueuedWriteConfirmation) return 'confirmation_pending';
+    return 'execute';
+  }
+
   function queuedResultFailureReason(command, result, routing) {
     command = command || {};
     result = result || {};
@@ -264,6 +272,7 @@
     createController: createController,
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
     handleQueuedResult: handleQueuedResult,
+    queuedExecutionDisposition: queuedExecutionDisposition,
     queuedSessionRouting: queuedSessionRouting,
     shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload

@@ -3853,9 +3853,12 @@ JSB.newAddon = function(mainPath) {
   CodexAssistantAddon.prototype.beginAiEditTransaction = function(draftId, json) {
     var now = String(new Date().getTime());
     var objectRef = aiEditObjectRefFromDraft(json);
+    var draftSummary = valueOf(json, 'draft') || {};
+    var queueId = safeString(valueOf(json, 'queueId') || valueOf(draftSummary, 'queueId'));
     var transaction = {
       transactionId: 'ai-edit-' + now + '-' + String(Math.random()).substring(2, 8),
       draftId: safeString(draftId),
+      queueId: queueId,
       topicid: '',
       objectRef: objectRef,
       createdNotes: [],
@@ -3874,6 +3877,7 @@ JSB.newAddon = function(mainPath) {
     this.postEvent('aiEditTransactionStarted', copyAiEditObjectRefFields({
       transactionId: transaction.transactionId,
       draftId: transaction.draftId,
+      queueId: transaction.queueId,
       topicid: transaction.topicid,
       hasMindmap: valueOf(json, 'mindmap') ? true : false,
       cards: countOf(valueOf(json, 'cards'))
@@ -3917,6 +3921,7 @@ JSB.newAddon = function(mainPath) {
     var payload = {
       id: transaction.draftId,
       draftId: transaction.draftId,
+      queueId: transaction.queueId,
       transactionId: transaction.transactionId,
       createdCount: transaction.createdNoteIds.length,
       createdNoteIds: transaction.createdNoteIds,
@@ -3955,6 +3960,7 @@ JSB.newAddon = function(mainPath) {
         ok: false,
         action: 'accept',
         transactionId: transactionId,
+        queueId: transaction ? transaction.queueId : safeString(valueOf(fallback, 'queueId')),
         status: 'partial_failed',
         message: '写入未完整完成，仅可拒绝并回滚。'
       }, acceptedObjectRef);
@@ -3965,7 +3971,13 @@ JSB.newAddon = function(mainPath) {
     if (this.aiEditTransactions && this.aiEditTransactions[transactionId]) {
       delete this.aiEditTransactions[transactionId];
     }
-    var payload = copyAiEditObjectRefFields({ok: true, action: 'accept', transactionId: transactionId, message: '已保留本次 AI 编辑结果。'}, acceptedObjectRef);
+    var payload = copyAiEditObjectRefFields({
+      ok: true,
+      action: 'accept',
+      transactionId: transactionId,
+      queueId: transaction ? transaction.queueId : safeString(valueOf(fallback, 'queueId')),
+      message: '已保留本次 AI 编辑结果。'
+    }, acceptedObjectRef);
     this.postEvent('aiEditTransactionAccepted', payload);
     if (this.panel && this.panel.setAiEditOperationResult) this.panel.setAiEditOperationResult(payload);
     return payload;
@@ -4071,6 +4083,7 @@ JSB.newAddon = function(mainPath) {
       ok: ok,
       action: 'reject',
       transactionId: transactionId,
+      queueId: transaction.queueId,
       deleted: deleted,
       failed: failed.length,
       deletedNoteIds: deletedNoteIds,

@@ -109,6 +109,7 @@ TOKEN_PROTECTED_POST_PATHS = {
     "/marginnote/action",
     "/marginnote/draft",
     "/marginnote/enqueue",
+    "/marginnote/queue-complete",
 }
 STOP_PATH = CONTROL_DIR / "stop.json"
 WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
@@ -610,6 +611,7 @@ def draft_summary(draft_id: str, draft: dict[str, Any]) -> dict[str, Any]:
         "mindmap_attachment": mindmap_attachment_summary,
         "operation_manifest": operation_manifest,
         "mn_object": mn_object,
+        "queueId": str(draft.get("queueId") or ""),
         "created_at": str(draft.get("created_at") or ""),
     }
 
@@ -744,6 +746,15 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(draft_payload.get("mnObject"), dict)
         else payload.get("mnObject") if isinstance(payload.get("mnObject"), dict) else {}
     )
+    queue_id = str(payload.get("queueId") or draft_payload.get("queueId") or "").strip()[:160]
+    raw_queue_command = payload.get("queueCommand") if isinstance(payload.get("queueCommand"), dict) else {}
+    queue_command = {
+        "rawAction": str(raw_queue_command.get("rawAction") or raw_queue_command.get("action") or ""),
+        "conversationId": normalize_conversation_id(raw_queue_command),
+        "sessionId": safe_session_id(raw_queue_command.get("sessionId") or raw_queue_command.get("session_id")),
+        "sessionEpoch": safe_session_epoch(raw_queue_command.get("sessionEpoch") or raw_queue_command.get("session_epoch")),
+        "contextDocumentKey": normalize_document_context_key(raw_queue_command),
+    } if queue_id else {}
     draft = {
         "ok": bool(draft_payload.get("ok", True)),
         "message": str(draft_payload.get("message") or "草稿已准备好。"),
@@ -772,6 +783,8 @@ def save_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "originalAction": str(payload.get("originalAction") or draft_payload.get("action") or ""),
         "topicid": topic_id,
         "bookmd5": book_md5,
+        "queueId": queue_id,
+        "queueCommand": queue_command,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -7260,6 +7273,11 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
             command = record.get("command") if isinstance(record, dict) else None
             if not is_valid_queue_command(command):
                 continue
+            if record.get("completedAckPending") is True:
+                command["_queue_id"] = str(record.get("id") or "")
+                command["_queue_completed_ack_pending"] = True
+                commands.append(command)
+                continue
             raw_action = str(command.get("rawAction") or command.get("action") or "").strip()
             conversation_id = str(command.get("conversationId") or record.get("conversationId") or "")
             session_id = safe_session_id(command.get("sessionId") or record.get("sessionId"))
@@ -7365,7 +7383,8 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
         passthrough_commands = [
             command
             for command in commands
-            if str(command.get("nativeAction") or "") in WEB_BUSY_PASSTHROUGH_NATIVE_ACTIONS
+            if command.get("_queue_completed_ack_pending") is True
+            or str(command.get("nativeAction") or "") in WEB_BUSY_PASSTHROUGH_NATIVE_ACTIONS
         ]
         if passthrough_commands:
             return {
@@ -7394,6 +7413,76 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
         "command": commands[0] if commands else None,
         "commands": commands[:8],
         **rejection_fields,
+    }
+
+
+def mark_queue_commands_completed(payload: dict[str, Any]) -> dict[str, Any]:
+    topic_id = normalize_topic_id(payload)
+    book_md5 = normalize_book_md5(payload)
+    raw_ids = payload.get("ids")
+    if isinstance(raw_ids, str):
+        requested_ids = {raw_ids}
+    elif isinstance(raw_ids, list):
+        requested_ids = {str(item) for item in raw_ids if item}
+    else:
+        requested_ids = set()
+    if not topic_id or not requested_ids:
+        return {"ok": False, "message": "missing topicid or ids", "updated": 0}
+    paths = queue_paths_for_topic(topic_id, book_md5)
+    completed_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    matched_ids: set[str] = set()
+    updated = 0
+    for path in paths:
+        with queue_lock(path):
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                return {"ok": False, "message": f"queue completion read failed: {exc}", "updated": updated}
+            rewritten: list[str] = []
+            changed = False
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    rewritten.append(line)
+                    continue
+                record_id = str(record.get("id") or "") if isinstance(record, dict) else ""
+                matches_scope = bool(
+                    record_id in requested_ids
+                    and str(record.get("topicid") or "") == topic_id
+                    and (not book_md5 or str(record.get("bookmd5") or "") == book_md5)
+                )
+                if matches_scope:
+                    matched_ids.add(record_id)
+                    if record.get("completedAckPending") is not True:
+                        record["completedAckPending"] = True
+                        record["completedAt"] = completed_at
+                        updated += 1
+                        changed = True
+                    rewritten.append(json.dumps(record, ensure_ascii=False))
+                else:
+                    rewritten.append(line)
+            if changed:
+                try:
+                    atomic_rewrite_queue(path, rewritten)
+                except Exception as exc:
+                    return {"ok": False, "message": f"queue completion write failed: {exc}", "updated": updated}
+    missing_ids = sorted(requested_ids - matched_ids)
+    if missing_ids:
+        return {
+            "ok": False,
+            "message": "queue completion marker did not match every requested item",
+            "updated": updated,
+            "missingIds": missing_ids,
+        }
+    return {
+        "ok": True,
+        "message": "queue completion persisted; acknowledgement remains pending",
+        "updated": updated,
+        "ids": sorted(matched_ids),
+        "completedAckPending": True,
     }
 
 
@@ -16233,6 +16322,13 @@ class Handler(BaseHTTPRequestHandler):
                 result = ack_commands(payload if isinstance(payload, dict) else {})
             except Exception as exc:
                 result = {"ok": False, "message": f"ack failed: {exc}"}
+            self._send_json(200 if result.get("ok") else 400, result)
+            return
+        if self.path == "/marginnote/queue-complete":
+            try:
+                result = mark_queue_commands_completed(payload if isinstance(payload, dict) else {})
+            except Exception as exc:
+                result = {"ok": False, "message": f"queue completion failed: {exc}"}
             self._send_json(200 if result.get("ok") else 400, result)
             return
         if self.path == "/marginnote/draft":

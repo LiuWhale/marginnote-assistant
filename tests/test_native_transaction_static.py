@@ -36,6 +36,25 @@ class NativeTransactionStaticTests(unittest.TestCase):
         ]:
             self.assertIn(marker, self.main_js)
 
+    def test_ai_edit_transaction_carries_queued_write_ownership(self) -> None:
+        begin_body = self.main_js.split(
+            "CodexAssistantAddon.prototype.beginAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.recordAiEditCreatedNote", 1)[0]
+        finish_body = self.main_js.split(
+            "CodexAssistantAddon.prototype.finishAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.acceptAiEditTransaction", 1)[0]
+        accept_body = self.main_js.split(
+            "CodexAssistantAddon.prototype.acceptAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.rejectAiEditTransaction", 1)[0]
+        reject_body = self.main_js.split(
+            "CodexAssistantAddon.prototype.rejectAiEditTransaction", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.writeDraft", 1)[0]
+
+        self.assertIn("queueId", begin_body)
+        self.assertIn("queueId: transaction.queueId", finish_body)
+        self.assertIn("queueId: transaction ? transaction.queueId :", accept_body)
+        self.assertIn("queueId: transaction.queueId", reject_body)
+
     def test_mindmap_diff_apply_registers_rollbackable_ai_edit_transaction(self) -> None:
         body = self.main_js.split("CodexAssistantAddon.prototype.applyMindmapDiffOperations", 1)[1].split(
             "CodexAssistantAddon.prototype.handleNativeQueueCommand", 1
