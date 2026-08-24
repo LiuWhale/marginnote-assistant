@@ -2440,6 +2440,23 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("deferQueuedGenerationForLifecycle", queued_body)
         self.assertIn("generationLifecycleUnavailableReason", drain_body)
 
+    def test_document_scoped_payloads_use_exported_implicit_object_policy(self) -> None:
+        payload_body = self.js.split("function companionPayload", 1)[1].split(
+            "\n  function parseCompanionResult", 1
+        )[0]
+        lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
+
+        self.assertIn("function shouldAttachImplicitMnObject(action)", lifecycle_js)
+        self.assertIn("shouldAttachImplicitMnObject: shouldAttachImplicitMnObject", lifecycle_js)
+        self.assertIn(
+            "window.SourceWorkspaceLifecycle.shouldAttachImplicitMnObject(action)",
+            payload_body,
+        )
+        self.assertNotIn(
+            "if (mnObject && mnObject.objectId && !payload.mnObject && !payload.mnObjectId) payload.mnObject = mnObject;",
+            payload_body,
+        )
+
     def test_source_workspace_page_supports_ordered_multi_file_binary_uploads(self) -> None:
         for marker in [
             'id="sourceWorkspaceAddFilesButton"',

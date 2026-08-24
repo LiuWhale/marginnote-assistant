@@ -410,3 +410,82 @@ All returned exit `0`.
 
 - The executable helper tests cover lifecycle interleavings deterministically, but a live MarginNote WebView switch/upload run was not available in this fix round.
 - Stale conversation cleanup is best-effort over the localhost Companion endpoint; cleanup failure is surfaced in panel status and no stale callback can unlock the active newer lifecycle.
+
+## Fix Round 4
+
+### Finding Addressed
+
+- `companionPayload()` attached `state.agentOperation.mnObject` after its `conversation_new` cleanup branch and for every `source_workspace_*` action. A stable Lee-to-Hilton switch could therefore persist the new three-source conversation with Lee object ownership, after which Hilton workspace get/update/validate requests failed ownership checks.
+- Manual and automatic `conversation_new` plus all `source_workspace_*` actions are document-scoped. They now skip only implicit agent-operation object ownership; an explicit caller-supplied `mnObject` or `mnObjectId` remains intact. Other actions retain their previous implicit-object behavior.
+
+### RED Evidence
+
+Tests were added before production changes for:
+
+```text
+implicit object predicate excludes every document-scoped source action
+app payload keeps explicit object ownership but skips stale implicit ownership
+stable automatic switch persists three sources and rebuilds in the new document scope
+test_document_scoped_payloads_use_exported_implicit_object_policy
+```
+
+The initial Node run retained the five prior passes and failed all three new executable tests: the predicate export was missing, both manual/automatic `conversation_new` carried the stale object, and the Hilton migration rejected its first request because `mnObject` was present. The focused static test also failed because `app.js` had no exported-policy wiring.
+
+### Implementation
+
+- Added pure exported `shouldAttachImplicitMnObject(action)` in `source_workspace_lifecycle.js`. It returns false for `conversation_new` and the complete `source_workspace_` action family, and true for existing ordinary actions.
+- Gated only the existing `state.agentOperation.mnObject` injection in `companionPayload()`. Context/extra merging still runs first, so explicit `extra.mnObject` and `extra.mnObjectId` survive unchanged.
+- Extended the Node lifecycle suite to execute the actual `companionPayload()` and `completeAutomaticDocumentSwitch()` functions from `app.js` with controlled Companion boundaries. The stable-switch test runs `conversation_new -> source_workspace_get -> source_workspace_update -> source_workspace_validate`, verifies the Hilton topic/book/context on every payload, preserves the same three ordered source IDs with `followCurrentDocument=false`, rejects stale object fields, and confirms the migration lifecycle finishes.
+- Added a static wiring regression that requires `app.js` to call the exported predicate instead of restoring the former unconditional injection.
+
+### GREEN Evidence
+
+Executable lifecycle and payload flow:
+
+```text
+node --test tests/source_workspace_lifecycle.test.js
+8 tests passed
+```
+
+UI/static suites:
+
+```text
+python3 -m unittest \
+  tests.test_web_controls_static \
+  tests.test_resizable_panel_static \
+  tests.test_ui_functional_acceptance -q
+Ran 154 tests in 0.660s
+OK
+```
+
+Focused Companion persistence/workspace checks (Companion code was not changed):
+
+```text
+python3 -m unittest \
+  tests.test_companion_controls.CompanionControlsTests.test_automatic_document_conversation_persists_explicit_source_binding \
+  tests.test_companion_controls.CompanionControlsTests.test_source_workspace_update_persists_selection_and_returns_revision -v
+Ran 2 tests in 0.370s
+OK
+```
+
+Repository-wide Python suite:
+
+```text
+python3 -m unittest discover -s tests -q
+Ran 741 tests in 190.668s
+OK
+```
+
+Additional checks:
+
+```text
+node --check extension/codex.mn.assistant/web/app.js
+node --check extension/codex.mn.assistant/web/source_workspace_lifecycle.js
+git diff --check
+```
+
+All returned exit `0`.
+
+### Concerns
+
+- The emitted payloads and automatic-switch callback chain are exercised with the real Web functions, and the real Companion persistence/workspace boundaries pass focused tests. A live Lee-to-Hilton MarginNote WebView switch was not available in this round.

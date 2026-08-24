@@ -3,6 +3,11 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.SourceWorkspaceLifecycle = api;
 })(typeof window !== 'undefined' ? window : globalThis, function() {
+  function shouldAttachImplicitMnObject(action) {
+    action = String(action || '');
+    return action !== 'conversation_new' && action.indexOf('source_workspace_') !== 0;
+  }
+
   function createHandle(kind, epoch, meta) {
     return {
       kind: kind,
@@ -129,6 +134,7 @@
 
   return {
     createController: createController,
+    shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload
   };
 });

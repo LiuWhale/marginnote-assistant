@@ -3052,7 +3052,10 @@
       }
     }
     var mnObject = state.agentOperation && state.agentOperation.mnObject ? state.agentOperation.mnObject : null;
-    if (mnObject && mnObject.objectId && !payload.mnObject && !payload.mnObjectId) payload.mnObject = mnObject;
+    if (
+      window.SourceWorkspaceLifecycle.shouldAttachImplicitMnObject(action) &&
+      mnObject && mnObject.objectId && !payload.mnObject && !payload.mnObjectId
+    ) payload.mnObject = mnObject;
     payload.action = action;
     payload.source = payload.source || 'marginnote4-web-panel';
     payload.contextScope = currentContextScope();
