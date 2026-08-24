@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -15,6 +16,7 @@ from urllib import error, request
 DEFAULT_URL = "http://127.0.0.1:48761"
 DEFAULT_COMPANION_HOME = Path(os.environ.get("CODEX_MN_COMPANION_HOME", Path.home() / ".codex/marginnote-assistant")).expanduser()
 DEFAULT_ACTION_RESULTS_PATH = DEFAULT_COMPANION_HOME / "release/evidence/action-results.jsonl"
+DEFAULT_ACTION_TOKEN_PATH = DEFAULT_COMPANION_HOME / "control/web-action-token"
 
 
 def read_default(key: str) -> str:
@@ -33,12 +35,28 @@ def read_default(key: str) -> str:
     return result.stdout.strip().strip('"')
 
 
+def read_action_token(path: Path | str = DEFAULT_ACTION_TOKEN_PATH) -> str:
+    token_path = Path(path).expanduser()
+    try:
+        token = token_path.read_text(encoding="ascii").strip()
+    except OSError as exc:
+        raise SystemExit("Companion action token is unavailable; reinstall or restart Codex Companion.") from exc
+    if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+        raise SystemExit("Companion action token is invalid; reinstall or restart Codex Companion.")
+    return token
+
+
 def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    token = read_action_token()
     req = request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Codex-Action-Token": token,
+        },
         method="POST",
     )
     try:

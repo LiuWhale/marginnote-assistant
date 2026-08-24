@@ -167,7 +167,7 @@ Uninstall Codex Companion.command
 
 ### 多文件资料工作区
 
-当一个问题需要比较或综合多个文件时，点击对话标题栏的 `资料 N`。资料页会列出当前 MarginNote 文件、当前 notebook 文件、已上传文件、手动选择的本地文件和搜索根目录结果。勾选文件后先查看可读状态和文本提取状态，再点 `验证资料` 和 `完成`。`全部取消` 会清空显式资料集；单独移除某一项只影响下一次请求，不会操作源文件。
+当一个问题需要读取一个或多个明确资料时，点击对话标题栏的 `资料 N`。资料页只列出当前 MarginNote 文件、可解析的当前 notebook 文件和已上传文件；本地文件统一通过 `Add Files` 加入。勾选文件后先查看可读状态和文本提取状态，再点 `验证资料` 和 `完成`。`全部取消` 会清空显式资料集；单独移除某一项只影响下一次请求，不会操作源文件。显式资料集即使只有一个文件，也必须使用托管工作区、Codex CLI、来源确认和写入门禁；只有完全没有显式资料元数据的旧对话继续走原有单文档路径。
 
 点击 `Add Files` 可在一次选择操作中上传多个本地文件。原生多选文件框每次最多接受 **20 个文件**，每个文件不超过 **20 MB**。支持的二进制和文本格式包括 PDF、DOCX、PPTX、Markdown/纯文本、JSON/CSV/TSV、Jupyter Notebook、LaTeX/BibTeX/RST、常见源码/配置/Web 文件，以及 PNG/JPEG/GIF/WebP/BMP/TIFF/HEIC/HEIF/AVIF/ICO 图片。页面逐文件显示上传进度，并汇总成功数与失败数。发生部分失败时不会回滚已成功文件：成功项会保留、自动选中，并继续保存和验证为资料；只需修复或重新选择失败项。超过 20 个文件时可使用重复批次继续添加。
 
@@ -176,6 +176,10 @@ Uninstall Codex Companion.command
 每次发送只执行 **一次 Codex CLI 调用**，工作目录是当前对话的托管资料工作区。Codex 先按顺序读取 `SOURCES.md`；`files/` 和 `text/` 中保存的是指向原文件、缓存或提取文本的托管`软链接`。清理或重建工作区只删除 Companion 创建的链接和清单，`不会删除原文件`，也不会移动、重命名或修改原文件。
 
 多文件资料工作区必须使用 Codex CLI。`auto` 可以选择 Codex CLI，但这类请求不会回退到 OpenAI API；只配置 OpenAI API 时会在生成前阻止，因为 API 后端不能读取本地软链接。回答会报告成功读取的 source ID。读取资料与 MarginNote 写入目标彼此独立：卡片或脑图仍只能写入一个明确的当前 notebook 和已验证目标，选择多个资料不代表允许写入多个 notebook。
+
+0.4.53 的本地 HTTP 动作接口要求安装时生成的 token、精确的 `127.0.0.1:48761` Host 和受限文件来源 CORS。token 保存在 `~/.codex/marginnote-assistant/control/web-action-token`，Web 面板和 `send_action.py` 只把它放进请求头，不会写入动作 JSON、对话历史或诊断日志。请求里的 `pdfPath`、`documentPath` 或 `availableDocuments` 路径不能授权资料；候选只来自 Companion 自有 PDF 缓存/索引、托管上传记录或服务端解析的 MarginNote 路径。
+
+PDF 原文件可读但文本提取失败时仍可继续使用，manifest 会显示 `textReadable=false` 和提取诊断，让 Codex 改为检查原 PDF，不能假装已有提取文本；发生截断时也会明确标记。周期清理只删除所有权可证明且超过 7 天的孤立工作区和未引用文本产物，以及超过 24 小时的 staging/backup；活跃目录、链接目录和所有权不明确的目录都保留。
 
 ## 全文读取和缓存
 

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -58,6 +59,7 @@ PDF_EXPORT_DIR = ONEDRIVE_DIR / "exports"
 NATIVE_HIGHLIGHT_VALIDATION_TOPIC_ID = "AAFA4811-8B3A-46AF-8511-6037060FA23B"
 NATIVE_HIGHLIGHT_VALIDATION_BOOK_MD5 = "253dd5804dd4973bcea545ebcc7ee5a760c73581e1a4e25904fd10ae4b8d1246"
 COMPANION_URL = "http://127.0.0.1:48761"
+ACTION_TOKEN_PATH = ROOT / "control/web-action-token"
 REQUIRED_WEB_CONTROL_IDS = [
     "aiChatShell",
     "knowledgeOsContractPanel",
@@ -306,10 +308,17 @@ def http_json(path: str, timeout: float = 5) -> dict[str, Any] | None:
 def http_action_json(payload: dict[str, Any], timeout: float = 8) -> dict[str, Any] | None:
     try:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+            return None
         req = request.Request(
             COMPANION_URL + "/marginnote/action",
             data=data,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-Codex-Action-Token": token,
+            },
             method="POST",
         )
         with request.urlopen(req, timeout=timeout) as resp:

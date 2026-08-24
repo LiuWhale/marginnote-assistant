@@ -57,6 +57,7 @@ REQUIRED_SUFFIXES = [
     "companion/companion.py",
     "companion/diagnostic_log.py",
     "companion/runtime_config.py",
+    "companion/source_workspace.py",
     "companion/doctor.py",
     "companion/install_companion.sh",
     "companion/install_extension.sh",
@@ -72,6 +73,7 @@ PRIVATE_NAMES = {
     "companion/goal.json",
     "companion/mn-object-registry.json",
     "companion/companion.pid",
+    "extension/codex.mn.assistant/web-action-token",
 }
 PRIVATE_PARTS = (
     "companion/uploads/",
@@ -110,6 +112,7 @@ MARKERS = {
     "companion/install_companion.sh": "LEGACY_LABEL=\"com.liuwhale.codex-marginnote-assistant\"",
     "companion/diagnostic_log.py": "SENSITIVE_LOG_KEYS",
     "companion/runtime_config.py": "DEFAULT_RUNTIME_SETTINGS",
+    "companion/source_workspace.py": "SOURCE_WORKSPACE_SCHEMA",
     "companion/doctor.py": "installable clean zip",
     "extension/codex.mn.assistant/main.js": "appendSelectionPopupMenuActions",
     "extension/codex.mn.assistant/web/source_workspace_lifecycle.js": "SourceWorkspaceLifecycle",
@@ -261,6 +264,7 @@ def inspect_mnaddon(path: Path) -> SmokeResult:
             or name.endswith(".DS_Store")
             or name.startswith("._")
             or "/._" in name
+            or name == "web-action-token"
         ]
         missing_markers: list[str] = []
         for suffix, marker in MNADDON_MARKERS.items():

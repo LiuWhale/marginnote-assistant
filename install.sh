@@ -22,8 +22,8 @@ if [[ ! -f "$COMPANION_SOURCE/install_companion.sh" ]]; then
 fi
 
 echo "Installing Codex Companion for MarginNote 4..."
-/bin/zsh "$COMPANION_SOURCE/install_extension.sh"
 /bin/zsh "$COMPANION_SOURCE/install_companion.sh"
+/bin/zsh "$COMPANION_SOURCE/install_extension.sh"
 
 INSTALLED_HOME="${CODEX_MN_COMPANION_HOME:-$HOME/.codex/marginnote-assistant}"
 echo

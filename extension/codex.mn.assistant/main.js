@@ -41,6 +41,29 @@ JSB.newAddon = function(mainPath) {
     return String(value);
   }
 
+  function companionActionToken() {
+    try {
+      var home = safeString(NSHomeDirectory());
+      var candidates = [safeString(mainPath) + '/web-action-token'];
+      if (home) candidates.push(home + '/.codex/marginnote-assistant/control/web-action-token');
+      for (var i = 0; i < candidates.length; i++) {
+        var value = NSString.stringWithContentsOfFileEncodingError(candidates[i], 4, null);
+        var token = safeString(value).replace(/^\s+|\s+$/g, '');
+        if (/^[A-Fa-f0-9]{64}$/.test(token)) return token;
+      }
+      return '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function companionRequestHeaders() {
+    var headers = {'Content-Type': 'application/json', 'Accept': 'application/json'};
+    var token = companionActionToken();
+    if (token) headers['X-Codex-Action-Token'] = token;
+    return headers;
+  }
+
   function isExplicitTrue(value) {
     if (value === true || value === 1) return true;
     try {
@@ -1099,7 +1122,7 @@ JSB.newAddon = function(mainPath) {
     var request = NSMutableURLRequest.requestWithURL(NSURL.URLWithString(url));
     request.setHTTPMethod('POST');
     request.setTimeoutInterval(timeout || 5);
-    request.setAllHTTPHeaderFields({'Content-Type': 'application/json', 'Accept': 'application/json'});
+    request.setAllHTTPHeaderFields(companionRequestHeaders());
     request.setHTTPBody(NSJSONSerialization.dataWithJSONObjectOptions(payload, 1));
     NSURLConnection.sendAsynchronousRequestQueueCompletionHandler(request, NSOperationQueue.mainQueue(), function(response, data, error) {
       if (callback) callback(response, data, error);
@@ -2343,7 +2366,7 @@ JSB.newAddon = function(mainPath) {
     var request = NSMutableURLRequest.requestWithURL(NSURL.URLWithString(CompanionURL));
     request.setHTTPMethod('POST');
     request.setTimeoutInterval(CompanionActionTimeout);
-    request.setAllHTTPHeaderFields({'Content-Type': 'application/json', 'Accept': 'application/json'});
+    request.setAllHTTPHeaderFields(companionRequestHeaders());
     request.setHTTPBody(NSJSONSerialization.dataWithJSONObjectOptions(payload, 1));
 
     var addon = this;

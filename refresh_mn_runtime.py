@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -19,6 +21,9 @@ DEFAULT_NEXT_STEP_EN = "reopen the Codex panel or restart MarginNote 4, then cli
 DEFAULT_ADDON_ID = "codex.mn.assistant"
 CURRENT_PLUGIN_VERSION = "0.4.53"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
+ACTION_TOKEN_PATH = Path(
+    os.environ.get("CODEX_MN_COMPANION_HOME", Path.home() / ".codex/marginnote-assistant")
+).expanduser() / "control/web-action-token"
 
 
 def read_default(key: str) -> str:
@@ -110,10 +115,17 @@ def get_json(base_url: str, path: str, timeout: int = 10) -> dict[str, Any]:
 
 def post_json(base_url: str, path: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
+    if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+        raise RuntimeError("Companion Web action token is missing or invalid")
     req = request.Request(
         companion_url(base_url, path),
         data=data,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Codex-Action-Token": token,
+        },
         method="POST",
     )
     with request.urlopen(req, timeout=timeout) as response:

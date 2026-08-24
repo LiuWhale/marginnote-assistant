@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hmac
 import importlib.util
 import json
 import hashlib
 import os
 import re
+import secrets
 import signal
 import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -97,6 +100,15 @@ PDF_CACHE_DIR = UPLOAD_DIR / "pdf-cache"
 PDF_CACHE_INDEX_PATH = PDF_CACHE_DIR / "index.json"
 PDF_TEXT_CACHE_DIR = PDF_CACHE_DIR / "text"
 CONTROL_DIR = ROOT / "control"
+ACTION_TOKEN_PATH = CONTROL_DIR / "web-action-token"
+ACTION_TOKEN_HEADER = "X-Codex-Action-Token"
+ACTION_TOKEN = ""
+ALLOWED_WEB_ORIGINS = {"null", "file://"}
+TOKEN_PROTECTED_POST_PATHS = {
+    "/marginnote/action",
+    "/marginnote/draft",
+    "/marginnote/enqueue",
+}
 STOP_PATH = CONTROL_DIR / "stop.json"
 WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
@@ -137,6 +149,11 @@ CURRENT_GENERATION_PROCESS_LOCK = threading.RLock()
 CURRENT_GENERATION_PROCESS: Any | None = None
 CURRENT_GENERATION_PROCESS_LABEL = ""
 HISTORY_LOCKS = tuple(threading.RLock() for _ in range(64))
+QUEUE_LOCKS = tuple(threading.RLock() for _ in range(64))
+SOURCE_MUTATION_LOCKS = tuple(threading.RLock() for _ in range(64))
+SOURCE_CLEANUP_LOCK = threading.RLock()
+SOURCE_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
+LAST_SOURCE_CLEANUP_AT = 0.0
 DRAFT_SCOPE_BINDING_FEATURE = "draft-write-scope-binding-v1"
 WHOLE_NOTEBOOK_SNAPSHOT_FEATURE = "mindmap-whole-notebook-snapshot-v2"
 MINDMAP_VISIBLE_SURFACE_GUARD_FEATURE = "mindmap-visible-surface-guard-v1"
@@ -2214,6 +2231,18 @@ def source_workspace_canonical_file(raw_path: Any) -> Path | None:
     return path
 
 
+def source_workspace_managed_file(raw_path: Any, managed_root: Path) -> Path | None:
+    path = source_workspace_canonical_file(raw_path)
+    if path is None:
+        return None
+    try:
+        root = managed_root.expanduser().resolve(strict=False)
+        path.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return path
+
+
 def source_workspace_candidate(
     *,
     kind: str,
@@ -2241,34 +2270,6 @@ def source_workspace_candidate(
     }
 
 
-def source_workspace_selected_search_paths(payload: dict[str, Any]) -> list[Path]:
-    values: list[Any] = []
-    for key in ("selectedSearchPaths", "searchResultPaths", "fileSearchResults"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            values.extend(value)
-    configured_roots: list[Path] = []
-    for root in configured_extra_pdf_roots():
-        try:
-            configured_roots.append(root.resolve(strict=True))
-        except (OSError, RuntimeError):
-            continue
-    selected: list[Path] = []
-    for value in values:
-        path = source_workspace_canonical_file(value)
-        if path is None:
-            continue
-        try:
-            if not any(path.is_relative_to(root) for root in configured_roots):
-                continue
-        except AttributeError:
-            if not any(str(path).startswith(f"{root}{os.sep}") for root in configured_roots):
-                continue
-        if path not in selected:
-            selected.append(path)
-    return selected
-
-
 def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     sources: list[dict[str, Any]] = []
@@ -2280,12 +2281,12 @@ def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
         seen_ids.add(candidate["id"])
         sources.append(candidate)
 
-    topic_id = normalize_topic_id(payload)
-    book_md5 = normalize_book_md5(payload)
+    topic_id = str(payload.get("topicid") or payload.get("notebookid") or "").strip()
+    book_md5 = str(payload.get("bookmd5") or payload.get("docmd5") or "").strip()
     document_title = str(payload.get("documentTitle") or payload.get("documentFileName") or "").strip()
 
     cache_access = pdf_cache_access_status(book_md5, payload)
-    cache_path = source_workspace_canonical_file(cache_access.get("path"))
+    cache_path = source_workspace_managed_file(cache_access.get("path"), PDF_CACHE_DIR)
     if cache_path is not None:
         add(
             source_workspace_candidate(
@@ -2301,22 +2302,22 @@ def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
                 },
             )
         )
-
-    for key in ("pdfPath", "documentPath", "sourcePdfPath"):
-        path = source_workspace_canonical_file(payload.get(key))
-        if path is not None:
+    elif book_md5:
+        database_path, _ = resolve_pdf_source_from_mn_database(book_md5)
+        database_path = source_workspace_canonical_file(database_path)
+        if database_path is not None:
             add(
                 source_workspace_candidate(
-                    kind="explicit_pdf",
-                    identity=str(path),
-                    title=path.name,
-                    path=path,
-                    metadata={"topicid": topic_id, "bookmd5": book_md5, "payloadKey": key},
+                    kind="marginnote_pdf",
+                    identity=f"{topic_id}|{book_md5}|{database_path}",
+                    title=document_title or database_path.name,
+                    path=database_path,
+                    metadata={"topicid": topic_id, "bookmd5": book_md5, "registry": "marginnote_database"},
                 )
             )
 
     for item in uploaded_files():
-        path = source_workspace_canonical_file(item.get("path"))
+        path = source_workspace_managed_file(item.get("path"), UPLOAD_DIR)
         if path is not None:
             add(
                 source_workspace_candidate(
@@ -2338,11 +2339,9 @@ def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
         descriptor_title = str(
             descriptor.get("title") or descriptor.get("documentTitle") or descriptor.get("documentFileName") or ""
         ).strip()
-        path = source_workspace_canonical_file(
-            descriptor.get("path") or descriptor.get("pdfPath") or descriptor.get("documentPath")
-        )
+        path: Path | None = None
         cache_access: dict[str, Any] = {}
-        if path is None and descriptor_book_md5:
+        if descriptor_book_md5:
             cache_payload = {
                 "topicid": topic_id,
                 "bookmd5": descriptor_book_md5,
@@ -2352,7 +2351,10 @@ def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
                 "contextDocumentKey": str(descriptor.get("contextDocumentKey") or ""),
             }
             cache_access = pdf_cache_access_status(descriptor_book_md5, cache_payload)
-            path = source_workspace_canonical_file(cache_access.get("path"))
+            path = source_workspace_managed_file(cache_access.get("path"), PDF_CACHE_DIR)
+            if path is None:
+                path, _ = resolve_pdf_source_from_mn_database(descriptor_book_md5)
+                path = source_workspace_canonical_file(path)
         if path is None:
             continue
         title = descriptor_title or path.name
@@ -2367,20 +2369,8 @@ def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
                     "topicid": topic_id,
                     "bookmd5": descriptor_book_md5,
                     "documentId": str(descriptor.get("id") or ""),
-                    "sourcePath": str(descriptor.get("path") or ""),
                     "cachePath": str(cache_access.get("path") or ""),
                 },
-            )
-        )
-
-    for path in source_workspace_selected_search_paths(payload):
-        add(
-            source_workspace_candidate(
-                kind="search_result",
-                identity=str(path),
-                title=path.name,
-                path=path,
-                metadata={"searchRootSelected": True},
             )
         )
 
@@ -2395,7 +2385,7 @@ def source_workspace_candidates(payload: dict[str, Any]) -> dict[str, Any]:
 def source_text_artifact(source: dict[str, Any]) -> dict[str, Any]:
     source = source if isinstance(source, dict) else {}
     path = source_workspace_canonical_file(source.get("path"))
-    result = {"textPath": "", "pageCount": None, "truncated": False, "error": ""}
+    result = {"textPath": "", "textReadable": False, "pageCount": None, "truncated": False, "error": ""}
     if path is None:
         result["error"] = "source path is not a readable regular file"
         return result
@@ -2408,6 +2398,7 @@ def source_text_artifact(source: dict[str, Any]) -> dict[str, Any]:
             result["error"] = "source is not UTF-8 text"
             return result
         result["textPath"] = str(path)
+        result["textReadable"] = True
         return result
 
     metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
@@ -2431,16 +2422,25 @@ def source_text_artifact(source: dict[str, Any]) -> dict[str, Any]:
     if not text:
         result["error"] = "PDF text extraction returned no readable text"
         return result
-    source_id = re.sub(r"[^A-Za-z0-9._:-]+", "_", str(source.get("id") or "source"))[:160] or "source"
-    source_sha = str(record.get("sourceSha256") or source.get("sha256") or sha256_file(path))
-    source_sha = re.sub(r"[^A-Fa-f0-9]+", "", source_sha)[:64] or "unknown"
-    artifact_path = SOURCE_TEXT_DIR / f"{source_id}-{source_sha}.txt"
+    source_id = str(source.get("id") or "source")
+    source_id_digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:16]
+    text_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    artifact_path = SOURCE_TEXT_DIR / f"managed-{source_id_digest}-{text_sha256}.txt"
     SOURCE_TEXT_DIR.mkdir(parents=True, exist_ok=True)
     if not artifact_path.is_file() or artifact_path.read_text(encoding="utf-8") != text:
-        artifact_path.write_text(text, encoding="utf-8")
+        temporary_path = artifact_path.with_name(f".{artifact_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary_path.write_text(text, encoding="utf-8")
+            os.replace(temporary_path, artifact_path)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
     result.update(
         {
             "textPath": str(artifact_path),
+            "textReadable": True,
             "pageCount": record.get("pageCount"),
             "truncated": text.startswith("当前文档全文（因输入长度限制截断）："),
         }
@@ -3497,39 +3497,34 @@ def clear_pending_pdf_cache_commands(
     removed = 0
     remaining = 0
     for path in paths:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception:
-            continue
-        kept: list[str] = []
-        for line in lines:
+        with queue_lock(path):
             try:
-                record = json.loads(line)
+                lines = path.read_text(encoding="utf-8").splitlines()
             except Exception:
+                continue
+            kept: list[str] = []
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    kept.append(line)
+                    continue
+                command = record.get("command") if isinstance(record, dict) else None
+                is_same_scope = str(record.get("topicid") or "") == topic_id and (
+                    not book_md5 or str(record.get("bookmd5") or "") == book_md5
+                )
+                is_pdf_cache_command = (
+                    isinstance(command, dict)
+                    and str(command.get("nativeAction") or "") == "cache_pdf_from_current_document"
+                )
+                command_context_key = str(command.get("contextDocumentKey") or "") if isinstance(command, dict) else ""
+                is_same_document = not context_document_key or not command_context_key or command_context_key == context_document_key
+                if is_same_scope and is_pdf_cache_command and is_same_document:
+                    removed += 1
+                    continue
                 kept.append(line)
-                continue
-            command = record.get("command") if isinstance(record, dict) else None
-            is_same_scope = str(record.get("topicid") or "") == topic_id and (
-                not book_md5 or str(record.get("bookmd5") or "") == book_md5
-            )
-            is_pdf_cache_command = (
-                isinstance(command, dict)
-                and str(command.get("nativeAction") or "") == "cache_pdf_from_current_document"
-            )
-            command_context_key = str(command.get("contextDocumentKey") or "") if isinstance(command, dict) else ""
-            is_same_document = not context_document_key or not command_context_key or command_context_key == context_document_key
-            if is_same_scope and is_pdf_cache_command and is_same_document:
-                removed += 1
-                continue
-            kept.append(line)
-        remaining += len(kept)
-        if kept:
-            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
-        else:
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+            remaining += len(kept)
+            atomic_rewrite_queue(path, kept)
     return {"removed": removed, "remaining": remaining}
 
 
@@ -4573,6 +4568,7 @@ def unique_string_list(value: Any) -> list[str]:
 def source_metadata(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "conversationId": normalize_conversation_id(data),
+        "sessionId": safe_session_id(data.get("sessionId") or data.get("session_id")),
         "sourceIds": unique_string_list(data.get("sourceIds")),
         "followCurrentDocument": bool(data.get("followCurrentDocument", True)),
         "sourceWorkspaceRevision": str(data.get("sourceWorkspaceRevision") or ""),
@@ -4581,6 +4577,7 @@ def source_metadata(data: dict[str, Any]) -> dict[str, Any]:
 
 SOURCE_QUEUE_BINDING_FIELDS = (
     "conversationId",
+    "sessionId",
     "sourceIds",
     "followCurrentDocument",
     "sourceWorkspaceRevision",
@@ -4613,13 +4610,33 @@ def queue_path(topic_id: str, book_md5: str) -> Path:
     return QUEUE_DIR / f"{queue_key(topic_id, book_md5)}.jsonl"
 
 
-def read_queue_lines(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
+def queue_lock(path: Path) -> threading.RLock:
+    key = str(path.expanduser().resolve(strict=False))
+    index = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % len(QUEUE_LOCKS)
+    return QUEUE_LOCKS[index]
+
+
+def atomic_rewrite_queue(path: Path, lines: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return []
+        temporary_path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def read_queue_lines(path: Path) -> list[dict[str, Any]]:
+    with queue_lock(path):
+        if not path.exists():
+            return []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            return []
     records: list[dict[str, Any]] = []
     for line in lines:
         try:
@@ -4655,45 +4672,38 @@ def quarantine_queue_records(
     rejected_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     evidence: list[dict[str, Any]] = []
     try:
-        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
-        with quarantine_path.open("a", encoding="utf-8") as handle:
-            for record, workspace in rejected:
-                reason = "source_workspace_revision_mismatch"
-                quarantined = {
-                    **record,
-                    "rejectedAt": rejected_at,
-                    "rejectionReason": reason,
-                    "sourceWorkspace": workspace,
-                }
-                handle.write(json.dumps(quarantined, ensure_ascii=False) + "\n")
-                evidence.append(
-                    {
-                        "queueId": str(record.get("id") or ""),
-                        "reason": reason,
+        with queue_lock(path):
+            quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+            with quarantine_path.open("a", encoding="utf-8") as handle:
+                for record, workspace in rejected:
+                    reason = str(workspace.get("blocked") or "source_workspace_revision_mismatch")
+                    quarantined = {
+                        **record,
                         "rejectedAt": rejected_at,
-                        "quarantinePath": str(quarantine_path),
+                        "rejectionReason": reason,
                         "sourceWorkspace": workspace,
                     }
-                )
+                    handle.write(json.dumps(quarantined, ensure_ascii=False) + "\n")
+                    evidence.append(
+                        {
+                            "queueId": str(record.get("id") or ""),
+                            "reason": reason,
+                            "rejectedAt": rejected_at,
+                            "quarantinePath": str(quarantine_path),
+                            "sourceWorkspace": workspace,
+                        }
+                    )
 
-        kept: list[str] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                record = json.loads(line)
-            except Exception:
-                kept.append(line)
-                continue
-            if not isinstance(record, dict) or str(record.get("id") or "") not in rejected_ids:
-                kept.append(line)
-        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            temporary_path.write_text(("\n".join(kept) + "\n") if kept else "", encoding="utf-8")
-            os.replace(temporary_path, path)
-        finally:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
+            kept: list[str] = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    kept.append(line)
+                    continue
+                if not isinstance(record, dict) or str(record.get("id") or "") not in rejected_ids:
+                    kept.append(line)
+            atomic_rewrite_queue(path, kept)
     except Exception as exc:
         return [], f"queue quarantine failed: {exc}"
     return evidence, ""
@@ -4734,8 +4744,10 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
         "command": command,
         **source_metadata(payload),
     }
-    with queue_path(topic_id, book_md5).open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    path = queue_path(topic_id, book_md5)
+    with queue_lock(path):
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return {"ok": True, "message": "command queued", "queued": record}
 
 
@@ -7201,10 +7213,60 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
                     command.get("sourceWorkspaceRevision") or record.get("sourceWorkspaceRevision") or ""
                 )
                 conversation_id = str(command.get("conversationId") or record.get("conversationId") or "")
+                session_id = safe_session_id(command.get("sessionId") or record.get("sessionId"))
+                if conversation_id:
+                    session_item = (
+                        read_conversation_file(SESSIONS_DIR / f"{session_id}.json") if session_id else None
+                    )
+                    queued_context_key = str(command.get("contextDocumentKey") or record.get("contextDocumentKey") or "")
+                    session_binding_matches = bool(
+                        session_item
+                        and str(session_item.get("conversationId") or "") == conversation_id
+                        and (
+                            not str(session_item.get("topicid") or "")
+                            or str(session_item.get("topicid") or "") == str(record.get("topicid") or "")
+                        )
+                        and (
+                            not str(session_item.get("bookmd5") or "")
+                            or str(session_item.get("bookmd5") or "") == str(record.get("bookmd5") or "")
+                        )
+                        and (
+                            not queued_context_key
+                            or not str(session_item.get("contextDocumentKey") or "")
+                            or str(session_item.get("contextDocumentKey") or "") == queued_context_key
+                        )
+                    )
+                    if not session_binding_matches:
+                        rejected_for_path.append(
+                            (
+                                record,
+                                {
+                                    "ok": False,
+                                    "blocked": "queue_session_binding_mismatch",
+                                    "errors": ["queued conversation and session binding do not match"],
+                                    "sourceCount": 0,
+                                },
+                            )
+                        )
+                        continue
+                elif session_id:
+                    rejected_for_path.append(
+                        (
+                            record,
+                            {
+                                "ok": False,
+                                "blocked": "queue_session_binding_mismatch",
+                                "errors": ["queued session binding has no conversation ID"],
+                                "sourceCount": 0,
+                            },
+                        )
+                    )
+                    continue
                 if source_ids:
-                    if not conversation_id or not expected_revision:
+                    if not conversation_id or not session_id or not expected_revision:
                         workspace = {
                             "ok": False,
+                            "blocked": "source_workspace_revision_mismatch",
                             "errors": ["queued source workspace binding is incomplete"],
                             "sourceCount": 0,
                         }
@@ -7243,13 +7305,17 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
         "rejectedCommands": rejected_commands,
     }
     if rejected_commands and not commands:
+        rejection_reasons = {str(item.get("reason") or "") for item in rejected_commands}
+        blocked_reason = (
+            next(iter(rejection_reasons)) if len(rejection_reasons) == 1 else "queue_binding_mismatch"
+        )
         return {
             "ok": False,
             "pending": 0,
             "hasCommand": False,
             "command": None,
             "commands": [],
-            "blocked": "source_workspace_revision_mismatch",
+            "blocked": blocked_reason,
             "message": "Rejected stale source-workspace queue bindings; no stale command was dispatched.",
             **rejection_fields,
         }
@@ -7307,33 +7373,28 @@ def ack_commands(payload: dict[str, Any]) -> dict[str, Any]:
     removed = 0
     remaining = 0
     for path in paths:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception as exc:
-            return {"ok": False, "message": f"ack read failed: {exc}"}
-        kept: list[str] = []
-        for line in lines:
+        with queue_lock(path):
             try:
-                record = json.loads(line)
-            except Exception:
-                kept.append(line)
-                continue
-            if (
-                str(record.get("topicid") or "") == topic_id
-                and (not book_md5 or str(record.get("bookmd5") or "") == book_md5)
-                and str(record.get("id") or "") in ack_set
-            ):
-                removed += 1
-            else:
-                kept.append(line)
-        remaining += len(kept)
-        if kept:
-            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
-        else:
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except Exception as exc:
+                return {"ok": False, "message": f"ack read failed: {exc}"}
+            kept: list[str] = []
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    kept.append(line)
+                    continue
+                if (
+                    str(record.get("topicid") or "") == topic_id
+                    and (not book_md5 or str(record.get("bookmd5") or "") == book_md5)
+                    and str(record.get("id") or "") in ack_set
+                ):
+                    removed += 1
+                else:
+                    kept.append(line)
+            remaining += len(kept)
+            atomic_rewrite_queue(path, kept)
     return {"ok": True, "message": "ack recorded", "removed": removed, "remaining": remaining}
 
 
@@ -7634,11 +7695,12 @@ def load_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     if not conversation_matches_payload(item, payload):
         return {"ok": False, "message": "加载历史对话失败：该会话不属于当前文档或当前对象。"}
     workspace = restore_conversation_source_workspace(item, payload)
+    latest_item = read_conversation_file(path) or item
     return {
         "ok": True,
         "message": "已加载历史对话。",
-        "conversation": conversation_summary(item),
-        "history": item["history"],
+        "conversation": conversation_summary(latest_item),
+        "history": latest_item["history"],
         "workspace": workspace,
     }
 
@@ -7654,50 +7716,60 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     if not conversation_matches_payload(item, payload):
         return {"ok": False, "message": "删除历史对话失败：该会话不属于当前文档或当前对象。"}
     conversation_id = str(item.get("conversationId") or "")
-    if conversation_id:
-        cleanup = source_workspace.clear_workspace(conversation_id)
-        if not cleanup.get("ok"):
-            return {
-                "ok": False,
-                "message": "删除历史对话失败：来源工作区清理失败。",
-                "workspace": cleanup,
-            }
-    try:
-        path.unlink()
-    except Exception as exc:
-        return {"ok": False, "message": f"删除历史对话失败：{exc}"}
+    with source_mutation_lock(conversation_id):
+        latest = read_conversation_file(path)
+        if not latest or not conversation_matches_payload(latest, payload):
+            return {"ok": False, "message": "删除历史对话失败：会话已更改。"}
+        if conversation_id:
+            cleanup = source_workspace.clear_workspace(conversation_id)
+            if not cleanup.get("ok"):
+                return {
+                    "ok": False,
+                    "message": "删除历史对话失败：来源工作区清理失败。",
+                    "workspace": cleanup,
+                }
+        try:
+            with history_lock({**payload, "sessionId": session_id}):
+                path.unlink()
+        except Exception as exc:
+            return {"ok": False, "message": f"删除历史对话失败：{exc}"}
     return {"ok": True, "message": "历史对话已删除。", "deleted": session_id}
 
 
-def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None:
-    path = session_path(payload)
-    existing = read_conversation_file(path) if path.exists() else None
-    conversation_id = normalize_conversation_id(payload)
-    title = conversation_title_from_history(history)
-    object_ref = object_ref_from_mapping(payload, object_ref_from_existing_session(path))
-    body = {
+def _new_session_state(payload: dict[str, Any], path: Path) -> dict[str, Any]:
+    object_ref = object_ref_from_mapping(payload)
+    return {
+        "sessionId": path.stem,
+        "conversationId": normalize_conversation_id(payload),
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
         "contextDocumentKey": normalize_document_context_key(payload),
         "documentTitle": str(payload.get("documentTitle") or payload.get("documentFileName") or ""),
         "source": str(payload.get("source") or ""),
-        "conversationId": conversation_id,
-        "title": title,
+        "history": [],
+        "sourceIds": unique_string_list(payload.get("sourceIds")),
+        "followCurrentDocument": bool(payload.get("followCurrentDocument", True)),
+        "sourceWorkspaceRevision": str(payload.get("sourceWorkspaceRevision") or ""),
+        "objectRef": object_ref,
+    }
+
+
+def _write_session_state(path: Path, state: dict[str, Any]) -> None:
+    history = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
+    object_ref = state.get("objectRef") if isinstance(state.get("objectRef"), dict) else {}
+    body = {
+        "topicid": str(state.get("topicid") or ""),
+        "bookmd5": str(state.get("bookmd5") or ""),
+        "contextDocumentKey": str(state.get("contextDocumentKey") or ""),
+        "documentTitle": str(state.get("documentTitle") or ""),
+        "source": str(state.get("source") or ""),
+        "conversationId": str(state.get("conversationId") or ""),
+        "title": conversation_title_from_history(history),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "history": history,
-        "sourceIds": unique_string_list(
-            payload.get("sourceIds") if "sourceIds" in payload else (existing or {}).get("sourceIds")
-        ),
-        "followCurrentDocument": bool(
-            payload.get("followCurrentDocument")
-            if "followCurrentDocument" in payload
-            else (existing or {}).get("followCurrentDocument", True)
-        ),
-        "sourceWorkspaceRevision": str(
-            payload.get("sourceWorkspaceRevision")
-            if "sourceWorkspaceRevision" in payload
-            else (existing or {}).get("sourceWorkspaceRevision") or ""
-        ),
+        "sourceIds": unique_string_list(state.get("sourceIds")),
+        "followCurrentDocument": bool(state.get("followCurrentDocument", True)),
+        "sourceWorkspaceRevision": str(state.get("sourceWorkspaceRevision") or ""),
     }
     if object_ref_has_identity(object_ref):
         body["objectRef"] = object_ref
@@ -7713,6 +7785,34 @@ def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def mutate_session(
+    payload: dict[str, Any],
+    mutation: Any,
+    *,
+    create: bool = True,
+) -> dict[str, Any] | None:
+    path = session_path(payload)
+    with history_lock(payload):
+        existing = read_conversation_file(path) if path.exists() else None
+        if existing is None and not create:
+            return None
+        state = dict(existing) if existing is not None else _new_session_state(payload, path)
+        state["history"] = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
+        mutated = mutation(state)
+        if isinstance(mutated, dict):
+            state = mutated
+        _write_session_state(path, state)
+        return read_conversation_file(path)
+
+
+def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None:
+    def replace_history(state: dict[str, Any]) -> dict[str, Any]:
+        state["history"] = [dict(item) for item in history if isinstance(item, dict)]
+        return state
+
+    mutate_session(payload, replace_history)
 
 
 def conversation_record_for_source_action(
@@ -7785,18 +7885,36 @@ def persist_conversation_source_metadata(
     revision: str,
     *,
     create: bool = True,
-) -> None:
+    expected_revision: str | None = None,
+) -> dict[str, Any]:
     if item is None and not create:
-        return
+        return {"ok": True, "item": None}
     bound = bound_conversation_payload(payload, item)
-    bound.update(
-        {
-            "sourceIds": source_ids,
-            "followCurrentDocument": bool(follow_current_document),
-            "sourceWorkspaceRevision": str(revision or ""),
+
+    class SourceRevisionMismatch(Exception):
+        pass
+
+    def update_source_metadata(state: dict[str, Any]) -> dict[str, Any]:
+        current_revision = str(state.get("sourceWorkspaceRevision") or "")
+        if expected_revision is not None and current_revision != str(expected_revision or ""):
+            raise SourceRevisionMismatch(current_revision)
+        state["sourceIds"] = list(source_ids)
+        state["followCurrentDocument"] = bool(follow_current_document)
+        state["sourceWorkspaceRevision"] = str(revision or "")
+        return state
+
+    try:
+        persisted = mutate_session(bound, update_source_metadata, create=create)
+    except SourceRevisionMismatch as exc:
+        current_revision = str(exc.args[0] if exc.args else "")
+        return {
+            "ok": False,
+            "blocked": "source_workspace_revision_mismatch",
+            "message": "来源工作区已被其他操作更新，请刷新后重试。",
+            "expectedRevision": str(expected_revision or ""),
+            "currentRevision": current_revision,
         }
-    )
-    save_history(bound, item.get("history", []) if item else [])
+    return {"ok": True, "item": persisted}
 
 
 def prepare_source_workspace(
@@ -7819,7 +7937,13 @@ def prepare_source_workspace(
         for source_id in source_ids:
             candidate = candidate_by_id[source_id]
             artifact = source_text_artifact(candidate)
-            if artifact.get("error"):
+            candidate_path = source_workspace_canonical_file(candidate.get("path"))
+            pdf_original_fallback = bool(
+                artifact.get("error")
+                and candidate_path is not None
+                and candidate_path.suffix.lower() == ".pdf"
+            )
+            if artifact.get("error") and not pdf_original_fallback:
                 errors.append(f"source {source_id}: {artifact['error']}")
                 continue
             prepared.append(
@@ -7832,6 +7956,7 @@ def prepare_source_workspace(
                     "sha256": str(candidate.get("sha256") or ""),
                     "pageCount": artifact.get("pageCount"),
                     "truncated": bool(artifact.get("truncated", False)),
+                    "error": str(artifact.get("error") or ""),
                 }
             )
     conversation_id = normalize_conversation_id(payload)
@@ -7850,7 +7975,7 @@ def prepare_source_workspace(
     return candidates, workspace
 
 
-def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _restore_conversation_source_workspace_locked(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     source_ids = unique_string_list(item.get("sourceIds"))
     conversation_id = str(item.get("conversationId") or "")
     if not source_ids:
@@ -7860,13 +7985,21 @@ def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[st
     if status.get("ok"):
         status["active"] = True
         if not revision:
-            persist_conversation_source_metadata(
+            persisted = persist_conversation_source_metadata(
                 payload,
                 item,
                 source_ids,
                 bool(item.get("followCurrentDocument", True)),
                 str(status.get("revision") or ""),
+                expected_revision=revision,
             )
+            if not persisted.get("ok"):
+                return {
+                    "ok": False,
+                    "active": False,
+                    "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
+                    **persisted,
+                }
             item["sourceWorkspaceRevision"] = str(status.get("revision") or "")
         return status
     bound = bound_conversation_payload(payload, item)
@@ -7877,18 +8010,34 @@ def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[st
     )
     if rebuilt.get("ok"):
         rebuilt_revision = str(rebuilt.get("revision") or "")
-        persist_conversation_source_metadata(
+        persisted = persist_conversation_source_metadata(
             bound,
             item,
             source_ids,
             bool(item.get("followCurrentDocument", True)),
             rebuilt_revision,
+            expected_revision=revision,
         )
+        if not persisted.get("ok"):
+            return {
+                "ok": False,
+                "active": False,
+                "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
+                **persisted,
+            }
         item["sourceWorkspaceRevision"] = rebuilt_revision
     return rebuilt
 
 
-def source_workspace_action(payload: dict[str, Any], action: str) -> dict[str, Any]:
+def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    conversation_id = str(item.get("conversationId") or "")
+    with source_mutation_lock(conversation_id):
+        session_id = safe_session_id(item.get("sessionId"))
+        latest = read_conversation_file(SESSIONS_DIR / f"{session_id}.json") if session_id else None
+        return _restore_conversation_source_workspace_locked(latest or item, payload)
+
+
+def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dict[str, Any]:
     item, ownership_error = conversation_record_for_source_action(payload)
     if ownership_error:
         return {"ok": False, "message": ownership_error, "errors": [ownership_error]}
@@ -7911,16 +8060,42 @@ def source_workspace_action(payload: dict[str, Any], action: str) -> dict[str, A
     )
 
     if action == "source_workspace_update":
+        expected_revision = str(payload.get("sourceWorkspaceRevision") or "")
+        current_revision = str(stored.get("sourceWorkspaceRevision") or "")
+        if expected_revision != current_revision:
+            return {
+                "ok": False,
+                "blocked": "source_workspace_revision_mismatch",
+                "message": "来源工作区已被其他操作更新，请刷新后重试。",
+                "errors": ["source workspace revision does not match the current conversation revision"],
+                "candidates": candidates,
+                "sourceIds": unique_string_list(stored.get("sourceIds")),
+                "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": current_revision,
+                "expectedRevision": expected_revision,
+                "currentRevision": current_revision,
+            }
         candidates, workspace = prepare_source_workspace(bound, source_ids, follow_current_document)
         if workspace.get("ok"):
             revision = str(workspace.get("revision") or "")
-            persist_conversation_source_metadata(
+            persisted = persist_conversation_source_metadata(
                 bound,
                 item,
                 source_ids,
                 follow_current_document,
                 revision,
+                expected_revision=expected_revision,
             )
+            if not persisted.get("ok"):
+                return {
+                    **persisted,
+                    "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
+                    "candidates": candidates,
+                    "workspace": workspace,
+                    "sourceIds": unique_string_list(stored.get("sourceIds")),
+                    "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
+                    "sourceWorkspaceRevision": str(persisted.get("currentRevision") or current_revision),
+                }
         return {
             "ok": bool(workspace.get("ok")),
             "message": "来源工作区已更新。" if workspace.get("ok") else "来源工作区更新失败。",
@@ -7933,18 +8108,44 @@ def source_workspace_action(payload: dict[str, Any], action: str) -> dict[str, A
         }
 
     if action == "source_workspace_clear":
+        expected_revision = str(payload.get("sourceWorkspaceRevision") or "")
+        current_revision = str(stored.get("sourceWorkspaceRevision") or "")
+        if expected_revision != current_revision:
+            return {
+                "ok": False,
+                "blocked": "source_workspace_revision_mismatch",
+                "message": "来源工作区已被其他操作更新，请刷新后重试。",
+                "errors": ["source workspace revision does not match the current conversation revision"],
+                "candidates": candidates,
+                "sourceIds": unique_string_list(stored.get("sourceIds")),
+                "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": current_revision,
+                "expectedRevision": expected_revision,
+                "currentRevision": current_revision,
+            }
         workspace = source_workspace.clear_workspace(conversation_id)
         if workspace.get("ok"):
             source_ids = []
             revision = ""
-            persist_conversation_source_metadata(
+            persisted = persist_conversation_source_metadata(
                 bound,
                 item,
                 source_ids,
                 follow_current_document,
                 revision,
                 create=False,
+                expected_revision=expected_revision,
             )
+            if not persisted.get("ok"):
+                return {
+                    **persisted,
+                    "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
+                    "candidates": candidates,
+                    "workspace": workspace,
+                    "sourceIds": unique_string_list(stored.get("sourceIds")),
+                    "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
+                    "sourceWorkspaceRevision": str(persisted.get("currentRevision") or current_revision),
+                }
         workspace["active"] = False
         workspace["revision"] = ""
         workspace["sources"] = []
@@ -7979,20 +8180,66 @@ def source_workspace_action(payload: dict[str, Any], action: str) -> dict[str, A
     }
 
 
+def source_mutation_lock(conversation_id: str) -> threading.RLock:
+    key = str(conversation_id or "")
+    index = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % len(SOURCE_MUTATION_LOCKS)
+    return SOURCE_MUTATION_LOCKS[index]
+
+
+def source_workspace_action(payload: dict[str, Any], action: str) -> dict[str, Any]:
+    maybe_cleanup_source_workspaces()
+    if action in {"source_workspace_update", "source_workspace_clear"}:
+        with source_mutation_lock(normalize_conversation_id(payload)):
+            return _source_workspace_action_locked(payload, action)
+    return _source_workspace_action_locked(payload, action)
+
+
+def active_source_workspace_conversation_ids() -> set[str]:
+    conversation_ids: set[str] = set()
+    if not SESSIONS_DIR.exists() or SESSIONS_DIR.is_symlink():
+        return conversation_ids
+    for path in SESSIONS_DIR.glob("*.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        item = read_conversation_file(path)
+        conversation_id = str((item or {}).get("conversationId") or "")
+        if conversation_id:
+            conversation_ids.add(conversation_id)
+    return conversation_ids
+
+
+def maybe_cleanup_source_workspaces(*, force: bool = False) -> dict[str, Any]:
+    global LAST_SOURCE_CLEANUP_AT
+    now = time.time()
+    with SOURCE_CLEANUP_LOCK:
+        if not force and LAST_SOURCE_CLEANUP_AT and now - LAST_SOURCE_CLEANUP_AT < SOURCE_CLEANUP_INTERVAL_SECONDS:
+            return {"ok": True, "skipped": True}
+        result = source_workspace.cleanup_orphans(
+            active_source_workspace_conversation_ids(),
+            text_artifacts_dir=SOURCE_TEXT_DIR,
+            now=now,
+        )
+        LAST_SOURCE_CLEANUP_AT = now
+        return result
+
+
 def append_history(
     payload: dict[str, Any],
     user_text: str,
     assistant_text: str,
     assistant_kind: str = "answer",
 ) -> None:
-    with history_lock(payload):
-        history = load_history(payload)
+    def append_messages(state: dict[str, Any]) -> dict[str, Any]:
+        history = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
         if user_text:
             history.append({"role": "user", "content": user_text, "kind": "prompt"})
         if assistant_text:
             kind = assistant_kind if assistant_kind in {"answer", "error", "system"} else "answer"
             history.append({"role": "assistant", "content": assistant_text, "kind": kind})
-        save_history(payload, history)
+        state["history"] = history
+        return state
+
+    mutate_session(payload, append_messages)
 
 
 STALE_MISSING_PDF_HISTORY_RE = re.compile(
@@ -10674,9 +10921,10 @@ def clear_history(payload: dict[str, Any]) -> dict[str, Any]:
     path = session_path(payload)
     removed = 0
     try:
-        if path.exists():
-            path.unlink()
-            removed = 1
+        with history_lock(payload):
+            if path.exists():
+                path.unlink()
+                removed = 1
     except Exception as exc:
         return {"ok": False, "message": f"清空历史失败：{exc}", "removed": removed}
     return {"ok": True, "message": "历史对话已清空。", "removed": removed, "history": []}
@@ -13321,8 +13569,9 @@ def document_context_for_model(
 
 
 def generation_source_workspace(payload: dict[str, Any]) -> dict[str, Any]:
+    explicit_workspace_metadata = "sourceIds" in payload or "sourceWorkspaceRevision" in payload
     source_ids = unique_string_list(payload.get("sourceIds"))
-    if len(source_ids) <= 1:
+    if not explicit_workspace_metadata or not source_ids:
         return {
             "active": False,
             "ok": True,
@@ -13334,9 +13583,9 @@ def generation_source_workspace(payload: dict[str, Any]) -> dict[str, Any]:
     revision = str(payload.get("sourceWorkspaceRevision") or "").strip()
     binding_errors = []
     if not conversation_id:
-        binding_errors.append("multi-file source workspace requires a conversation ID")
+        binding_errors.append("explicit source workspace requires a conversation ID")
     if not revision:
-        binding_errors.append("multi-file source workspace requires a revision")
+        binding_errors.append("explicit source workspace requires a revision")
     if binding_errors:
         return {
             "active": True,
@@ -15455,6 +15704,91 @@ def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _valid_action_token(value: object) -> str:
+    token = str(value or "").strip()
+    return token if re.fullmatch(r"[A-Fa-f0-9]{64}", token) else ""
+
+
+def ensure_action_token() -> str:
+    global ACTION_TOKEN
+    cached = _valid_action_token(ACTION_TOKEN)
+    if cached:
+        return cached
+    CONTROL_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        CONTROL_DIR.chmod(0o700)
+    except OSError:
+        pass
+    try:
+        token_stat = ACTION_TOKEN_PATH.lstat()
+    except FileNotFoundError:
+        token_stat = None
+    if token_stat is not None:
+        if not stat.S_ISREG(token_stat.st_mode) or ACTION_TOKEN_PATH.is_symlink():
+            raise RuntimeError("Web action token path is not a regular managed file")
+        token = _valid_action_token(ACTION_TOKEN_PATH.read_text(encoding="ascii"))
+        if not token:
+            raise RuntimeError("Web action token file is invalid")
+        try:
+            ACTION_TOKEN_PATH.chmod(0o600)
+        except OSError:
+            pass
+        ACTION_TOKEN = token
+        return token
+
+    token = secrets.token_hex(32)
+    try:
+        descriptor = os.open(ACTION_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        ACTION_TOKEN = ""
+        return ensure_action_token()
+    try:
+        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+            handle.write(token + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            ACTION_TOKEN_PATH.unlink()
+        except OSError:
+            pass
+        raise
+    ACTION_TOKEN = token
+    return token
+
+
+def _http_header_values(headers: Any, name: str) -> list[str]:
+    if hasattr(headers, "get_all"):
+        values = headers.get_all(name) or []
+        return [str(value).strip() for value in values]
+    wanted = name.casefold()
+    return [str(value).strip() for key, value in dict(headers or {}).items() if str(key).casefold() == wanted]
+
+
+def http_request_boundary(headers: Any, path: str, *, preflight: bool = False) -> dict[str, Any]:
+    host_values = _http_header_values(headers, "Host")
+    if host_values != [f"{HOST}:{PORT}"]:
+        return {"ok": False, "status": 421, "message": "Host 必须是精确的 Companion loopback 地址。", "corsOrigin": ""}
+
+    origin_values = _http_header_values(headers, "Origin")
+    if len(origin_values) > 1 or (origin_values and origin_values[0] not in ALLOWED_WEB_ORIGINS):
+        return {"ok": False, "status": 403, "message": "Origin 不允许访问 Companion。", "corsOrigin": ""}
+    cors_origin = origin_values[0] if origin_values else ""
+
+    request_path = urlparse(str(path or "")).path
+    if request_path in TOKEN_PROTECTED_POST_PATHS and not preflight:
+        token_values = _http_header_values(headers, ACTION_TOKEN_HEADER)
+        expected = ensure_action_token()
+        if len(token_values) != 1 or not hmac.compare_digest(token_values[0], expected):
+            return {
+                "ok": False,
+                "status": 401,
+                "message": "缺少或无效的 Companion Web action token。",
+                "corsOrigin": cors_origin,
+            }
+    return {"ok": True, "status": 200, "message": "", "corsOrigin": cors_origin}
+
+
 def read_json_post_payload(headers: Any, body_stream: Any) -> dict[str, Any]:
     transfer_encoding = str(headers.get("Transfer-Encoding") or "").strip()
     if transfer_encoding:
@@ -15488,19 +15822,36 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        origin_values = _http_header_values(self.headers, "Origin")
+        if len(origin_values) == 1 and origin_values[0] in ALLOWED_WEB_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin_values[0])
+            self.send_header("Access-Control-Allow-Headers", f"Content-Type, {ACTION_TOKEN_HEADER}")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Vary", "Origin")
         self.end_headers()
         try:
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
 
+    def _enforce_request_boundary(self, *, preflight: bool = False) -> bool:
+        boundary = http_request_boundary(self.headers, self.path, preflight=preflight)
+        if boundary.get("ok"):
+            return True
+        self._send_json(
+            int(boundary.get("status") or 403),
+            {"ok": False, "message": str(boundary.get("message") or "Companion request rejected.")},
+        )
+        return False
+
     def do_OPTIONS(self) -> None:
+        if not self._enforce_request_boundary(preflight=True):
+            return
         self._send_json(200, {"ok": True})
 
     def do_GET(self) -> None:
+        if not self._enforce_request_boundary():
+            return
         if self.path.startswith("/health"):
             self._send_json(200, {"ok": True, "message": "Codex MarginNote Companion is running."})
         elif self.path.startswith("/status"):
@@ -15521,6 +15872,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"ok": False, "message": "Not found"})
 
     def do_POST(self) -> None:
+        if not self._enforce_request_boundary():
+            return
         parsed_body = read_json_post_payload(self.headers, self.rfile)
         if not parsed_body.get("ok"):
             self._send_json(
@@ -15627,6 +15980,8 @@ def main() -> None:
     CONTROL_DIR.mkdir(parents=True, exist_ok=True)
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
     WORKFLOW_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_action_token()
+    maybe_cleanup_source_workspaces(force=True)
     load_env_file()
     (ROOT / "companion.pid").write_text(str(os.getpid()), encoding="utf-8")
     server = ThreadingHTTPServer((HOST, PORT), Handler)

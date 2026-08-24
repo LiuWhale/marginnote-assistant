@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+import io
 import importlib.util
 import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 COMPANION_PATH = Path(__file__).resolve().parents[1] / "companion.py"
@@ -68,6 +71,19 @@ class CompanionControlsTests(unittest.TestCase):
                 "mindmap-visible-surface-guard-v1",
             ]:
                 self.assertIn(feature, companion.REQUIRED_NATIVE_HANDLER_FEATURES)
+
+    def test_web_action_token_is_install_scoped_private_and_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            first = companion.ensure_action_token()
+            companion.ACTION_TOKEN = ""
+            second = companion.ensure_action_token()
+
+            self.assertRegex(first, r"^[a-f0-9]{64}$")
+            self.assertEqual(second, first)
+            self.assertEqual(companion.ACTION_TOKEN_PATH.read_text(encoding="ascii").strip(), first)
+            self.assertEqual(companion.ACTION_TOKEN_PATH.stat().st_mode & 0o777, 0o600)
 
     def test_default_ai_profile_is_codex_cli_gpt56_following_codex_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5845,12 +5861,145 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["sourceCount"], len(result["sources"]))
             titles = {item["title"] for item in result["sources"]}
             self.assertIn("notes.md", titles)
-            self.assertIn("explicit.pdf", titles)
-            self.assertIn("Available.pdf", titles)
+            self.assertNotIn("explicit.pdf", titles)
+            self.assertNotIn("Available.pdf", titles)
             self.assertIn("Cache only.pdf", titles)
             self.assertNotIn("Missing.pdf", titles)
             self.assertTrue(all(Path(item["path"]).is_file() for item in result["sources"]))
             self.assertTrue(all(item["id"] == companion.source_registry.stable_source_id(item["kind"], item["identity"]) for item in result["sources"]))
+
+    def test_source_workspace_candidates_reject_request_paths_and_outside_upload_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            valid_upload = root / "uploads" / "owned.md"
+            valid_upload.parent.mkdir(parents=True, exist_ok=True)
+            valid_upload.write_text("owned upload", encoding="utf-8")
+            forged_secret = root / "secret.txt"
+            forged_secret.write_text("must not become a source", encoding="utf-8")
+            forged_directory = root / "directory-source"
+            forged_directory.mkdir()
+            companion.save_uploaded_files(
+                [
+                    {
+                        "id": "owned",
+                        "name": valid_upload.name,
+                        "path": str(valid_upload),
+                        "size": valid_upload.stat().st_size,
+                    },
+                    {
+                        "id": "outside",
+                        "name": forged_secret.name,
+                        "path": str(forged_secret),
+                        "size": forged_secret.stat().st_size,
+                    },
+                ]
+            )
+
+            result = companion.source_workspace_candidates(
+                {
+                    "topicid": "TOPIC",
+                    "bookmd5": "BOOK",
+                    "pdfPath": str(forged_secret),
+                    "documentPath": str(forged_directory),
+                    "availableDocuments": [
+                        {"id": "forged", "bookmd5": "FORGED", "title": "Secret", "path": str(forged_secret)}
+                    ],
+                    "selectedSearchPaths": [str(forged_secret)],
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual([item["title"] for item in result["sources"]], ["owned.md"])
+            self.assertEqual(Path(result["sources"][0]["path"]), valid_upload.resolve())
+
+    def test_http_action_boundary_rejects_bad_host_origin_and_token_then_accepts_installed_web(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.ACTION_TOKEN = "a" * 64
+
+            def boundary(*, host: str, origin: str | None, token: str | None) -> dict[str, Any]:
+                headers = {"Host": host}
+                if origin is not None:
+                    headers["Origin"] = origin
+                if token is not None:
+                    headers["X-Codex-Action-Token"] = token
+                return companion.http_request_boundary(headers, "/marginnote/action")
+
+            bad_host = boundary(host="localhost:48761", origin="null", token=companion.ACTION_TOKEN)
+            bad_origin = boundary(
+                host="127.0.0.1:48761", origin="https://malicious.example", token=companion.ACTION_TOKEN
+            )
+            missing_token = boundary(host="127.0.0.1:48761", origin="null", token=None)
+            wrong_token = boundary(host="127.0.0.1:48761", origin="null", token="b" * 64)
+            valid = boundary(host="127.0.0.1:48761", origin="null", token=companion.ACTION_TOKEN)
+
+            self.assertEqual(bad_host["status"], 421)
+            self.assertEqual(bad_origin["status"], 403)
+            self.assertEqual(missing_token["status"], 401)
+            self.assertEqual(wrong_token["status"], 401)
+            self.assertEqual(valid["status"], 200)
+            self.assertEqual(valid["corsOrigin"], "null")
+            self.assertNotEqual(valid["corsOrigin"], "*")
+
+    def test_http_handler_enforces_action_boundary_before_body_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.ACTION_TOKEN = "a" * 64
+
+            class NoReadBody:
+                called = False
+
+                def read(self, _length: int) -> bytes:
+                    self.called = True
+                    raise AssertionError("rejected request body must not be read")
+
+            def invoke(headers: dict[str, str], body: Any) -> tuple[int, dict[str, Any]]:
+                handler = companion.Handler.__new__(companion.Handler)
+                handler.path = "/marginnote/action"
+                handler.headers = headers
+                handler.rfile = body
+                sent: list[tuple[int, dict[str, Any]]] = []
+                handler._send_json = lambda status, payload: sent.append((status, payload))
+                handler.do_POST()
+                self.assertEqual(len(sent), 1)
+                return sent[0]
+
+            rejected_body = NoReadBody()
+            missing = invoke(
+                {
+                    "Host": "127.0.0.1:48761",
+                    "Origin": "null",
+                    "Content-Length": "2",
+                },
+                rejected_body,
+            )
+            self.assertEqual(missing[0], 401)
+            self.assertFalse(rejected_body.called)
+
+            malicious = invoke(
+                {
+                    "Host": "127.0.0.1:48761",
+                    "Origin": "https://malicious.example",
+                    "X-Codex-Action-Token": companion.ACTION_TOKEN,
+                    "Content-Length": "2",
+                },
+                NoReadBody(),
+            )
+            self.assertEqual(malicious[0], 403)
+
+            payload = json.dumps({"action": "health", "source": "marginnote4-web-panel"}).encode("utf-8")
+            valid = invoke(
+                {
+                    "Host": "127.0.0.1:48761",
+                    "Origin": "null",
+                    "X-Codex-Action-Token": companion.ACTION_TOKEN,
+                    "Content-Length": str(len(payload)),
+                },
+                io.BytesIO(payload),
+            )
+            self.assertEqual(valid[0], 200)
+            self.assertTrue(valid[1]["ok"], valid)
 
     def test_source_workspace_update_persists_selection_and_returns_revision(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5891,6 +6040,215 @@ class CompanionControlsTests(unittest.TestCase):
             validated = companion.handle_action({**payload, "action": "source_workspace_validate"})
             self.assertEqual(fetched["workspace"]["revision"], result["workspace"]["revision"])
             self.assertTrue(validated["workspace"]["ok"], validated)
+
+    def test_source_workspace_update_merges_history_appended_while_workspace_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "uploads" / "owned.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("owned", encoding="utf-8")
+            companion.save_uploaded_files(
+                [{"id": "owned", "name": source.name, "path": str(source), "size": source.stat().st_size}]
+            )
+            created = companion.new_conversation(
+                {"topicid": "T1", "bookmd5": "B1", "contextDocumentKey": "T1|B1|doc", "source": "unittest"}
+            )
+            self.assertTrue(created["ok"], created)
+            conversation = created["conversation"]
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            payload = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": "T1|B1|doc",
+                "source": "unittest",
+                "conversationId": conversation["conversationId"],
+                "sessionId": conversation["sessionId"],
+                "sourceIds": [source_id],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": "",
+            }
+            build_finished = threading.Event()
+            allow_source_save = threading.Event()
+            original_build = companion.source_workspace.build_workspace
+
+            def blocking_build(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                result = original_build(*args, **kwargs)
+                build_finished.set()
+                self.assertTrue(allow_source_save.wait(5), "test did not release source metadata save")
+                return result
+
+            with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=blocking_build):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    updating = executor.submit(companion.source_workspace_action, payload, "source_workspace_update")
+                    self.assertTrue(build_finished.wait(5), "workspace build did not reach the interleaving point")
+                    companion.append_history(payload, "question during build", "answer during build")
+                    allow_source_save.set()
+                    result = updating.result(timeout=5)
+
+            self.assertTrue(result["ok"], result)
+            saved = json.loads(companion.session_path(payload).read_text(encoding="utf-8"))
+            self.assertEqual(
+                [(item["role"], item["content"]) for item in saved["history"]],
+                [("user", "question during build"), ("assistant", "answer during build")],
+            )
+            self.assertEqual(saved["sourceIds"], [source_id])
+            self.assertEqual(saved["sourceWorkspaceRevision"], result["sourceWorkspaceRevision"])
+
+    def test_history_append_preserves_newer_source_binding_from_stale_generation_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            uploads = []
+            for index in (1, 2):
+                path = root / "uploads" / f"source-{index}.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"source {index}", encoding="utf-8")
+                uploads.append({"id": f"source-{index}", "name": path.name, "path": str(path), "size": path.stat().st_size})
+            companion.save_uploaded_files(uploads)
+            created = companion.new_conversation({"topicid": "T1", "bookmd5": "B1", "source": "unittest"})
+            conversation = created["conversation"]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "source": "unittest",
+                "conversationId": conversation["conversationId"],
+                "sessionId": conversation["sessionId"],
+                "followCurrentDocument": False,
+            }
+            source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
+            first = companion.source_workspace_action(
+                {**base, "sourceIds": source_ids[:1], "sourceWorkspaceRevision": ""}, "source_workspace_update"
+            )
+            self.assertTrue(first["ok"], first)
+            stale_generation_payload = {
+                **base,
+                "sourceIds": source_ids[:1],
+                "sourceWorkspaceRevision": first["sourceWorkspaceRevision"],
+            }
+            second = companion.source_workspace_action(
+                {**base, "sourceIds": source_ids, "sourceWorkspaceRevision": first["sourceWorkspaceRevision"]},
+                "source_workspace_update",
+            )
+            self.assertTrue(second["ok"], second)
+
+            companion.append_history(stale_generation_payload, "stale request", "late answer")
+
+            saved = json.loads(companion.session_path(base).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], source_ids)
+            self.assertEqual(saved["sourceWorkspaceRevision"], second["sourceWorkspaceRevision"])
+            self.assertEqual(saved["history"][-1]["content"], "late answer")
+
+    def test_source_workspace_update_rejects_stale_expected_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            uploads = []
+            for index in (1, 2):
+                path = root / "uploads" / f"source-{index}.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"source {index}", encoding="utf-8")
+                uploads.append({"id": f"source-{index}", "name": path.name, "path": str(path), "size": path.stat().st_size})
+            companion.save_uploaded_files(uploads)
+            created = companion.new_conversation({"topicid": "T1", "bookmd5": "B1", "source": "unittest"})
+            conversation = created["conversation"]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "source": "unittest",
+                "conversationId": conversation["conversationId"],
+                "sessionId": conversation["sessionId"],
+                "followCurrentDocument": False,
+            }
+            source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
+            first = companion.source_workspace_action(
+                {**base, "sourceIds": source_ids[:1], "sourceWorkspaceRevision": ""}, "source_workspace_update"
+            )
+            second = companion.source_workspace_action(
+                {**base, "sourceIds": source_ids, "sourceWorkspaceRevision": first["sourceWorkspaceRevision"]},
+                "source_workspace_update",
+            )
+            stale = companion.source_workspace_action(
+                {**base, "sourceIds": source_ids[:1], "sourceWorkspaceRevision": first["sourceWorkspaceRevision"]},
+                "source_workspace_update",
+            )
+
+            self.assertTrue(first["ok"], first)
+            self.assertTrue(second["ok"], second)
+            self.assertFalse(stale["ok"], stale)
+            self.assertEqual(stale.get("blocked"), "source_workspace_revision_mismatch")
+            saved = json.loads(companion.session_path(base).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], source_ids)
+            self.assertEqual(saved["sourceWorkspaceRevision"], second["sourceWorkspaceRevision"])
+
+    def test_concurrent_source_updates_serialize_and_only_one_cas_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            uploads = []
+            for index in (1, 2):
+                path = root / "uploads" / f"source-{index}.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"source {index}", encoding="utf-8")
+                uploads.append({"id": str(index), "name": path.name, "path": str(path), "size": path.stat().st_size})
+            companion.save_uploaded_files(uploads)
+            created = companion.new_conversation({"topicid": "T1", "bookmd5": "B1", "source": "unittest"})[
+                "conversation"
+            ]
+            base = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "source": "unittest",
+                "conversationId": created["conversationId"],
+                "sessionId": created["sessionId"],
+                "followCurrentDocument": False,
+            }
+            source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
+            initial = companion.source_workspace_action(
+                {**base, "sourceIds": source_ids[:1], "sourceWorkspaceRevision": ""}, "source_workspace_update"
+            )
+            revision = initial["sourceWorkspaceRevision"]
+            first_build_started = threading.Event()
+            release_first_build = threading.Event()
+            original_build = companion.source_workspace.build_workspace
+            build_count = 0
+            count_lock = threading.Lock()
+
+            def blocking_first_build(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                nonlocal build_count
+                with count_lock:
+                    build_count += 1
+                    call_number = build_count
+                if call_number == 1:
+                    first_build_started.set()
+                    self.assertTrue(release_first_build.wait(5), "test did not release first source build")
+                return original_build(*args, **kwargs)
+
+            with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=blocking_first_build):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    first_future = executor.submit(
+                        companion.source_workspace_action,
+                        {**base, "sourceIds": source_ids, "sourceWorkspaceRevision": revision},
+                        "source_workspace_update",
+                    )
+                    self.assertTrue(first_build_started.wait(5), "first source update did not start building")
+                    second_future = executor.submit(
+                        companion.source_workspace_action,
+                        {**base, "sourceIds": source_ids[1:], "sourceWorkspaceRevision": revision},
+                        "source_workspace_update",
+                    )
+                    time.sleep(0.05)
+                    release_first_build.set()
+                    first = first_future.result(timeout=5)
+                    second = second_future.result(timeout=5)
+
+            self.assertTrue(first["ok"], first)
+            self.assertFalse(second["ok"], second)
+            self.assertEqual(second.get("blocked"), "source_workspace_revision_mismatch")
+            self.assertEqual(build_count, 1)
+            saved = json.loads(companion.session_path(base).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], source_ids)
+            self.assertEqual(saved["sourceWorkspaceRevision"], first["sourceWorkspaceRevision"])
 
     def test_source_workspace_update_rejects_unknown_and_broken_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5948,7 +6306,13 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(updated["ok"], updated)
             companion.append_history(base, "question", "answer")
 
-            cleared = companion.handle_action({**base, "action": "source_workspace_clear"})
+            cleared = companion.handle_action(
+                {
+                    **base,
+                    "action": "source_workspace_clear",
+                    "sourceWorkspaceRevision": updated["sourceWorkspaceRevision"],
+                }
+            )
 
             self.assertTrue(cleared["ok"], cleared)
             self.assertFalse(companion.source_workspace.workspace_path("CONV-CLEAR").exists())
@@ -6102,6 +6466,7 @@ class CompanionControlsTests(unittest.TestCase):
                 {**base, "action": "source_workspace_update", "sourceIds": source_ids[:1]}
             )
             revision = initial["workspace"]["revision"]
+            base["sessionId"] = companion.session_path(base).stem
             queued = companion.enqueue_command(
                 {
                     **base,
@@ -6116,7 +6481,12 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(queued["queued"]["sourceWorkspaceRevision"], revision)
             self.assertEqual(queued["queued"]["command"]["sourceIds"], source_ids[:1])
             changed = companion.handle_action(
-                {**base, "action": "source_workspace_update", "sourceIds": source_ids}
+                {
+                    **base,
+                    "action": "source_workspace_update",
+                    "sourceIds": source_ids,
+                    "sourceWorkspaceRevision": revision,
+                }
             )
             self.assertNotEqual(changed["workspace"]["revision"], revision)
             valid = companion.enqueue_command(
@@ -6164,6 +6534,16 @@ class CompanionControlsTests(unittest.TestCase):
                 / companion.source_workspace.safe_conversation_id(conversation_id)
             )
             digest_path.rename(legacy_path)
+            session_payload = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "conversationId": conversation_id,
+                "sourceIds": ["src-legacy"],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": workspace["revision"],
+            }
+            companion.save_history(session_payload, [])
+            session_id = companion.session_path(session_payload).stem
             queued = companion.enqueue_command(
                 {
                     "action": "chat",
@@ -6172,6 +6552,7 @@ class CompanionControlsTests(unittest.TestCase):
                     "topicid": "T1",
                     "bookmd5": "B1",
                     "conversationId": conversation_id,
+                    "sessionId": session_id,
                     "sourceIds": ["src-legacy"],
                     "followCurrentDocument": False,
                     "sourceWorkspaceRevision": workspace["revision"],
@@ -6275,7 +6656,7 @@ class CompanionControlsTests(unittest.TestCase):
             companion.subprocess.Popen = FakeProcess
             try:
                 text, backend = companion.call_codex_cli(
-                    {"prompt": "解释当前文件", "sourceIds": ["src-a"]},
+                    {"prompt": "解释当前文件"},
                     "chat",
                 )
             finally:
@@ -6439,6 +6820,68 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["sourceUsage"]["missing"], ["src-b"])
             self.assertFalse(result["sourceUsage"]["complete"])
             self.assertFalse(result["answerDerivedWritesEligible"])
+
+    def test_explicit_singleton_workspace_uses_workspace_cwd_and_acknowledgement_write_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            payload = self.multi_file_payload(
+                companion,
+                root,
+                "CONV-SINGLETON",
+                source_ids=("src-only",),
+            )
+            workspace = companion.generation_source_workspace(payload)
+            self.assertTrue(workspace["active"], workspace)
+            self.assertTrue(workspace["ok"], workspace)
+            self.assertEqual(workspace["sourceCount"], 1)
+
+            companion.save_runtime_settings({"aiBackend": "codex_cli", "codexCliPath": "/tmp/codex"})
+            companion.codex_cli_status = lambda settings: {"available": True, "path": "/tmp/codex"}
+            companion.effective_codex_cli_model = lambda settings=None: "gpt-test"
+            calls: list[dict[str, Any]] = []
+
+            class FakeProcess:
+                pid = 4321
+                returncode = 0
+
+                def __init__(self, command: list[str], **kwargs: Any) -> None:
+                    calls.append({"command": command, "cwd": kwargs.get("cwd")})
+                    output_index = command.index("--output-last-message") + 1
+                    Path(command[output_index]).write_text(
+                        "singleton answer\n资料读取：src-only=read",
+                        encoding="utf-8",
+                    )
+
+                def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    return "", ""
+
+                def poll(self) -> int:
+                    return self.returncode
+
+            with mock.patch.object(companion.subprocess, "Popen", FakeProcess):
+                reply, backend = companion.call_codex_cli(payload, "chat")
+
+            self.assertEqual(backend, "codex-cli")
+            self.assertIn("singleton answer", reply or "")
+            codex_calls = [item for item in calls if item["command"][:2] == ["/tmp/codex", "exec"]]
+            self.assertEqual(len(codex_calls), 1)
+            self.assertEqual(Path(str(codex_calls[0]["cwd"])), Path(workspace["workspacePath"]))
+
+            missing = companion.with_generation_source_usage(
+                payload,
+                "answer without acknowledgement",
+                {"ok": True, "reply": "answer without acknowledgement", "backend": "codex-cli"},
+            )
+            complete = companion.with_generation_source_usage(
+                payload,
+                "answer\n资料读取：src-only=read",
+                {"ok": True, "reply": "answer\n资料读取：src-only=read", "backend": "codex-cli"},
+            )
+            self.assertFalse(missing["sourceUsage"]["complete"])
+            self.assertFalse(missing["answerDerivedWritesEligible"])
+            self.assertTrue(complete["sourceUsage"]["complete"])
+            self.assertTrue(complete["answerDerivedWritesEligible"])
 
     def test_unread_source_suppresses_generated_card_write_eligibility(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6763,6 +7206,126 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(command["sourceWorkspaceRevision"], "REV-OUTER")
             self.assertEqual(command["contextDocumentKey"], "T1|B1|/papers/a.pdf")
 
+    def test_queue_binding_persists_exact_session_id_in_record_and_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": "T1|B1|doc",
+                "conversationId": "CONV-A",
+                "sessionId": "a" * 24,
+                "action": "chat",
+                "_queue_raw": True,
+                "prompt": "queued for A",
+            }
+
+            queued = companion.enqueue_command(payload)
+
+            self.assertTrue(queued["ok"], queued)
+            self.assertEqual(queued["queued"]["sessionId"], "a" * 24)
+            self.assertEqual(queued["queued"]["command"]["sessionId"], "a" * 24)
+
+    def test_poll_quarantines_queue_binding_with_mismatched_conversation_and_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            first = companion.new_conversation({"topicid": "T1", "bookmd5": "B1", "source": "unittest"})[
+                "conversation"
+            ]
+            second = companion.new_conversation({"topicid": "T1", "bookmd5": "B1", "source": "unittest"})[
+                "conversation"
+            ]
+            queued = companion.enqueue_command(
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "conversationId": first["conversationId"],
+                    "sessionId": second["sessionId"],
+                    "action": "chat",
+                    "_queue_raw": True,
+                    "prompt": "must stay with conversation A",
+                }
+            )
+            self.assertTrue(queued["ok"], queued)
+
+            polled = companion.poll_commands("T1", "B1")
+
+            self.assertFalse(polled["hasCommand"], polled)
+            self.assertEqual(polled.get("blocked"), "queue_session_binding_mismatch")
+            self.assertEqual(polled.get("rejectedCount"), 1)
+
+    def test_ack_rewrite_does_not_lose_concurrent_enqueue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "action": "chat", "_queue_raw": True}
+            first = companion.enqueue_command({**base, "prompt": "first"})["queued"]
+            path = companion.queue_path("T1", "B1")
+            read_reached = threading.Event()
+            allow_rewrite = threading.Event()
+            original_read_text = Path.read_text
+
+            def blocking_read_text(target: Path, *args: Any, **kwargs: Any) -> str:
+                text = original_read_text(target, *args, **kwargs)
+                if target == path and threading.current_thread().name.startswith("ack-rewrite"):
+                    read_reached.set()
+                    self.assertTrue(allow_rewrite.wait(5), "test did not release ack rewrite")
+                return text
+
+            with mock.patch.object(Path, "read_text", blocking_read_text):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="ack-rewrite") as executor:
+                    acknowledging = executor.submit(
+                        companion.ack_commands, {"topicid": "T1", "bookmd5": "B1", "ids": [first["id"]]}
+                    )
+                    self.assertTrue(read_reached.wait(5), "ack did not reach the interleaving point")
+                    enqueuing = executor.submit(companion.enqueue_command, {**base, "prompt": "second"})
+                    time.sleep(0.05)
+                    allow_rewrite.set()
+                    acked = acknowledging.result(timeout=5)
+                    second = enqueuing.result(timeout=5)
+
+            self.assertTrue(acked["ok"], acked)
+            self.assertTrue(second["ok"], second)
+            remaining_ids = [record["id"] for record in companion.read_queue_lines(path)]
+            self.assertEqual(remaining_ids, [second["queued"]["id"]])
+
+    def test_quarantine_rewrite_does_not_lose_concurrent_enqueue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T1", "bookmd5": "B1", "action": "chat", "_queue_raw": True}
+            first = companion.enqueue_command({**base, "prompt": "stale"})["queued"]
+            path = companion.queue_path("T1", "B1")
+            read_reached = threading.Event()
+            allow_rewrite = threading.Event()
+            original_read_text = Path.read_text
+
+            def blocking_read_text(target: Path, *args: Any, **kwargs: Any) -> str:
+                text = original_read_text(target, *args, **kwargs)
+                if target == path and threading.current_thread().name.startswith("quarantine-rewrite"):
+                    read_reached.set()
+                    self.assertTrue(allow_rewrite.wait(5), "test did not release quarantine rewrite")
+                return text
+
+            rejected_workspace = {"ok": False, "errors": ["stale revision"]}
+            with mock.patch.object(Path, "read_text", blocking_read_text):
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=2, thread_name_prefix="quarantine-rewrite"
+                ) as executor:
+                    quarantining = executor.submit(
+                        companion.quarantine_queue_records, path, [(first, rejected_workspace)]
+                    )
+                    self.assertTrue(read_reached.wait(5), "quarantine did not reach the interleaving point")
+                    enqueuing = executor.submit(companion.enqueue_command, {**base, "prompt": "fresh"})
+                    time.sleep(0.05)
+                    allow_rewrite.set()
+                    evidence, error = quarantining.result(timeout=5)
+                    fresh = enqueuing.result(timeout=5)
+
+            self.assertEqual(error, "")
+            self.assertEqual(len(evidence), 1)
+            self.assertTrue(fresh["ok"], fresh)
+            remaining_ids = [record["id"] for record in companion.read_queue_lines(path)]
+            self.assertEqual(remaining_ids, [fresh["queued"]["id"]])
+
     def test_source_text_artifact_reuses_page_aware_pdf_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -6806,6 +7369,75 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(text_path.is_file())
             self.assertIn("[第1页]", text_path.read_text(encoding="utf-8"))
             self.assertIn("[第2页]", text_path.read_text(encoding="utf-8"))
+
+    def test_readable_pdf_extraction_failure_keeps_original_with_visible_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source_path = root / "uploads" / "paper.pdf"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_bytes(b"%PDF-1.4\nreadable original")
+            companion.save_uploaded_files(
+                [{"id": "paper", "name": source_path.name, "path": str(source_path), "size": source_path.stat().st_size}]
+            )
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            payload = {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "conversationId": "CONV-PDF-FALLBACK",
+                "sourceIds": [source_id],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": "",
+            }
+
+            with mock.patch.object(
+                companion,
+                "ensure_pdf_text_cache",
+                return_value=(None, "synthetic extraction failure"),
+            ):
+                result = companion.source_workspace_action(payload, "source_workspace_update")
+
+            self.assertTrue(result["ok"], result)
+            source = result["workspace"]["sources"][0]
+            self.assertTrue(source["readable"])
+            self.assertFalse(source["textReadable"])
+            self.assertEqual(source["textLink"], "")
+            self.assertIn("synthetic extraction failure", source["error"])
+            validated = companion.source_workspace.validate_workspace(
+                "CONV-PDF-FALLBACK", result["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(validated["ok"], validated)
+            self.assertFalse(validated["sources"][0]["textReadable"])
+
+    def test_pdf_text_artifact_marks_and_persists_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source_path = root / "paper.pdf"
+            source_path.write_bytes(b"%PDF-1.4\n")
+            source = {
+                "id": "upload:paper",
+                "kind": "upload",
+                "title": "paper.pdf",
+                "path": str(source_path),
+                "sha256": companion.sha256_file(source_path),
+            }
+            oversized_text = "x" * (companion.FULL_DOCUMENT_CONTEXT_MAX_CHARS + 5000)
+            record = {
+                "pageCount": 1,
+                "chunks": [{"page": 1, "start": 0, "end": len(oversized_text), "text": oversized_text}],
+            }
+
+            with mock.patch.object(companion, "ensure_pdf_text_cache", return_value=(record, None)):
+                artifact = companion.source_text_artifact(source)
+
+            self.assertEqual(artifact["error"], "")
+            self.assertTrue(artifact["truncated"])
+            artifact_path = Path(artifact["textPath"])
+            self.assertTrue(artifact_path.is_file())
+            self.assertTrue(
+                artifact_path.read_text(encoding="utf-8").startswith("当前文档全文（因输入长度限制截断）：")
+            )
 
     def test_source_text_artifact_reuses_utf8_text_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -7430,6 +8062,9 @@ class CompanionControlsTests(unittest.TestCase):
                 "sourceWorkspaceRevision": workspace["revision"],
                 "contextDocumentKey": "T1|B1|/papers/workflow.pdf",
             }
+            session_payload = {"topicid": "T1", "bookmd5": "B1", **binding}
+            companion.save_history(session_payload, [])
+            binding["sessionId"] = companion.session_path(session_payload).stem
             companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
             started = companion.handle_action(
                 {

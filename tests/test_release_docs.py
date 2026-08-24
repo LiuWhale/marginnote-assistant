@@ -38,6 +38,25 @@ class ReleaseDocsTests(unittest.TestCase):
         ]:
             self.assertIn(marker, text)
 
+    def test_release_docs_cover_final_workspace_security_and_fallback_contracts(self) -> None:
+        expectations = {
+            "README.md": ["0.4.53", "token", "one file", "textReadable=false", "7 days"],
+            "README.zh-CN.md": ["0.4.53", "token", "一个文件", "textReadable=false", "7 天"],
+            "docs/USER_MANUAL.md": ["0.4.53", "token", "一个文件", "textReadable=false", "7 天"],
+        }
+        for name, markers in expectations.items():
+            with self.subTest(name=name):
+                text = self.read_doc(name)
+                for marker in markers:
+                    self.assertIn(marker, text)
+                source_section = text.partition("资料")[2]
+                self.assertNotIn("本地选择与搜索结果", source_section)
+                self.assertNotIn("search-root results", source_section)
+
+        checklist = self.read_doc("docs/RELEASE_CHECKLIST.md")
+        self.assertIn("source_workspace.py", checklist)
+        self.assertIn("web-action-token", checklist)
+
     def test_release_docs_cover_one_operation_multi_file_upload(self) -> None:
         expectations = {
             "README.md": [

@@ -2181,7 +2181,6 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="sourceWorkspaceCurrentDocumentList"',
             'id="sourceWorkspaceNotebookList"',
             'id="sourceWorkspaceUploadList"',
-            'id="sourceWorkspaceLocalList"',
             'id="sourceWorkspaceValidationStatus"',
             'id="sourceWorkspaceClearButton"',
             'id="sourceWorkspaceValidateButton"',
@@ -2195,6 +2194,8 @@ class WebControlsStaticTests(unittest.TestCase):
             '完成',
         ]:
             self.assertIn(marker, self.html)
+        self.assertNotIn('id="sourceWorkspaceLocalList"', self.html)
+        self.assertNotIn('本地选择与搜索结果', self.html)
 
         for marker in [
             "sourceWorkspace: {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''}",

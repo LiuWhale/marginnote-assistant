@@ -26,7 +26,7 @@ python3 build_pkg.py --dry-run
 
 验收条件：
 
-- zip 根目录包含 `README.md`、`README.zh-CN.md`、`README-FIRST.txt`、`install.sh`、`uninstall.sh`、`Install Codex Companion.command`、`Uninstall Codex Companion.command`、`Refresh MN Runtime.command`、`Restart MarginNote 4.command`、`Collect Native Highlight Evidence.command`、`Collect Single Document Acceptance.command`、`Collect Cross-Machine Evidence.command`、`Build Signed Package.command`、`Notarize Package.command`、`release_smoke_test.py`、`release_acceptance.py`、`single_document_acceptance.py`、`ui_functional_acceptance.py`、`build_pkg.py` 和 `notarize_pkg.py`。
+- zip 根目录包含 `README.md`、`README.zh-CN.md`、`README-FIRST.txt`、`install.sh`、`uninstall.sh`、`Install Codex Companion.command`、`Uninstall Codex Companion.command`、`Refresh MN Runtime.command`、`Restart MarginNote 4.command`、`Collect Native Highlight Evidence.command`、`Collect Single Document Acceptance.command`、`Collect Cross-Machine Evidence.command`、`Build Signed Package.command`、`Notarize Package.command`、`release_smoke_test.py`、`release_acceptance.py`、`single_document_acceptance.py`、`ui_functional_acceptance.py`、`build_pkg.py`、`notarize_pkg.py` 和 import-critical `companion/source_workspace.py`。
 - `python3 release_smoke_test.py` 能离线检查根目录入口、插件文件、Companion 文件、旧 LaunchAgent 迁移 marker 和私有运行文件排除；带 `--mnaddon` 时还会检查 `.mnaddon` 是否把 `main.js`、`mnaddon.json`、WebView 文件和图标放在 archive root。
 - `python3 release_smoke_test.py --install-dry-run` 会把 zip 解压到临时 `HOME`，设置 `CODEX_MN_DRY_RUN=1`，完整运行安装/卸载入口，并验证不会调用 `launchctl`、不会修改真实 MN4 扩展目录、不会运行真实 doctor。
 - `python3 prepare_release_handoff.py` 或双击 `Prepare Release Handoff.command` 会生成 `CodexCompanion-release-handoff-*` 文件夹/zip，内含最新 zip/pkg、`release_acceptance.json`、`SHA256SUMS.txt`、当前 blocking/warning gate 下一步和 MN runtime/native/single-document/cross-machine evidence 模板；该包会同步到 OneDrive 的 `Codex Companion/Release Handoff` 目录。交接包只把满足 release gate 的有效证据放进 `evidence/`；stale runtime、旧 handler、`ok=false`、不完整证据、native highlight 事件/数据库 scope 不匹配证据、single-document acceptance 未完成，或 package hash 不匹配当前 zip 的跨机器证据只放进 `diagnostics/evidence/`，不能作为发布通过证明。
@@ -35,6 +35,7 @@ python3 build_pkg.py --dry-run
 - `Restart MarginNote 4.command` 只在用户确认后调用 Companion 的 `restart_marginnote4` 动作，用于让 MN4 重新加载原生 `main.js` handler；它不能使用 `killall`。
 - `python3 build_pkg.py --dry-run` 能从最新 zip 生成 pkg payload 和 postinstall 脚本预览；postinstall 必须检测 `/dev/console` 桌面用户，并以该用户身份运行 `install.sh`，不能安装到 root 的 MN4 容器。
 - `./install.sh` 会安装 MN4 扩展、安装并启动 Companion，然后运行 `python3 ~/.codex/marginnote-assistant/doctor.py`。
+- 首次启动会生成权限为 `0600` 的 `~/.codex/marginnote-assistant/control/web-action-token`。Web action 请求必须使用精确 `Host: 127.0.0.1:48761`、受限 Origin/CORS 和 token 请求头；token 不得出现在 payload、历史、诊断日志或发布包中。
 - `./install.sh` 会迁移旧 LaunchAgent label `com.liuwhale.codex-marginnote-assistant`，最终 doctor 应显示 `LaunchAgent loaded: com.codex.paper-companion`。
 - `./uninstall.sh` 会卸载 LaunchAgent，并移除 MN4 扩展；默认保留 `~/.codex/marginnote-assistant` 里的日志/会话，便于排错。
 
@@ -74,6 +75,7 @@ node --check "$HOME/Library/Containers/QReader.MarginStudy.easy/Data/Library/Mar
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/marginnote_api_adapter.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/operation_runtime.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/runtime_config.py"
+/usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/source_workspace.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/skill_marketplace.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/transaction_manager.py"
 /usr/bin/python3 -m py_compile "$HOME/.codex/marginnote-assistant/update_manager.py"
@@ -231,6 +233,10 @@ python3 "$HOME/.codex/marginnote-assistant/release_acceptance.py" \
 - 面板显示逐文件上传进度与最终成功/失败汇总。构造一个可恢复的部分失败时，已成功文件仍保留并自动选中，失败文件逐项显示原因；修复后可用重复批次继续添加，不得清空先前成功项。
 - 成功上传后自动保存并验证资料集，`资料 N` 的 source count 与勾选项一致；重新打开资料页仍能看到这些选择。
 - dist zip 必须包含 `extension/codex.mn.assistant/web/source_workspace_lifecycle.js`，mnaddon 必须包含 `web/source_workspace_lifecycle.js`；`index.html` 必须在 `app.js` 前加载该 helper，任一包缺失都必须被 smoke test 拒绝。
+- dist zip 还必须包含 `companion/source_workspace.py`，并在安装后执行 Python 语法检查；删除该文件的测试包必须被 smoke test 拒绝。
+- 再建立一个只含一个上传文件的显式资料集，确认它仍使用工作区 `cwd`、Codex CLI 和 source acknowledgement；完全没有显式资料元数据的旧对话仍走原单文档路径。
+- 模拟 PDF 文本提取失败但原 PDF 可读，确认验证通过、manifest/UI 显示 `textReadable=false` 和诊断；模拟提取截断，确认文本产物和 manifest 都显示截断，不得声称完整全文。
+- 验证周期清理只移除超过 7 天的无会话引用且所有权可证明工作区/文本产物，以及超过 24 小时的 owned staging/backup；活跃目录、符号链接和所有权不明目录必须保留。
 - 当前会话的 `control/source-workspaces/<conversation-id>/SOURCES.md` 按顺序列出三个文件，`manifest.json` 有三个 source ID，`files/` 有三个可读链接；可提取格式还应在 `text/` 中有对应链接。
 - 进程/诊断证据显示仅启动一个 Codex CLI 进程，且该进程的 `cwd` 是上述资料工作区；回答逐一确认三个 source ID，并给出来源相关说明。
 - `跟随当前文件` 关闭时，切换 MarginNote 当前文档不会替换显式资料集。

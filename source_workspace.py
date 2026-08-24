@@ -14,6 +14,48 @@ from typing import Any
 ROOT = Path.home() / ".codex/marginnote-assistant"
 SOURCE_WORKSPACES_DIR = ROOT / "control" / "source-workspaces"
 SOURCE_WORKSPACE_SCHEMA = "codex.mn.sourceWorkspace.v1"
+MANIFEST_KEYS = {
+    "schema",
+    "conversationId",
+    "followCurrentDocument",
+    "revision",
+    "updatedAt",
+    "sourcesMdSha256",
+    "sources",
+}
+LEGACY_MANIFEST_KEYS = MANIFEST_KEYS - {"sourcesMdSha256"}
+SOURCE_KEYS = {
+    "sourceId",
+    "displayName",
+    "kind",
+    "originalPath",
+    "textOriginalPath",
+    "fileLink",
+    "fileLinkName",
+    "textLink",
+    "textLinkName",
+    "sha256",
+    "textSha256",
+    "readable",
+    "textReadable",
+    "pageCount",
+    "truncated",
+    "error",
+}
+LEGACY_SOURCE_KEYS = SOURCE_KEYS - {"textSha256", "textLinkName"}
+MANAGED_TEXT_ARTIFACT_RE = re.compile(r"^managed-[a-f0-9]{16}-([a-f0-9]{64})\.txt$")
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def configure(root: Path | str) -> None:
@@ -116,7 +158,12 @@ def _json_write(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _workspace_owned_entries(path: Path) -> list[Path]:
+def _workspace_owned_entries(
+    path: Path,
+    conversation_id: str = "",
+    *,
+    allow_legacy_contract: bool = False,
+) -> list[Path]:
     if not path.exists() and not path.is_symlink():
         return []
     if path.is_symlink() or not path.is_dir():
@@ -130,6 +177,26 @@ def _workspace_owned_entries(path: Path) -> list[Path]:
         raise ValueError(f"workspace manifest is invalid: {exc}") from exc
     if not isinstance(manifest, dict) or manifest.get("schema") != SOURCE_WORKSPACE_SCHEMA:
         raise ValueError("workspace manifest schema is invalid")
+    if conversation_id and str(manifest.get("conversationId") or "") != str(conversation_id):
+        raise ValueError("workspace conversation ownership does not match")
+    manifest_keys = set(manifest)
+    if manifest_keys != MANIFEST_KEYS and not (
+        allow_legacy_contract and manifest_keys == LEGACY_MANIFEST_KEYS
+    ):
+        raise ValueError("workspace manifest contains unrecognized fields")
+    if not str(manifest.get("conversationId") or ""):
+        raise ValueError("workspace manifest conversation ownership is missing")
+    if not isinstance(manifest.get("followCurrentDocument"), bool):
+        raise ValueError("workspace manifest follow-current value is invalid")
+    if not re.fullmatch(r"[a-f0-9]{64}", str(manifest.get("revision") or "")):
+        raise ValueError("workspace manifest revision is invalid")
+    if manifest_keys == MANIFEST_KEYS and not re.fullmatch(
+        r"[a-f0-9]{64}", str(manifest.get("sourcesMdSha256") or "")
+    ):
+        raise ValueError("workspace manifest SOURCES.md sha256 is invalid")
+    sources = manifest.get("sources")
+    if not isinstance(sources, list):
+        raise ValueError("workspace manifest sources are invalid")
 
     top_entries = {child.name for child in path.iterdir()}
     if top_entries != {"manifest.json", "SOURCES.md", "files", "text"}:
@@ -140,9 +207,47 @@ def _workspace_owned_entries(path: Path) -> list[Path]:
             raise ValueError(f"workspace {directory_name} is not a managed directory")
 
     expected_links: set[Path] = set()
-    for source in manifest.get("sources", []):
+    source_ids: set[str] = set()
+    for source in sources:
         if not isinstance(source, dict):
             raise ValueError("workspace manifest contains an invalid source")
+        source_keys = set(source)
+        if source_keys != SOURCE_KEYS and not (
+            allow_legacy_contract
+            and (
+                source_keys == LEGACY_SOURCE_KEYS
+                or source_keys == LEGACY_SOURCE_KEYS | {"textLinkName"}
+            )
+        ):
+            raise ValueError("workspace manifest source contains unrecognized fields")
+        source_id = str(source.get("sourceId") or "")
+        if not source_id or source_id in source_ids:
+            raise ValueError("workspace manifest source identity is invalid")
+        source_ids.add(source_id)
+        if source_keys == SOURCE_KEYS:
+            for text_field in ("displayName", "kind", "originalPath", "fileLink", "fileLinkName"):
+                if not str(source.get(text_field) or ""):
+                    raise ValueError(f"workspace manifest source {text_field} is invalid")
+            if not Path(str(source.get("originalPath") or "")).is_absolute():
+                raise ValueError("workspace manifest source path is not absolute")
+            if not re.fullmatch(r"[a-f0-9]{64}", str(source.get("sha256") or "")):
+                raise ValueError("workspace manifest source sha256 is invalid")
+            if not isinstance(source.get("truncated"), bool) or not isinstance(source.get("error"), str):
+                raise ValueError("workspace manifest source diagnostic fields are invalid")
+            if source.get("pageCount") is not None and not isinstance(source.get("pageCount"), int):
+                raise ValueError("workspace manifest source page count is invalid")
+            text_link_present = bool(source.get("textLink"))
+            if text_link_present != bool(source.get("textReadable")):
+                raise ValueError("workspace manifest text readability is inconsistent")
+            if text_link_present:
+                if not Path(str(source.get("textOriginalPath") or "")).is_absolute():
+                    raise ValueError("workspace manifest text source path is not absolute")
+                if not re.fullmatch(r"[a-f0-9]{64}", str(source.get("textSha256") or "")):
+                    raise ValueError("workspace manifest text sha256 is invalid")
+            elif source.get("textSha256") or source.get("textOriginalPath") or source.get("textLinkName"):
+                raise ValueError("workspace manifest contains orphaned text metadata")
+            if source.get("readable") is not True:
+                raise ValueError("workspace manifest source readability is invalid")
         for field, directory_name in (("fileLink", "files"), ("textLink", "text")):
             relative = str(source.get(field) or "")
             if not relative:
@@ -150,6 +255,9 @@ def _workspace_owned_entries(path: Path) -> list[Path]:
             relative_path = Path(relative)
             if relative_path.is_absolute() or relative_path.parts[:1] != (directory_name,) or len(relative_path.parts) != 2:
                 raise ValueError("workspace manifest contains an invalid managed link")
+            name_field = "fileLinkName" if field == "fileLink" else "textLinkName"
+            if source.get(name_field) and str(source.get(name_field)) != relative_path.name:
+                raise ValueError("workspace manifest link name does not match its path")
             expected_links.add(relative_path)
     actual_links = {
         Path(directory_name) / child.name
@@ -164,11 +272,32 @@ def _workspace_owned_entries(path: Path) -> list[Path]:
     sources_file = path / "SOURCES.md"
     if sources_file.is_symlink() or not sources_file.is_file():
         raise ValueError("workspace SOURCES.md is missing or not a regular file")
+    if manifest_keys == MANIFEST_KEYS:
+        try:
+            sources_text = sources_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError(f"workspace SOURCES.md is unreadable: {exc}") from exc
+        if _sha256_text(sources_text) != str(manifest.get("sourcesMdSha256") or ""):
+            raise ValueError("workspace SOURCES.md sha256 does not match the manifest")
+        if sources_text != _sources_markdown(manifest):
+            raise ValueError("workspace SOURCES.md content does not match the manifest")
+        expected_revision = _revision(
+            str(manifest.get("conversationId") or ""),
+            sources,
+            bool(manifest.get("followCurrentDocument", True)),
+            str(manifest.get("sourcesMdSha256") or ""),
+        )
+        if str(manifest.get("revision") or "") != expected_revision:
+            raise ValueError("workspace manifest revision does not match its content")
     return [manifest_path, sources_file, path / "files", path / "text", *[path / relative for relative in sorted(expected_links)]]
 
 
-def _remove_owned_tree(path: Path) -> None:
-    entries = _workspace_owned_entries(path)
+def _remove_owned_tree(path: Path, conversation_id: str = "", *, allow_legacy_contract: bool = False) -> None:
+    entries = _workspace_owned_entries(
+        path,
+        conversation_id,
+        allow_legacy_contract=allow_legacy_contract,
+    )
     if not entries:
         return
     for entry in entries:
@@ -198,6 +327,19 @@ def _normal_source(source: dict[str, Any], index: int) -> tuple[dict[str, Any] |
             errors.append(text_error)
     if errors or path is None:
         return None, errors
+    try:
+        source_sha256 = _sha256_file(path)
+    except OSError as exc:
+        return None, [f"source {source_id or index + 1} cannot be hashed: {exc}"]
+    claimed_sha256 = str(source.get("sha256") or "").strip().lower()
+    if claimed_sha256 and claimed_sha256 != source_sha256:
+        return None, [f"source {source_id or index + 1} sha256 changed before workspace build"]
+    text_sha256 = ""
+    if text_path is not None:
+        try:
+            text_sha256 = _sha256_file(text_path)
+        except OSError as exc:
+            return None, [f"source {source_id or index + 1} textPath cannot be hashed: {exc}"]
     display_name = title or path.name
     normalized = {
         "sourceId": source_id,
@@ -205,15 +347,28 @@ def _normal_source(source: dict[str, Any], index: int) -> tuple[dict[str, Any] |
         "kind": kind,
         "originalPath": str(path),
         "textOriginalPath": str(text_path) if text_path else "",
-        "sha256": str(source.get("sha256") or ""),
+        "sha256": source_sha256,
+        "textSha256": text_sha256,
         "pageCount": source.get("pageCount") if source.get("pageCount") is not None else None,
         "truncated": bool(source.get("truncated", False)),
+        "error": str(source.get("error") or source.get("textError") or ""),
     }
     return normalized, []
 
 
-def _revision(records: list[dict[str, Any]], follow_current_document: bool) -> str:
-    payload = {"followCurrentDocument": bool(follow_current_document), "sources": records}
+def _revision(
+    conversation_id: str,
+    records: list[dict[str, Any]],
+    follow_current_document: bool,
+    sources_md_sha256: str,
+) -> str:
+    payload = {
+        "schema": SOURCE_WORKSPACE_SCHEMA,
+        "conversationId": str(conversation_id),
+        "followCurrentDocument": bool(follow_current_document),
+        "sourcesMdSha256": str(sources_md_sha256),
+        "sources": records,
+    }
     encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -244,6 +399,9 @@ def _sources_markdown(manifest: dict[str, Any]) -> str:
         lines.append(f"- Original: `{source['fileLink']}`")
         if source.get("textLink"):
             lines.append(f"- Extracted text: `{source['textLink']}`")
+            lines.append(f"- Extracted text truncated: `{'true' if source.get('truncated') else 'false'}`")
+        elif source.get("error"):
+            lines.append(f"- Extracted text unavailable: {source['error']}")
         lines.append("")
     return "\n".join(lines)
 
@@ -266,7 +424,6 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
     if errors:
         return _result({"schema": SOURCE_WORKSPACE_SCHEMA, "conversationId": str(conversation_id), "sources": []}, False, errors)
 
-    revision = _revision(normalized, follow_current_document)
     manifest_sources: list[dict[str, Any]] = []
     for index, item in enumerate(normalized, 1):
         digest = hashlib.sha256(f"{item['sourceId']}|{item['originalPath']}".encode("utf-8")).hexdigest()[:8]
@@ -281,12 +438,14 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             "fileLink": f"files/{file_name}",
             "fileLinkName": file_name,
             "textLink": "",
+            "textLinkName": "",
             "sha256": item["sha256"],
+            "textSha256": item["textSha256"],
             "readable": True,
             "textReadable": False,
             "pageCount": item["pageCount"],
             "truncated": item["truncated"],
-            "error": "",
+            "error": item["error"],
             "_textOriginalPath": item["textOriginalPath"],
         }
         if item["textOriginalPath"]:
@@ -296,13 +455,23 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             record["textReadable"] = True
         manifest_sources.append(record)
 
+    public_sources = [{key: value for key, value in source.items() if not key.startswith("_")} for source in manifest_sources]
+    sources_text = _sources_markdown({"sources": public_sources})
+    sources_md_sha256 = _sha256_text(sources_text)
+    revision = _revision(
+        str(conversation_id),
+        public_sources,
+        follow_current_document,
+        sources_md_sha256,
+    )
     manifest = {
         "schema": SOURCE_WORKSPACE_SCHEMA,
         "conversationId": str(conversation_id),
         "followCurrentDocument": bool(follow_current_document),
         "revision": revision,
         "updatedAt": _now(),
-        "sources": [{key: value for key, value in source.items() if not key.startswith("_")} for source in manifest_sources],
+        "sourcesMdSha256": sources_md_sha256,
+        "sources": public_sources,
     }
     staging = SOURCE_WORKSPACES_DIR / f".staging-{uuid.uuid4().hex}"
     backup = SOURCE_WORKSPACES_DIR / f".backup-{uuid.uuid4().hex}"
@@ -314,7 +483,7 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             if source.get("textLink"):
                 os.symlink(item["textOriginalPath"], staging / source["textLink"])
         _json_write(staging / "manifest.json", manifest)
-        (staging / "SOURCES.md").write_text(_sources_markdown(manifest), encoding="utf-8")
+        (staging / "SOURCES.md").write_text(sources_text, encoding="utf-8")
         SOURCE_WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
         if target.exists() or target.is_symlink():
             if target.is_symlink() or not target.is_dir():
@@ -322,14 +491,14 @@ def build_workspace(conversation_id: str, sources: list[dict], follow_current_do
             os.replace(target, backup)
         os.replace(staging, target)
         if backup.exists():
-            _remove_owned_tree(backup)
+            _remove_owned_tree(backup, str(conversation_id), allow_legacy_contract=True)
     except Exception as exc:
         if target.exists() and target != staging and backup.exists():
-            _remove_owned_tree(target)
+            _remove_owned_tree(target, str(conversation_id), allow_legacy_contract=True)
         if backup.exists() and not target.exists():
             os.replace(backup, target)
         if staging.exists() and (staging / "manifest.json").is_file():
-            _remove_owned_tree(staging)
+            _remove_owned_tree(staging, str(conversation_id), allow_legacy_contract=True)
         result = _result(manifest, False, [f"workspace build failed: {exc}"])
         result["workspacePath"] = str(target)
         return result
@@ -346,6 +515,7 @@ def load_workspace(conversation_id: str) -> dict:
     if not manifest_path.is_file():
         return {"ok": False, "errors": ["workspace manifest is missing"], "sourceCount": 0}
     try:
+        _workspace_owned_entries(path, str(conversation_id))
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return {"ok": False, "errors": [f"workspace manifest is invalid: {exc}"], "sourceCount": 0}
@@ -380,6 +550,8 @@ def validate_workspace(conversation_id: str, expected_revision: str = "") -> dic
                     source_errors.append("file link target does not match the manifest source")
                 elif not target.is_file() or not os.access(target, os.R_OK):
                     source_errors.append("file link target is not a readable regular file")
+                elif _sha256_file(target) != str(source.get("sha256") or ""):
+                    source_errors.append("file content sha256 does not match the manifest source")
         except (OSError, RuntimeError):
             source_errors.append("file link is missing or invalid")
         if source.get("textLink"):
@@ -395,6 +567,8 @@ def validate_workspace(conversation_id: str, expected_revision: str = "") -> dic
                         source_errors.append("text link target does not match the manifest source")
                     elif not text_target.is_file() or not os.access(text_target, os.R_OK):
                         source_errors.append("text link target is not a readable regular file")
+                    elif _sha256_file(text_target) != str(source.get("textSha256") or ""):
+                        source_errors.append("text content sha256 does not match the manifest source")
             except (OSError, RuntimeError):
                 source_errors.append("text link is missing or invalid")
         item["valid"] = not source_errors
@@ -425,12 +599,12 @@ def clear_workspace(conversation_id: str) -> dict:
         if ownership_error:
             return {"ok": False, "errors": [ownership_error], "sourceCount": 0}
         try:
-            _workspace_owned_entries(path)
+            _workspace_owned_entries(path, str(conversation_id), allow_legacy_contract=True)
         except (OSError, ValueError) as exc:
             return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
     try:
         for path in paths:
-            _remove_owned_tree(path)
+            _remove_owned_tree(path, str(conversation_id), allow_legacy_contract=True)
     except (OSError, ValueError) as exc:
         return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
     return {
@@ -440,4 +614,96 @@ def clear_workspace(conversation_id: str) -> dict:
         "workspacePath": str(paths[0]),
         "workspacePaths": [str(path) for path in paths],
         "conversationId": str(conversation_id),
+    }
+
+
+def cleanup_orphans(
+    active_conversation_ids: set[str] | list[str] | tuple[str, ...],
+    *,
+    text_artifacts_dir: Path | str | None = None,
+    now: float | None = None,
+) -> dict[str, Any]:
+    active_ids = {str(item) for item in active_conversation_ids if str(item)}
+    current_time = float(now if now is not None else time.time())
+    workspace_cutoff = current_time - 7 * 24 * 60 * 60
+    transient_cutoff = current_time - 24 * 60 * 60
+    removed_workspaces: list[str] = []
+    removed_transients: list[str] = []
+    removed_text_artifacts: list[str] = []
+    skipped: list[str] = []
+    referenced_text_paths: set[str] = set()
+
+    if SOURCE_WORKSPACES_DIR.exists() and not SOURCE_WORKSPACES_DIR.is_symlink():
+        for path in sorted(SOURCE_WORKSPACES_DIR.iterdir(), key=lambda item: item.name):
+            try:
+                path_stat = path.lstat()
+                if not stat.S_ISDIR(path_stat.st_mode):
+                    skipped.append(str(path))
+                    continue
+                manifest_path = path / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                conversation_id = str(manifest.get("conversationId") or "") if isinstance(manifest, dict) else ""
+                if not conversation_id:
+                    raise ValueError("missing conversation ownership")
+                _workspace_owned_entries(
+                    path,
+                    conversation_id,
+                    allow_legacy_contract=True,
+                )
+                modified_at = max(path_stat.st_mtime, manifest_path.lstat().st_mtime)
+                transient = path.name.startswith(".staging-") or path.name.startswith(".backup-")
+                if transient:
+                    remove = modified_at < transient_cutoff
+                else:
+                    expected_names = {
+                        workspace_path(conversation_id).name,
+                        legacy_workspace_path(conversation_id).name,
+                    }
+                    if path.name not in expected_names:
+                        raise ValueError("workspace path does not match its owner")
+                    remove = conversation_id not in active_ids and modified_at < workspace_cutoff
+                if remove:
+                    _remove_owned_tree(
+                        path,
+                        conversation_id,
+                        allow_legacy_contract=True,
+                    )
+                    (removed_transients if transient else removed_workspaces).append(str(path))
+                    continue
+                for source in manifest.get("sources", []):
+                    if not isinstance(source, dict):
+                        continue
+                    text_path = str(source.get("textOriginalPath") or "")
+                    if text_path:
+                        referenced_text_paths.add(str(Path(text_path).expanduser().resolve(strict=False)))
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+                skipped.append(str(path))
+
+    artifact_root = Path(text_artifacts_dir) if text_artifacts_dir is not None else ROOT / "control" / "source-text"
+    if artifact_root.exists() and not artifact_root.is_symlink() and artifact_root.is_dir():
+        for path in sorted(artifact_root.iterdir(), key=lambda item: item.name):
+            try:
+                path_stat = path.lstat()
+                match = MANAGED_TEXT_ARTIFACT_RE.fullmatch(path.name)
+                if not stat.S_ISREG(path_stat.st_mode) or path.is_symlink() or match is None:
+                    continue
+                if _sha256_file(path) != match.group(1):
+                    continue
+                canonical = str(path.resolve(strict=False))
+                if canonical in referenced_text_paths or path_stat.st_mtime >= workspace_cutoff:
+                    continue
+                path.unlink()
+                removed_text_artifacts.append(str(path))
+            except OSError:
+                skipped.append(str(path))
+
+    return {
+        "ok": True,
+        "removedWorkspaceCount": len(removed_workspaces),
+        "removedTransientCount": len(removed_transients),
+        "removedTextArtifactCount": len(removed_text_artifacts),
+        "removedWorkspaces": removed_workspaces,
+        "removedTransients": removed_transients,
+        "removedTextArtifacts": removed_text_artifacts,
+        "skipped": skipped,
     }

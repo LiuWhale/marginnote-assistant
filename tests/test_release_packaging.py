@@ -268,6 +268,7 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("ui_functional_acceptance.py", module.REQUIRED_SUFFIXES)
         self.assertIn("notarize_pkg.py", module.REQUIRED_SUFFIXES)
         self.assertIn("prepare_release_handoff.py", module.REQUIRED_SUFFIXES)
+        self.assertIn("companion/source_workspace.py", module.REQUIRED_SUFFIXES)
         self.assertIn("mnaddon.json", module.MNADDON_REQUIRED_SUFFIXES)
         self.assertIn("main.js", module.MNADDON_REQUIRED_SUFFIXES)
         self.assertIn("web/source_workspace_lifecycle.js", module.MNADDON_REQUIRED_SUFFIXES)
@@ -360,6 +361,33 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertFalse(result.ok, result)
             self.assertIn(lifecycle, result.missing)
 
+    def test_release_smoke_rejects_dist_without_source_workspace_module(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_dist_workspace_module",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        workspace_module = "companion/source_workspace.py"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "CodexCompanion-test-dist.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                for suffix in module.REQUIRED_SUFFIXES:
+                    if suffix == workspace_module:
+                        continue
+                    archive.writestr(
+                        f"CodexCompanion-test/{suffix}",
+                        module.MARKERS.get(suffix, "ok"),
+                    )
+
+            result = module.inspect_package(package)
+
+            self.assertFalse(result.ok, result)
+            self.assertIn(workspace_module, result.missing)
+
     def test_release_smoke_rejects_mnaddon_without_source_workspace_lifecycle(self) -> None:
         spec = importlib.util.spec_from_file_location(
             "codex_mn_release_smoke_mnaddon_lifecycle",
@@ -383,6 +411,39 @@ class ReleasePackagingTests(unittest.TestCase):
 
             self.assertFalse(result.ok, result)
             self.assertIn(lifecycle, result.missing)
+
+    def test_release_smoke_rejects_install_scoped_action_token_from_archives(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_private_action_token",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp) / "CodexCompanion-test-dist.zip"
+            with zipfile.ZipFile(dist, "w") as archive:
+                for suffix in module.REQUIRED_SUFFIXES:
+                    archive.writestr(f"CodexCompanion-test/{suffix}", module.MARKERS.get(suffix, "ok"))
+                archive.writestr(
+                    "CodexCompanion-test/extension/codex.mn.assistant/web-action-token",
+                    "a" * 64,
+                )
+            mnaddon = Path(tmp) / "CodexCompanion-test.mnaddon"
+            with zipfile.ZipFile(mnaddon, "w") as archive:
+                for suffix in module.MNADDON_REQUIRED_SUFFIXES:
+                    archive.writestr(suffix, module.MNADDON_MARKERS.get(suffix, "ok"))
+                archive.writestr("web-action-token", "a" * 64)
+
+            dist_result = module.inspect_package(dist)
+            mnaddon_result = module.inspect_mnaddon(mnaddon)
+
+            self.assertFalse(dist_result.ok, dist_result)
+            self.assertIn("extension/codex.mn.assistant/web-action-token", dist_result.bad_entries)
+            self.assertFalse(mnaddon_result.ok, mnaddon_result)
+            self.assertIn("web-action-token", mnaddon_result.bad_entries)
 
     def test_release_smoke_accepts_mnaddon_with_manifest_at_archive_root(self) -> None:
         spec = importlib.util.spec_from_file_location(
@@ -760,6 +821,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexCompanion-test/companion/companion.py": "print('ok')\n",
                 "CodexCompanion-test/companion/diagnostic_log.py": "SENSITIVE_LOG_KEYS\n",
                 "CodexCompanion-test/companion/runtime_config.py": "DEFAULT_RUNTIME_SETTINGS = {}\n",
+                "CodexCompanion-test/companion/source_workspace.py": "SOURCE_WORKSPACE_SCHEMA = 'test'\n",
                 "CodexCompanion-test/companion/doctor.py": "installable clean zip\n",
                 "CodexCompanion-test/companion/refresh_mn_runtime.py": "MNRuntimeEvidence\n",
                 "CodexCompanion-test/companion/install_companion.sh": "LEGACY_LABEL=\"com.liuwhale.codex-marginnote-assistant\"\n",

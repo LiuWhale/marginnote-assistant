@@ -180,6 +180,31 @@ test('older upload callback cannot unlock a newer upload lifecycle', () => {
   assert.equal(controller.isUploadActive(), false);
 });
 
+test('active upload locks conflicting source controls but permits its own finalization handle', () => {
+  const controller = lifecycle.createController();
+  const upload = controller.beginUpload({successfulUploadIds: []}).handle;
+
+  assert.equal(controller.areSourceControlsLocked(), true);
+  assert.equal(controller.isSourceMutationAllowed(null), false);
+  assert.equal(controller.isSourceMutationAllowed(upload), true);
+
+  controller.finishUpload(upload);
+  assert.equal(controller.areSourceControlsLocked(), false);
+  assert.equal(controller.isSourceMutationAllowed(null), true);
+});
+
+test('clear cancellation preserves upload successes and makes stale reselection callback inert', () => {
+  const controller = lifecycle.createController();
+  const upload = controller.beginUpload({successfulUploadIds: ['upload:one']}).handle;
+
+  const canceled = controller.cancelUpload('clear');
+
+  assert.deepEqual(canceled.meta.successfulUploadIds, ['upload:one']);
+  assert.equal(controller.isUploadCurrent(upload), false);
+  assert.equal(controller.updateUpload(upload, {autoSelect: true}), false);
+  assert.equal(controller.areSourceControlsLocked(), false);
+});
+
 test('generation gate remains active for the full migration lifecycle', () => {
   const controller = lifecycle.createController();
   const migration = controller.beginMigration({contextDocumentKey: 'stable'}).handle;
@@ -250,6 +275,94 @@ test('app payload keeps explicit object ownership but skips stale implicit owner
     const payload = companionPayload(action, {});
     assert.deepEqual(payload.mnObject, state.agentOperation.mnObject, action);
   }
+});
+
+test('app payload never copies the Web action token into action JSON', () => {
+  const state = payloadState({
+    context: Object.assign({}, payloadState().context, {
+      webActionToken: 'sensitive-install-token',
+    }),
+  });
+  const companionPayload = loadCompanionPayload(state);
+
+  const payload = companionPayload('chat', {prompt: 'hello'});
+
+  assert.equal(Object.hasOwn(payload, 'webActionToken'), false);
+  assert.equal(JSON.stringify(payload).includes('sensitive-install-token'), false);
+});
+
+test('explicit queued conversation never inherits the currently active session', () => {
+  const state = payloadState({conversationId: 'CONV-B', sessionId: 'SESSION-B'});
+  const companionPayload = loadCompanionPayload(state);
+
+  const unbound = companionPayload('chat', {conversationId: 'CONV-A'});
+  const bound = companionPayload('chat', {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+  });
+
+  assert.equal(Object.hasOwn(unbound, 'sessionId'), false);
+  assert.equal(bound.sessionId, 'SESSION-A');
+});
+
+test('queued A result stays background after the active session switches to B', () => {
+  assert.equal(
+    lifecycle.queuedSessionRouting(
+      {conversationId: 'CONV-A', sessionId: 'SESSION-A'},
+      {conversationId: 'CONV-B', sessionId: 'SESSION-B'},
+    ),
+    'background',
+  );
+  assert.equal(
+    lifecycle.queuedSessionRouting(
+      {conversationId: 'CONV-A', sessionId: 'SESSION-A'},
+      {conversationId: 'CONV-A', sessionId: 'SESSION-A'},
+    ),
+    'active',
+  );
+});
+
+test('runQueuedCommand persists A through exact background payload after switching to B', () => {
+  const state = payloadState({conversationId: 'CONV-B', sessionId: 'SESSION-B'});
+  const companionPayload = loadCompanionPayload(state);
+  const exactPayloads = [];
+  const acked = [];
+  const runQueuedCommand = loadAppFunction('runQueuedCommand', 'drainNextQueuedAction', {
+    state,
+    window: {SourceWorkspaceLifecycle: lifecycle},
+    generationLifecycleUnavailableReason: () => '',
+    ackAndSkipQueuedCommand: () => assert.fail('valid bound command must not be skipped'),
+    deferNativeQueuedCommand: () => assert.fail('generation command is not native'),
+    setContextScope: () => {},
+    isQueueableGoalAction: () => true,
+    isWriteAction: () => false,
+    companionPayload,
+    newRequestId: () => 'REQUEST-A',
+    postCompanionExactPayload: (payload, done) => {
+      exactPayloads.push(payload);
+      done({ok: true, reply: 'saved in A'});
+    },
+    ackQueueAndContinue: (queueId) => acked.push(queueId),
+    requestGoalAction: () => assert.fail('background result must bypass active rendering path'),
+    requestDraftAction: () => assert.fail('background result must bypass active rendering path'),
+    requestTextAction: () => assert.fail('background result must bypass active rendering path'),
+  });
+
+  runQueuedCommand({
+    _queue_id: 'QUEUE-A',
+    rawAction: 'chat',
+    prompt: 'queued for A',
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sourceIds: ['upload:one'],
+    sourceWorkspaceRevision: 'REV-A',
+  });
+
+  assert.equal(exactPayloads.length, 1);
+  assert.equal(exactPayloads[0].conversationId, 'CONV-A');
+  assert.equal(exactPayloads[0].sessionId, 'SESSION-A');
+  assert.equal(exactPayloads[0].prompt, 'queued for A');
+  assert.deepEqual(acked, ['QUEUE-A']);
 });
 
 test('stable automatic switch persists three sources and rebuilds in the new document scope', () => {

@@ -11,6 +11,22 @@ function codexSafeString(value) {
   return String(value);
 }
 
+function codexCompanionActionToken(mainPath) {
+  try {
+    var home = codexSafeString(NSHomeDirectory());
+    var candidates = [codexSafeString(mainPath) + '/web-action-token'];
+    if (home) candidates.push(home + '/.codex/marginnote-assistant/control/web-action-token');
+    for (var i = 0; i < candidates.length; i++) {
+      var value = NSString.stringWithContentsOfFileEncodingError(candidates[i], 4, null);
+      var token = codexSafeString(value).replace(/^\s+|\s+$/g, '');
+      if (/^[A-Fa-f0-9]{64}$/.test(token)) return token;
+    }
+    return '';
+  } catch (err) {
+    return '';
+  }
+}
+
 function codexUrlString(url) {
   if (!url) return '';
   try {
@@ -550,6 +566,7 @@ CodexWebPanelController.prototype.sendContextToWeb = function() {
   }
   context.panel = 'webview';
   context.companionUrl = 'http://127.0.0.1:48761';
+  context.webActionToken = codexCompanionActionToken(this.mainPath);
   this.callPanel('setContext', context);
 };
 

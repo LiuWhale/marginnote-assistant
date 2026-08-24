@@ -17,6 +17,19 @@
     );
   }
 
+  function queuedSessionRouting(command, activeConversation) {
+    command = command || {};
+    activeConversation = activeConversation || {};
+    var conversationId = String(command.conversationId || '');
+    var sessionId = String(command.sessionId || '');
+    if (!conversationId && !sessionId) return 'active';
+    if (!conversationId || !sessionId) return 'invalid';
+    return (
+      conversationId === String(activeConversation.conversationId || '') &&
+      sessionId === String(activeConversation.sessionId || '')
+    ) ? 'active' : 'background';
+  }
+
   function createHandle(kind, epoch, meta) {
     return {
       kind: kind,
@@ -109,6 +122,12 @@
       return canceled;
     }
 
+    function isSourceMutationAllowed(handle) {
+      if (activeMigration && !isMigrationCurrent(handle)) return false;
+      if (activeUpload && !isUploadCurrent(handle)) return false;
+      return true;
+    }
+
     return {
       beginMigration: beginMigration,
       isMigrationCurrent: isMigrationCurrent,
@@ -124,6 +143,8 @@
       finishUpload: finishUpload,
       cancelUpload: cancelUpload,
       isUploadActive: function() { return !!activeUpload; },
+      isSourceMutationAllowed: isSourceMutationAllowed,
+      areSourceControlsLocked: function() { return !!activeMigration || !!activeUpload; },
       isGenerationBlocked: function() { return !!activeMigration; }
     };
   }
@@ -144,6 +165,7 @@
   return {
     createController: createController,
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
+    queuedSessionRouting: queuedSessionRouting,
     shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload
   };

@@ -12,6 +12,8 @@ EXT_TARGETS=(
   "$HOME/Library/Containers/QReader.MarginStudyMac/Data/Library/MarginNote Extensions/codex.mn.assistant"
 )
 DRY_RUN="${CODEX_MN_DRY_RUN:-0}"
+COMPANION_HOME="${CODEX_MN_COMPANION_HOME:-$HOME/.codex/marginnote-assistant}"
+ACTION_TOKEN_PATH="$COMPANION_HOME/control/web-action-token"
 
 if [[ ! -d "$EXT_SOURCE" ]]; then
   echo "Cannot find extension source: $EXT_SOURCE" >&2
@@ -26,9 +28,16 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
+if [[ ! -f "$ACTION_TOKEN_PATH" ]] || ! /usr/bin/grep -Eq '^[A-Fa-f0-9]{64}$' "$ACTION_TOKEN_PATH"; then
+  echo "Missing or invalid Companion Web action token: $ACTION_TOKEN_PATH" >&2
+  echo "Install/start Companion before installing the MarginNote extension." >&2
+  exit 1
+fi
+
 for EXT_TARGET in "${EXT_TARGETS[@]}"; do
   mkdir -p "$(dirname "$EXT_TARGET")" "$EXT_TARGET"
   /usr/bin/rsync -a --delete "$EXT_SOURCE/" "$EXT_TARGET/"
+  /usr/bin/install -m 600 "$ACTION_TOKEN_PATH" "$EXT_TARGET/web-action-token"
   echo "Installed MN4 extension to $EXT_TARGET"
 done
 

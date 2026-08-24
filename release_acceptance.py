@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,9 @@ NATIVE_HIGHLIGHT_EVIDENCE_SCHEMA = "codex-companion-native-highlight-v1"
 MN_RUNTIME_EVIDENCE_SCHEMA = "codex-companion-mn-runtime-v1"
 SINGLE_DOCUMENT_ACCEPTANCE_SCHEMA = "codex-companion-single-document-acceptance-v1"
 DEFAULT_COMPANION_URL = "http://127.0.0.1:48761"
+ACTION_TOKEN_PATH = Path(
+    os.environ.get("CODEX_MN_COMPANION_HOME", Path.home() / ".codex/marginnote-assistant")
+).expanduser() / "control/web-action-token"
 CROSS_MACHINE_EVIDENCE_PATTERNS = [
     "codex-companion-cross-machine-evidence-*.json",
     "CodexCompanion-cross-machine-evidence-*.json",
@@ -204,10 +208,17 @@ def companion_url(base_url: str, path: str) -> str:
 
 def post_json(base_url: str, path: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
+    if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+        raise RuntimeError("Companion Web action token is missing or invalid")
     req = request.Request(
         companion_url(base_url, path),
         data=data,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Codex-Action-Token": token,
+        },
         method="POST",
     )
     with request.urlopen(req, timeout=timeout) as response:

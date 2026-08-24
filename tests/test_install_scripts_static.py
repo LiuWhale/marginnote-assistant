@@ -47,6 +47,10 @@ class InstallScriptStaticTests(unittest.TestCase):
         self.assertNotIn('! -x "$COMPANION_SOURCE/install_companion.sh"', install_root)
         self.assertIn('/bin/zsh "$COMPANION_SOURCE/install_extension.sh"', install_root)
         self.assertIn('/bin/zsh "$COMPANION_SOURCE/install_companion.sh"', install_root)
+        self.assertLess(
+            install_root.index('/bin/zsh "$COMPANION_SOURCE/install_companion.sh"'),
+            install_root.index('/bin/zsh "$COMPANION_SOURCE/install_extension.sh"'),
+        )
         self.assertNotIn('-x "$COMPANION_SOURCE/uninstall_companion.sh"', uninstall_root)
         self.assertIn('/bin/zsh "$COMPANION_SOURCE/uninstall_companion.sh"', uninstall_root)
 
@@ -56,6 +60,13 @@ class InstallScriptStaticTests(unittest.TestCase):
         self.assertIn("QReader.MarginStudy.easy", install_extension)
         self.assertIn("QReader.MarginStudyMac", install_extension)
         self.assertIn("EXT_TARGETS", install_extension)
+
+    def test_extension_installer_copies_private_web_action_token(self) -> None:
+        install_extension = (PROJECT_ROOT / "install_extension.sh").read_text(encoding="utf-8")
+
+        self.assertIn("control/web-action-token", install_extension)
+        self.assertIn('install -m 600 "$ACTION_TOKEN_PATH" "$EXT_TARGET/web-action-token"', install_extension)
+        self.assertNotIn('cat "$ACTION_TOKEN_PATH"', install_extension)
 
     def test_refresh_mn_runtime_command_collects_evidence_without_quitting_mn4(self) -> None:
         command = (PACKAGE_ROOT / "Refresh MN Runtime.command").read_text(encoding="utf-8")

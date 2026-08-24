@@ -16,11 +16,20 @@ All notable changes to Codex Companion are documented here.
 
 - Multi-file requests now require Codex CLI and never fall back to the OpenAI API, which cannot read local workspace links.
 - Read sources are independent of the single validated MarginNote write target; managed workspace cleanup removes only Companion metadata and links, never selected originals.
+- Explicit source metadata now activates the managed workspace even for one file. The unsupported local/search-results block was removed from the dedicated picker; local files enter through `Add Files`.
+- The local Web action endpoint now requires an install-scoped token, exact loopback Host, and restrictive Origin/CORS checks. Workspace candidates accept only server-owned cache/index records, managed uploads, or server-resolved MarginNote paths.
+- Ownership-proven orphan workspaces and unreferenced managed text artifacts are cleaned after 7 days; stale staging/backups are cleaned after 24 hours, without following links or touching active/ambiguous directories.
 
 ### Fixed
 
 - `conversation_new` now atomically persists its zero-message session before returning, so opening the source workspace after starting a new conversation no longer fails with `会话不存在`; a persistence failure leaves the current UI conversation unchanged.
 - Packaged WebView startup now treats `web/source_workspace_lifecycle.js` as load-bearing: both dist and mnaddon smoke checks require it because `index.html` imports it before `app.js`.
+- Session history and source metadata now share one atomic mutation lock and source-revision CAS, preventing concurrent generation/source saves from deleting messages or reverting source bindings.
+- Queue records now bind the exact `sessionId`, queue JSONL reads/appends/ack/quarantine rewrites share per-path locks, and results for an inactive conversation persist there without rendering in the active conversation.
+- Workspace validation now checks strict manifest ownership/allowlists, `SOURCES.md`, original and extracted-text hashes, and revision integrity. In-place source replacement fails preflight.
+- A readable PDF remains usable when text extraction fails; its source record reports `textReadable=false` and the extraction diagnostic. Truncated extracted artifacts remain explicitly marked.
+- Active uploads now lock conflicting source controls. Clearing cancels the upload epoch, preserves completed upload records, and prevents stale callbacks from reselecting sources.
+- Dist smoke and the release syntax checklist now require the import-critical `companion/source_workspace.py` module.
 
 ## 0.4.52 - 2026-08-01
 
