@@ -639,7 +639,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("minmax(0, 1fr)", row_body)
         self.assertIn("min-width: 0;", name_body)
         self.assertIn("overflow-wrap: anywhere;", name_body)
-        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr));", commands_body)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", commands_body)
         self.assertIn("min-height:", command_button_body)
         self.assertIn("height: 100%;", command_button_body)
 
@@ -647,6 +647,17 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertNotIn("width: 390px", source_css)
         self.assertNotIn("min-width: 420px", source_css)
         self.assertIn("@media (max-width: 520px)", source_css)
+
+    def test_bulk_removal_controls_wrap_into_stable_minimum_width_rows(self) -> None:
+        controls_body = self.css.split(".source-workspace-bulk-controls {", 1)[1].split("}", 1)[0]
+        button_body = self.css.split(".source-workspace-bulk-controls .small-button {", 1)[1].split("}", 1)[0]
+        small_screen_css = self.css.rsplit("@media (max-width: 520px)", 1)[1]
+
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr));", controls_body)
+        self.assertIn("min-height:", button_body)
+        self.assertIn("height: 100%;", button_body)
+        self.assertIn(".source-workspace-bulk-controls", small_screen_css)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", small_screen_css)
 
     def test_minimum_width_header_reflows_without_horizontal_clipping(self) -> None:
         minimum_css = self.css.rsplit("@media (max-width: 520px)", 1)[1].split(

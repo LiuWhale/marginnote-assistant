@@ -824,8 +824,21 @@
         <summary>技术诊断</summary>
         <div id="sourceWorkspaceDiagnosticsBody">展开后显示本地路径和验证详情。</div>
       </details>
+      <section id="sourceWorkspaceBulkRemoval" class="source-workspace-bulk-removal" aria-label="批量移除资料">
+        <div class="source-workspace-bulk-header">
+          <div>
+            <strong>批量移除</strong>
+            <p id="sourceWorkspaceRemovalSummary">仅从本次对话移除资料；原始文件和上传记录会保留。</p>
+          </div>
+          <button id="sourceWorkspaceManageRemovalButton" class="small-button" type="button">管理移除</button>
+        </div>
+        <div id="sourceWorkspaceBulkControls" class="source-workspace-bulk-controls hidden">
+          <button id="sourceWorkspaceSelectAllRemovableButton" class="small-button" type="button">全选可移除</button>
+          <button id="sourceWorkspaceCancelRemovalSelectionButton" class="small-button" type="button">取消全选</button>
+          <button id="sourceWorkspaceRemoveSelectedButton" class="small-button danger-lite" type="button">移除所选</button>
+        </div>
+      </section>
       <div class="source-workspace-commands">
-        <button id="sourceWorkspaceClearButton" class="small-button danger-lite" type="button">全部取消</button>
         <button id="sourceWorkspaceValidateButton" class="small-button" type="button">验证资料</button>
         <button id="sourceWorkspaceDoneButton" class="small-button primary" type="button">完成</button>
       </div>

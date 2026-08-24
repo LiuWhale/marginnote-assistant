@@ -484,6 +484,9 @@ BUTTON_COVERAGE_PANEL_CONTROL_BUTTONS = [
     "operationLedgerFilterButton",
     "sourceWorkspaceDoneButton",
     "sourceWorkspaceValidateButton",
+    "sourceWorkspaceManageRemovalButton",
+    "sourceWorkspaceSelectAllRemovableButton",
+    "sourceWorkspaceCancelRemovalSelectionButton",
 ]
 
 BUTTON_COVERAGE_DYNAMIC_BUTTONS = [
@@ -495,7 +498,7 @@ BUTTON_COVERAGE_FORM_OR_DESTRUCTIVE_BUTTONS = [
     "clearOpenAIKeyButton",
     "logsClearButton",
     "saveSettingsButton",
-    "sourceWorkspaceClearButton",
+    "sourceWorkspaceRemoveSelectedButton",
 ]
 
 BUTTON_COVERAGE_FILE_PICKER_BUTTONS = [

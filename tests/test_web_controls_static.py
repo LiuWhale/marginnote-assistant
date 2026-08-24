@@ -2187,14 +2187,19 @@ class WebControlsStaticTests(unittest.TestCase):
             'id="sourceWorkspaceNotebookList"',
             'id="sourceWorkspaceUploadList"',
             'id="sourceWorkspaceValidationStatus"',
-            'id="sourceWorkspaceClearButton"',
+            'id="sourceWorkspaceManageRemovalButton"',
+            'id="sourceWorkspaceSelectAllRemovableButton"',
+            'id="sourceWorkspaceCancelRemovalSelectionButton"',
+            'id="sourceWorkspaceRemoveSelectedButton"',
             'id="sourceWorkspaceValidateButton"',
             'id="sourceWorkspaceDoneButton"',
             'id="sourceWorkspaceDiagnostics"',
             '>资料 <span id="sourceWorkspaceCount"',
             '返回对话',
             '跟随当前文件',
-            '全部取消',
+            '全选可移除',
+            '取消全选',
+            '移除所选',
             '验证资料',
             '完成',
         ]:
@@ -2206,6 +2211,9 @@ class WebControlsStaticTests(unittest.TestCase):
             "sourceWorkspace: {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''}",
             "sourceWorkspaceCandidates: []",
             "sourceWorkspaceSelection: {}",
+            "sourceWorkspaceRemovalSelection: {}",
+            "sourceWorkspaceRemovalManagementActive: false",
+            "sourceWorkspaceBulkInFlight: false",
             "followCurrentDocument: true",
             "function openSourceWorkspacePage",
             "function renderSourceWorkspacePage",
@@ -2226,6 +2234,30 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("candidate.title", row_body)
         self.assertIn("row.title =", row_body)
         self.assertIn("type = 'checkbox'", row_body)
+        self.assertIn("document.createElement('div')", row_body)
+        self.assertNotIn("document.createElement('label')", row_body)
+
+        save_body = self.js.split("function saveSourceWorkspaceSelection", 1)[1].split(
+            "\n  function newConversationRequestIsCurrent", 1
+        )[0]
+        self.assertIn("clearSourceWorkspace", save_body)
+
+    def test_source_workspace_bulk_removal_is_membership_only_and_transactional(self) -> None:
+        removal_body = self.js.split("function applyBulkSourceWorkspaceRemoval", 1)[1].split(
+            "\n  function clearSourceWorkspace", 1
+        )[0]
+        for marker in [
+            "source_workspace_update",
+            "source_workspace_validate",
+            "原始文件和上传记录会保留",
+            "sourceWorkspaceRemovalSelection",
+            "sourceWorkspaceResultRevision",
+            "回滚",
+        ]:
+            self.assertIn(marker, removal_body)
+        self.assertIn("source_workspace_clear", removal_body)
+        for forbidden in ["delete_file", "upload_delete", "removeUpload"]:
+            self.assertNotIn(forbidden, removal_body)
 
     def test_generation_payload_and_source_coverage_are_fail_closed(self) -> None:
         payload_body = self.js.split("function companionPayload", 1)[1].split(

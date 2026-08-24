@@ -17,6 +17,32 @@
     );
   }
 
+  function selectAllRemovableSourceIds(sourceIds, protectedIds) {
+    var protectedSet = {};
+    protectedIds = protectedIds || [];
+    for (var i = 0; i < protectedIds.length; i++) protectedSet[String(protectedIds[i] || '')] = true;
+    return (sourceIds || []).map(function(sourceId) {
+      return String(sourceId || '');
+    }).filter(function(sourceId) {
+      return !!sourceId && !protectedSet[sourceId];
+    });
+  }
+
+  function reducedSourceWorkspaceMembership(sourceIds, removalIds) {
+    var removalSet = {};
+    removalIds = removalIds || [];
+    for (var i = 0; i < removalIds.length; i++) removalSet[String(removalIds[i] || '')] = true;
+    return (sourceIds || []).map(function(sourceId) {
+      return String(sourceId || '');
+    }).filter(function(sourceId) {
+      return !!sourceId && !removalSet[sourceId];
+    });
+  }
+
+  function clearBulkRemovalSelection() {
+    return [];
+  }
+
   function queuedSessionRouting(command, activeConversation) {
     command = command || {};
     activeConversation = activeConversation || {};
@@ -420,11 +446,14 @@
 
   return {
     createController: createController,
+    clearBulkRemovalSelection: clearBulkRemovalSelection,
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
     handleQueuedResult: handleQueuedResult,
     firstRunnableQueuedCommand: firstRunnableQueuedCommand,
     queueRuntimeCanStart: queueRuntimeCanStart,
     requestBindingMatchesActiveSession: requestBindingMatchesActiveSession,
+    reducedSourceWorkspaceMembership: reducedSourceWorkspaceMembership,
+    selectAllRemovableSourceIds: selectAllRemovableSourceIds,
     queuedDraftBindingMatchesActiveSession: queuedDraftBindingMatchesActiveSession,
     queuedExecutionDisposition: queuedExecutionDisposition,
     queuedConfirmationMatchesActiveSession: queuedConfirmationMatchesActiveSession,

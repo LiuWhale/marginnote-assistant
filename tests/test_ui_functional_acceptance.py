@@ -84,7 +84,10 @@ class UiFunctionalAcceptanceTests(unittest.TestCase):
         self.assertIn("sourceWorkspaceAddFilesButton", evidence["filePickerButtons"])
         self.assertIn("sourceWorkspaceValidateButton", evidence["panelControlButtons"])
         self.assertIn("sourceWorkspaceDoneButton", evidence["panelControlButtons"])
-        self.assertIn("sourceWorkspaceClearButton", evidence["formOrDestructiveButtons"])
+        self.assertIn("sourceWorkspaceManageRemovalButton", evidence["panelControlButtons"])
+        self.assertIn("sourceWorkspaceSelectAllRemovableButton", evidence["panelControlButtons"])
+        self.assertIn("sourceWorkspaceCancelRemovalSelectionButton", evidence["panelControlButtons"])
+        self.assertIn("sourceWorkspaceRemoveSelectedButton", evidence["formOrDestructiveButtons"])
 
     def test_cli_writes_json_report(self) -> None:
         module = load_module()

@@ -7834,11 +7834,69 @@ button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton):
   overflow-wrap: anywhere;
 }
 
+.source-workspace-bulk-removal {
+  display: grid;
+  gap: 8px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.source-workspace-bulk-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.source-workspace-bulk-header strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.source-workspace-bulk-header p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.source-workspace-bulk-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.source-workspace-bulk-controls.hidden {
+  display: none;
+}
+
+.source-workspace-bulk-controls .small-button {
+  min-height: 32px;
+  height: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.source-workspace-removal-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--error);
+}
+
+.source-workspace-removal-checkbox.hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .source-workspace-commands {
   position: sticky;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-inline: -14px;
   padding: 10px 14px 14px;
@@ -7904,6 +7962,14 @@ button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton):
   .source-workspace-remove {
     min-width: 40px;
     padding-inline: 3px;
+  }
+
+  .source-workspace-bulk-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .source-workspace-bulk-controls .small-button:last-child {
+    grid-column: 1 / -1;
   }
 }
 

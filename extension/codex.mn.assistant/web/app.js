@@ -88,6 +88,9 @@
     sourceWorkspace: {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''},
     sourceWorkspaceCandidates: [],
     sourceWorkspaceSelection: {},
+    sourceWorkspaceRemovalSelection: {},
+    sourceWorkspaceRemovalManagementActive: false,
+    sourceWorkspaceBulkInFlight: false,
     followCurrentDocument: true,
     sourceWorkspaceInFlight: false,
     sourceWorkspaceStatus: {tone: 'neutral', text: '资料尚未验证'},
@@ -2087,6 +2090,25 @@
     return selection;
   }
 
+  function sourceWorkspaceControlsLocked() {
+    return !!state.sourceWorkspaceInFlight || !!state.sourceWorkspaceBulkInFlight ||
+      !!state.sourceWorkspaceConversationCreateInFlight ||
+      sourceWorkspaceLifecycle.areSourceControlsLocked();
+  }
+
+  function sourceWorkspaceRemovalSelectionIds() {
+    var membership = sourceWorkspaceSelectionIds();
+    var selected = [];
+    for (var i = 0; i < membership.length; i++) {
+      var sourceId = membership[i];
+      if (
+        state.sourceWorkspaceRemovalSelection[sourceId] &&
+        !isSourceWorkspaceRemovalProtected(sourceId)
+      ) selected.push(sourceId);
+    }
+    return selected;
+  }
+
   function sourceWorkspaceCandidateById(sourceId) {
     sourceId = String(sourceId || '');
     for (var i = 0; i < state.sourceWorkspaceCandidates.length; i++) {
@@ -2128,6 +2150,22 @@
       if (!cached && candidate.kind === 'pdf_cache') cached = candidate;
     }
     return selected || cached || fallback;
+  }
+
+  function sourceWorkspaceProtectedRemovalIds() {
+    if (!state.followCurrentDocument) return [];
+    return state.sourceWorkspaceCurrentDocumentIds.slice();
+  }
+
+  function isSourceWorkspaceRemovalProtected(sourceId) {
+    return sourceWorkspaceProtectedRemovalIds().indexOf(String(sourceId || '')) >= 0;
+  }
+
+  function sourceWorkspaceRemovableIds() {
+    return window.SourceWorkspaceLifecycle.selectAllRemovableSourceIds(
+      sourceWorkspaceSelectionIds(),
+      sourceWorkspaceProtectedRemovalIds()
+    );
   }
 
   function sourceWorkspaceCandidateGroup(candidate) {
@@ -2212,6 +2250,14 @@
     if (Object.prototype.hasOwnProperty.call(result, 'followCurrentDocument')) {
       state.followCurrentDocument = !!result.followCurrentDocument;
     }
+    var retainedRemovalSelection = {};
+    for (var removalId in state.sourceWorkspaceRemovalSelection) {
+      if (Object.prototype.hasOwnProperty.call(state.sourceWorkspaceRemovalSelection, removalId) &&
+          state.sourceWorkspaceSelection[removalId] && !isSourceWorkspaceRemovalProtected(removalId)) {
+        retainedRemovalSelection[removalId] = true;
+      }
+    }
+    state.sourceWorkspaceRemovalSelection = retainedRemovalSelection;
     if (result.workspace) state.sourceWorkspace = result.workspace;
     state.sourceWorkspace = state.sourceWorkspace || {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''};
     if (result.sourceWorkspaceRevision !== undefined) state.sourceWorkspace.revision = String(result.sourceWorkspaceRevision || '');
@@ -2253,7 +2299,7 @@
     candidate = candidate || {};
     var sourceId = String(candidate.id || '');
     var workspaceSource = sourceWorkspaceRecordById(sourceId) || {};
-    var row = document.createElement('label');
+    var row = document.createElement('div');
     row.className = 'source-workspace-row' + (candidate.unavailable ? ' unavailable' : '');
     row.title = String(candidate.title || sourceId || '未命名文件');
 
@@ -2285,16 +2331,21 @@
     body.appendChild(name);
     body.appendChild(meta);
 
-    var remove = document.createElement('button');
-    remove.className = 'source-workspace-remove';
-    remove.type = 'button';
-    remove.textContent = '移除';
-    remove.title = '从本次资料中移除';
-    remove.disabled = !state.sourceWorkspaceSelection[sourceId] || sourceWorkspaceLifecycle.areSourceControlsLocked();
-    remove.addEventListener('click', function(ev) {
-      if (ev.preventDefault) ev.preventDefault();
-      delete state.sourceWorkspaceSelection[sourceId];
-      setSourceWorkspaceStatus('warning', '资料选择已更改，点击“完成”保存');
+    var remove = document.createElement('input');
+    remove.className = 'source-workspace-removal-checkbox' +
+      (state.sourceWorkspaceRemovalManagementActive ? '' : ' hidden');
+    remove.type = 'checkbox';
+    remove.checked = !!state.sourceWorkspaceRemovalSelection[sourceId];
+    remove.disabled = !state.sourceWorkspaceRemovalManagementActive ||
+      !state.sourceWorkspaceSelection[sourceId] ||
+      isSourceWorkspaceRemovalProtected(sourceId) ||
+      sourceWorkspaceControlsLocked();
+    remove.title = isSourceWorkspaceRemovalProtected(sourceId) ?
+      '跟随当前文件开启时，当前文件不能移除' : '选择从本次对话移除';
+    remove.setAttribute('aria-label', '选择移除 ' + String(candidate.title || sourceId));
+    remove.addEventListener('change', function() {
+      if (remove.checked) state.sourceWorkspaceRemovalSelection[sourceId] = true;
+      else delete state.sourceWorkspaceRemovalSelection[sourceId];
       renderSourceWorkspacePage();
     });
     row.appendChild(checkbox);
@@ -2353,20 +2404,46 @@
     var follow = byId('sourceWorkspaceFollowCurrentDocument');
     if (follow) {
       follow.checked = !!state.followCurrentDocument;
-      follow.disabled = sourceWorkspaceLifecycle.areSourceControlsLocked();
+      follow.disabled = sourceWorkspaceControlsLocked();
     }
-    var controlsLocked = sourceWorkspaceLifecycle.areSourceControlsLocked();
-    for (var controlIndex = 0; controlIndex < 4; controlIndex++) {
+    var controlsLocked = sourceWorkspaceControlsLocked();
+    for (var controlIndex = 0; controlIndex < 7; controlIndex++) {
       var control = byId([
         'sourceWorkspaceAddFilesButton',
-        'sourceWorkspaceClearButton',
         'sourceWorkspaceValidateButton',
-        'sourceWorkspaceDoneButton'
+        'sourceWorkspaceDoneButton',
+        'sourceWorkspaceManageRemovalButton',
+        'sourceWorkspaceSelectAllRemovableButton',
+        'sourceWorkspaceCancelRemovalSelectionButton',
+        'sourceWorkspaceRemoveSelectedButton'
       ][controlIndex]);
       if (control) control.disabled = controlsLocked;
     }
+    var selectedRemovalCount = sourceWorkspaceRemovalSelectionIds().length;
+    var removableCount = sourceWorkspaceRemovableIds().length;
+    var manageRemoval = byId('sourceWorkspaceManageRemovalButton');
+    if (manageRemoval) manageRemoval.disabled = controlsLocked || !sourceWorkspaceSelectionIds().length;
+    var selectAllRemoval = byId('sourceWorkspaceSelectAllRemovableButton');
+    if (selectAllRemoval) selectAllRemoval.disabled = controlsLocked || !removableCount;
+    var cancelRemoval = byId('sourceWorkspaceCancelRemovalSelectionButton');
+    if (cancelRemoval) cancelRemoval.disabled = controlsLocked || !selectedRemovalCount;
+    var removeSelected = byId('sourceWorkspaceRemoveSelectedButton');
+    if (removeSelected) removeSelected.disabled = controlsLocked || !selectedRemovalCount;
     var fileInput = byId('sourceWorkspaceFileInput');
     if (fileInput) fileInput.disabled = controlsLocked;
+    var bulkControls = byId('sourceWorkspaceBulkControls');
+    if (bulkControls) bulkControls.className = 'source-workspace-bulk-controls' +
+      (state.sourceWorkspaceRemovalManagementActive ? '' : ' hidden');
+    var manage = byId('sourceWorkspaceManageRemovalButton');
+    if (manage) manage.textContent = state.sourceWorkspaceRemovalManagementActive ? '结束移除' : '管理移除';
+    var removalSummary = byId('sourceWorkspaceRemovalSummary');
+    if (removalSummary) {
+      var selectedForRemoval = selectedRemovalCount;
+      var protectedCount = sourceWorkspaceProtectedRemovalIds().length;
+      removalSummary.textContent = selectedForRemoval ?
+        '已选择移除 ' + selectedForRemoval + ' 个资料；原始文件和上传记录会保留。' :
+        (protectedCount ? '当前文件受跟随保护；原始文件和上传记录会保留。' : '仅从本次对话移除资料；原始文件和上传记录会保留。');
+    }
     renderSourceWorkspaceHeaderControl();
     var status = state.sourceWorkspaceStatus || {tone: 'neutral', text: '资料尚未验证'};
     var statusNode = byId('sourceWorkspaceValidationStatus');
@@ -2380,6 +2457,9 @@
   function invalidateSourceWorkspaceRequests() {
     state.sourceWorkspaceRequestToken += 1;
     state.sourceWorkspaceInFlight = false;
+    state.sourceWorkspaceBulkInFlight = false;
+    state.sourceWorkspaceRemovalSelection = {};
+    state.sourceWorkspaceRemovalManagementActive = false;
   }
 
   function beginSourceWorkspaceRequest() {
@@ -2422,6 +2502,7 @@
     ensureSourceWorkspaceConversation(function() {
       state.sourceWorkspaceInFlight = true;
       setSourceWorkspaceStatus('warning', '正在保存并验证资料...');
+      renderSourceWorkspacePage();
       postSourceWorkspace('source_workspace_update', {
         conversationId: state.conversationId,
         sourceIds: sourceIds,
@@ -2492,6 +2573,9 @@
     };
     state.sourceWorkspaceCandidates = [];
     state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(conversation.sourceIds || []);
+    state.sourceWorkspaceRemovalSelection = {};
+    state.sourceWorkspaceRemovalManagementActive = false;
+    state.sourceWorkspaceBulkInFlight = false;
     state.followCurrentDocument = conversation.followCurrentDocument !== false;
     state.sourceWorkspaceCurrentDocumentId = '';
     state.sourceWorkspaceCurrentDocumentIds = [];
@@ -2561,6 +2645,7 @@
     }
     state.sourceWorkspaceInFlight = true;
     setSourceWorkspaceStatus('warning', '正在验证资料...');
+    renderSourceWorkspacePage();
     postSourceWorkspace('source_workspace_validate', {
       conversationId: state.conversationId,
       sourceIds: sourceWorkspaceSelectionIds(),
@@ -2580,6 +2665,121 @@
     saveSourceWorkspaceSelection(false, function(saved) {
       if (!saved || !saved.ok) return;
       validateSavedSourceWorkspace();
+    });
+  }
+
+  function sourceWorkspaceResultRevision(result, fallback) {
+    result = result || {};
+    return String((result.workspace || {}).revision || result.sourceWorkspaceRevision || fallback || '');
+  }
+
+  function applyBulkSourceWorkspaceRemoval(done) {
+    if (!sourceWorkspaceOperationAllowed(null) || sourceWorkspaceControlsLocked()) return;
+    var removalIds = sourceWorkspaceRemovalSelectionIds();
+    var snapshot = {
+      sourceIds: sourceWorkspaceSelectionIds(),
+      followCurrentDocument: !!state.followCurrentDocument,
+      sourceWorkspaceRevision: String((state.sourceWorkspace || {}).revision || '')
+    };
+    var reducedSourceIds = window.SourceWorkspaceLifecycle.reducedSourceWorkspaceMembership(snapshot.sourceIds, removalIds);
+    if (!removalIds.length || reducedSourceIds.length === snapshot.sourceIds.length) {
+      setSourceWorkspaceStatus('warning', '请先选择要从本次对话移除的资料。');
+      return;
+    }
+    if (window.confirm && !window.confirm(
+      '将从本次对话移除 ' + removalIds.length + ' 个资料。原始文件和上传记录会保留。'
+    )) return;
+
+    state.sourceWorkspaceBulkInFlight = true;
+    state.sourceWorkspaceInFlight = true;
+    state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(reducedSourceIds);
+    setSourceWorkspaceStatus('warning', '正在移除所选资料并验证...');
+    renderSourceWorkspacePage();
+
+    function finish(result, tone, message) {
+      state.sourceWorkspaceBulkInFlight = false;
+      state.sourceWorkspaceInFlight = false;
+      setSourceWorkspaceStatus(tone, message);
+      renderSourceWorkspacePage();
+      if (done) done(result || {});
+    }
+
+    function restoreSnapshot(failureResult, failureStage) {
+      var rollbackRevision = sourceWorkspaceResultRevision(
+        failureResult,
+        String((state.sourceWorkspace || {}).revision || snapshot.sourceWorkspaceRevision)
+      );
+      state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(snapshot.sourceIds);
+      state.followCurrentDocument = snapshot.followCurrentDocument;
+      setSourceWorkspaceStatus('warning', '移除未完成，正在回滚资料成员...');
+      renderSourceWorkspacePage();
+      postSourceWorkspace('source_workspace_update', {
+        conversationId: state.conversationId,
+        sourceIds: snapshot.sourceIds,
+        followCurrentDocument: snapshot.followCurrentDocument,
+        sourceWorkspaceRevision: rollbackRevision
+      }, function(rollbackResult) {
+        var rollbackOk = !!(rollbackResult && rollbackResult.ok);
+        if (rollbackOk) {
+          applySourceWorkspaceResult(rollbackResult, {selectionOverride: snapshot.sourceIds});
+        } else {
+          state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(snapshot.sourceIds);
+          state.followCurrentDocument = snapshot.followCurrentDocument;
+        }
+        var restoredRevision = sourceWorkspaceResultRevision(rollbackResult, rollbackRevision);
+        if (!rollbackOk || !snapshot.sourceIds.length) {
+          finish(rollbackResult || failureResult, 'error', rollbackOk ?
+            '移除失败，资料成员已回滚。' :
+            '移除失败，资料成员回滚失败；请重新验证资料。');
+          if (!rollbackOk) addFailureMessage('资料成员回滚失败', rollbackResult || failureResult || {});
+          return;
+        }
+        postSourceWorkspace('source_workspace_validate', {
+          conversationId: state.conversationId,
+          sourceIds: snapshot.sourceIds,
+          followCurrentDocument: snapshot.followCurrentDocument,
+          sourceWorkspaceRevision: restoredRevision
+        }, function(validationResult) {
+          if (validationResult && validationResult.ok) {
+            applySourceWorkspaceResult(validationResult, {selectionOverride: snapshot.sourceIds});
+            finish(validationResult, 'error', '移除在' + failureStage + '失败，资料成员已回滚并重新验证。');
+            return;
+          }
+          finish(validationResult || rollbackResult, 'error', '移除失败，资料成员已回滚，但重新验证失败。');
+          addFailureMessage('资料成员回滚后验证失败', validationResult || rollbackResult || {});
+        });
+      });
+    }
+
+    ensureSourceWorkspaceConversation(function() {
+      var updateAction = reducedSourceIds.length ? 'source_workspace_update' : 'source_workspace_clear';
+      postSourceWorkspace(updateAction, {
+        conversationId: state.conversationId,
+        sourceIds: reducedSourceIds,
+        followCurrentDocument: snapshot.followCurrentDocument,
+        sourceWorkspaceRevision: snapshot.sourceWorkspaceRevision
+      }, function(updateResult) {
+        if (!updateResult || !updateResult.ok) {
+          restoreSnapshot(updateResult || {}, '保存');
+          return;
+        }
+        applySourceWorkspaceResult(updateResult, {selectionOverride: reducedSourceIds});
+        postSourceWorkspace('source_workspace_validate', {
+          conversationId: state.conversationId,
+          sourceIds: reducedSourceIds,
+          followCurrentDocument: snapshot.followCurrentDocument,
+          sourceWorkspaceRevision: sourceWorkspaceResultRevision(updateResult, snapshot.sourceWorkspaceRevision)
+        }, function(validationResult) {
+          if (!validationResult || !validationResult.ok) {
+            restoreSnapshot(validationResult || {}, '验证');
+            return;
+          }
+          applySourceWorkspaceResult(validationResult, {selectionOverride: reducedSourceIds});
+          state.sourceWorkspaceRemovalSelection = {};
+          state.sourceWorkspaceRemovalManagementActive = false;
+          finish(validationResult, 'ready', '已从本次对话移除 ' + removalIds.length + ' 个资料；原始文件和上传记录已保留。');
+        });
+      });
     });
   }
 
@@ -13236,7 +13436,23 @@
     bindButton('conversationHistoryCloseButton', closeConversationHistory);
     bindButton('sourceWorkspaceButton', openSourceWorkspacePage);
     bindButton('sourceWorkspaceBackButton', closeSourceWorkspacePage);
-    bindButton('sourceWorkspaceClearButton', function() { clearSourceWorkspace(false); });
+    bindButton('sourceWorkspaceManageRemovalButton', function() {
+      if (sourceWorkspaceControlsLocked()) return;
+      state.sourceWorkspaceRemovalManagementActive = !state.sourceWorkspaceRemovalManagementActive;
+      if (!state.sourceWorkspaceRemovalManagementActive) state.sourceWorkspaceRemovalSelection = {};
+      renderSourceWorkspacePage();
+    });
+    bindButton('sourceWorkspaceSelectAllRemovableButton', function() {
+      if (sourceWorkspaceControlsLocked()) return;
+      state.sourceWorkspaceRemovalSelection = sourceWorkspaceSelectionMap(sourceWorkspaceRemovableIds());
+      renderSourceWorkspacePage();
+    });
+    bindButton('sourceWorkspaceCancelRemovalSelectionButton', function() {
+      if (sourceWorkspaceControlsLocked()) return;
+      state.sourceWorkspaceRemovalSelection = {};
+      renderSourceWorkspacePage();
+    });
+    bindButton('sourceWorkspaceRemoveSelectedButton', applyBulkSourceWorkspaceRemoval);
     bindButton('sourceWorkspaceValidateButton', validateSourceWorkspace);
     bindButton('sourceWorkspaceDoneButton', function() { saveSourceWorkspaceSelection(true); });
     bindButton('sourceWorkspaceAddFilesButton', function() {
@@ -13260,6 +13476,12 @@
         state.followCurrentDocument = !!ev.currentTarget.checked;
         var current = currentDocumentSourceCandidate();
         if (state.followCurrentDocument && current) state.sourceWorkspaceSelection[String(current.id || '')] = true;
+        if (state.followCurrentDocument) {
+          var protectedIds = sourceWorkspaceProtectedRemovalIds();
+          for (var protectedIndex = 0; protectedIndex < protectedIds.length; protectedIndex++) {
+            delete state.sourceWorkspaceRemovalSelection[protectedIds[protectedIndex]];
+          }
+        }
         setSourceWorkspaceStatus('warning', '跟随设置已更改，点击“完成”保存');
         renderSourceWorkspacePage();
       });

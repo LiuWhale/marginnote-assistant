@@ -69,6 +69,232 @@ function payloadState(overrides) {
 
 const appIsWriteAction = loadAppFunction('isWriteAction', 'isQueueableGoalAction', {});
 
+test('bulk removal reduces only the explicitly selected source subset', () => {
+  assert.deepEqual(
+    lifecycle.reducedSourceWorkspaceMembership?.(
+      ['current', 'upload-a', 'upload-b'],
+      ['upload-a'],
+    ),
+    ['current', 'upload-b'],
+  );
+});
+
+test('bulk select all excludes every protected current-document candidate', () => {
+  assert.deepEqual(
+    lifecycle.selectAllRemovableSourceIds?.(
+      ['current-cache', 'current-explicit', 'upload-a', 'upload-b'],
+      ['current-cache', 'current-explicit'],
+    ),
+    ['upload-a', 'upload-b'],
+  );
+});
+
+test('bulk removal cancel clears its independent removal selection', () => {
+  assert.deepEqual(
+    lifecycle.clearBulkRemovalSelection?.(['upload-a', 'upload-b']),
+    [],
+  );
+});
+
+test('bulk removal excludes a stale current-document selection after follow is re-enabled', () => {
+  const state = {
+    sourceWorkspaceRemovalSelection: {current: true, 'upload-a': true},
+  };
+  const sourceWorkspaceRemovalSelectionIds = loadAppFunction(
+    'sourceWorkspaceRemovalSelectionIds',
+    'sourceWorkspaceCandidateById',
+    {
+      state,
+      sourceWorkspaceSelectionIds: () => ['current', 'upload-a'],
+      isSourceWorkspaceRemovalProtected: (sourceId) => sourceId === 'current',
+    },
+  );
+
+  assert.deepEqual(sourceWorkspaceRemovalSelectionIds(), ['upload-a']);
+});
+
+test('bulk removal of every unprotected member clears only conversation membership', () => {
+  const state = {
+    conversationId: 'CONV-A',
+    followCurrentDocument: false,
+    sourceWorkspace: {revision: 'REV-OLD'},
+    sourceWorkspaceSelection: {'upload-a': true},
+    sourceWorkspaceRemovalSelection: {'upload-a': true},
+    sourceWorkspaceRemovalManagementActive: true,
+    sourceWorkspaceBulkInFlight: false,
+    sourceWorkspaceInFlight: false,
+  };
+  const actions = [];
+  const applyBulkSourceWorkspaceRemoval = loadAppFunction(
+    'applyBulkSourceWorkspaceRemoval',
+    'clearSourceWorkspace',
+    {
+      state,
+      sourceWorkspaceOperationAllowed: () => true,
+      sourceWorkspaceControlsLocked: () => false,
+      sourceWorkspaceRemovalSelectionIds: () => ['upload-a'],
+      sourceWorkspaceSelectionIds: () => Object.keys(state.sourceWorkspaceSelection),
+      sourceWorkspaceSelectionMap: (ids) => Object.fromEntries(ids.map((id) => [id, true])),
+      sourceWorkspaceResultRevision: (result, fallback) => String((result.workspace || {}).revision || fallback || ''),
+      setSourceWorkspaceStatus: () => {},
+      renderSourceWorkspacePage: () => {},
+      ensureSourceWorkspaceConversation: (done) => done(),
+      postSourceWorkspace: (action, payload, done) => {
+        actions.push({action, payload});
+        if (action === 'source_workspace_clear') {
+          return done({ok: true, sourceIds: [], workspace: {ok: true, revision: '', sources: []}});
+        }
+        return done({ok: true, sourceIds: [], workspace: {ok: true, revision: '', sources: []}});
+      },
+      applySourceWorkspaceResult: (result, options) => {
+        state.sourceWorkspaceSelection = Object.fromEntries((options.selectionOverride || result.sourceIds || []).map((id) => [id, true]));
+      },
+      window: {SourceWorkspaceLifecycle: lifecycle, confirm: () => true},
+      addFailureMessage: () => {},
+    },
+  );
+
+  applyBulkSourceWorkspaceRemoval();
+
+  assert.deepEqual(actions.map((item) => item.action), [
+    'source_workspace_clear',
+    'source_workspace_validate',
+  ]);
+  assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), []);
+  assert.equal(state.sourceWorkspaceRemovalManagementActive, false);
+  assert.equal(actions.some((item) => /delete|upload/.test(item.action)), false);
+});
+
+test('bulk source removal rolls membership back after an update failure', () => {
+  const state = {
+    conversationId: 'CONV-A',
+    followCurrentDocument: false,
+    sourceWorkspace: {revision: 'REV-OLD'},
+    sourceWorkspaceSelection: {current: true, 'upload-a': true, 'upload-b': true},
+    sourceWorkspaceRemovalSelection: {'upload-a': true},
+    sourceWorkspaceBulkInFlight: false,
+    sourceWorkspaceInFlight: false,
+  };
+  const actions = [];
+  const applyBulkSourceWorkspaceRemoval = loadAppFunction(
+    'applyBulkSourceWorkspaceRemoval',
+    'clearSourceWorkspace',
+    {
+      state,
+      sourceWorkspaceOperationAllowed: () => true,
+      sourceWorkspaceControlsLocked: () => false,
+      sourceWorkspaceRemovalSelectionIds: () => ['upload-a'],
+      sourceWorkspaceSelectionIds: () => Object.keys(state.sourceWorkspaceSelection),
+      sourceWorkspaceSelectionMap: (ids) => Object.fromEntries(ids.map((id) => [id, true])),
+      sourceWorkspaceResultRevision: (result, fallback) => String((result.workspace || {}).revision || fallback || ''),
+      setSourceWorkspaceStatus: () => {},
+      renderSourceWorkspacePage: () => {},
+      ensureSourceWorkspaceConversation: (done) => done(),
+      postSourceWorkspace: (action, payload, done) => {
+        actions.push({action, payload});
+        if (actions.length === 1) return done({ok: false, workspace: {revision: 'REV-FAILED'}});
+        if (actions.length === 2) return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
+        return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
+      },
+      applySourceWorkspaceResult: () => {},
+      window: {SourceWorkspaceLifecycle: lifecycle, confirm: () => true},
+      addFailureMessage: () => {},
+    },
+  );
+
+  applyBulkSourceWorkspaceRemoval();
+
+  assert.equal(actions[0].action, 'source_workspace_update');
+  assert.deepEqual(actions[0].payload.sourceIds, ['current', 'upload-b']);
+  assert.equal(actions[1].action, 'source_workspace_update');
+  assert.deepEqual(actions[1].payload.sourceIds, ['current', 'upload-a', 'upload-b']);
+  assert.equal(actions[1].payload.sourceWorkspaceRevision, 'REV-FAILED');
+  assert.equal(actions[2].action, 'source_workspace_validate');
+  assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), ['current', 'upload-a', 'upload-b']);
+  assert.equal(state.sourceWorkspaceBulkInFlight, false);
+});
+
+test('bulk source removal rolls membership back after validation failure without deleting data', () => {
+  const state = {
+    conversationId: 'CONV-A',
+    followCurrentDocument: false,
+    sourceWorkspace: {revision: 'REV-OLD'},
+    sourceWorkspaceSelection: {current: true, 'upload-a': true, 'upload-b': true},
+    sourceWorkspaceRemovalSelection: {'upload-a': true},
+    sourceWorkspaceBulkInFlight: false,
+    sourceWorkspaceInFlight: false,
+  };
+  const actions = [];
+  const applyBulkSourceWorkspaceRemoval = loadAppFunction(
+    'applyBulkSourceWorkspaceRemoval',
+    'clearSourceWorkspace',
+    {
+      state,
+      sourceWorkspaceOperationAllowed: () => true,
+      sourceWorkspaceControlsLocked: () => false,
+      sourceWorkspaceRemovalSelectionIds: () => ['upload-a'],
+      sourceWorkspaceSelectionIds: () => Object.keys(state.sourceWorkspaceSelection),
+      sourceWorkspaceSelectionMap: (ids) => Object.fromEntries(ids.map((id) => [id, true])),
+      sourceWorkspaceResultRevision: (result, fallback) => String((result.workspace || {}).revision || fallback || ''),
+      setSourceWorkspaceStatus: () => {},
+      renderSourceWorkspacePage: () => {},
+      ensureSourceWorkspaceConversation: (done) => done(),
+      postSourceWorkspace: (action, payload, done) => {
+        actions.push({action, payload});
+        if (actions.length === 1) return done({ok: true, workspace: {revision: 'REV-REDUCED'}});
+        if (actions.length === 2) return done({ok: false, workspace: {revision: 'REV-VALIDATE-FAILED'}});
+        if (actions.length === 3) return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
+        return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
+      },
+      applySourceWorkspaceResult: () => {},
+      window: {SourceWorkspaceLifecycle: lifecycle, confirm: () => true},
+      addFailureMessage: () => {},
+    },
+  );
+
+  applyBulkSourceWorkspaceRemoval();
+
+  assert.deepEqual(actions.map((item) => item.action), [
+    'source_workspace_update',
+    'source_workspace_validate',
+    'source_workspace_update',
+    'source_workspace_validate',
+  ]);
+  assert.equal(actions[2].payload.sourceWorkspaceRevision, 'REV-VALIDATE-FAILED');
+  assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), ['current', 'upload-a', 'upload-b']);
+  assert.equal(state.sourceWorkspaceBulkInFlight, false);
+  assert.equal(actions.some((item) => /delete/.test(item.action)), false);
+});
+
+test('bulk controls lock during upload, migration, conversation creation, save, and another bulk operation', () => {
+  const state = {
+    sourceWorkspaceInFlight: false,
+    sourceWorkspaceBulkInFlight: false,
+    sourceWorkspaceConversationCreateInFlight: false,
+  };
+  let lifecycleLocked = false;
+  const sourceWorkspaceControlsLocked = loadAppFunction(
+    'sourceWorkspaceControlsLocked',
+    'sourceWorkspaceRemovalSelectionIds',
+    {
+      state,
+      sourceWorkspaceLifecycle: {areSourceControlsLocked: () => lifecycleLocked},
+    },
+  );
+  assert.equal(sourceWorkspaceControlsLocked(), false);
+  state.sourceWorkspaceInFlight = true;
+  assert.equal(sourceWorkspaceControlsLocked(), true, 'save or validation must lock controls');
+  state.sourceWorkspaceInFlight = false;
+  state.sourceWorkspaceBulkInFlight = true;
+  assert.equal(sourceWorkspaceControlsLocked(), true, 'another bulk operation must lock controls');
+  state.sourceWorkspaceBulkInFlight = false;
+  state.sourceWorkspaceConversationCreateInFlight = true;
+  assert.equal(sourceWorkspaceControlsLocked(), true, 'conversation creation must lock controls');
+  state.sourceWorkspaceConversationCreateInFlight = false;
+  lifecycleLocked = true;
+  assert.equal(sourceWorkspaceControlsLocked(), true, 'upload or migration must lock controls');
+});
+
 test('automatic switch readiness accepts stable identity without title or path metadata', () => {
   const context = {
     topicid: 'TOPIC-HILTON',
