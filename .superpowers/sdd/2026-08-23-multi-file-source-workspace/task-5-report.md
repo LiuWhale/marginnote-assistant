@@ -489,3 +489,71 @@ All returned exit `0`.
 ### Concerns
 
 - The emitted payloads and automatic-switch callback chain are exercised with the real Web functions, and the real Companion persistence/workspace boundaries pass focused tests. A live Lee-to-Hilton MarginNote WebView switch was not available in this round.
+
+## Fix Round 5
+
+### Finding Addressed
+
+- `documentContextReadyForAutomaticSwitch()` required title or path metadata in addition to the stable document identity. MarginNote can provide a stable `contextDocumentKey`, topic/notebook ID, and book/document ID while leaving `documentTitle`, `documentFileName`, `pdfPath`, and `documentPath` blank. In that state, the 450 ms migration debounce was never armed, so a Lee conversation could remain active after switching to Hilton.
+- Automatic-switch readiness now requires only a nonempty document key, topic/notebook ID, and book/document ID. Title and path fields remain optional metadata. The existing debounce and lifecycle epoch guards are unchanged.
+
+### RED Evidence
+
+Four executable Node cases were added before the production change:
+
+```text
+automatic switch readiness accepts stable identity without title or path metadata
+automatic switch readiness rejects context without a topic or notebook identity
+automatic switch readiness rejects context without a book or document identity
+automatic switch readiness rejects an empty document key
+```
+
+The initial run retained all eight prior passes and failed the four new cases because the lifecycle helper did not export the readiness predicate. The focused static wiring test also failed because the helper export and `app.js` wiring were absent.
+
+### Implementation
+
+- Added pure exported `documentContextReadyForAutomaticSwitch(ctx, docKey)` to `source_workspace_lifecycle.js`. It checks only the ruled identity fields and does not inspect descriptive title/path metadata.
+- Bound the exported predicate once at `app.js` startup and removed the former local metadata-dependent implementation. Existing scheduling, completion revalidation, stable-key initialization, 450 ms debounce, and lifecycle controller epochs continue to call the same predicate name.
+- Added direct Node coverage for the four readiness boundaries and a static regression that requires the lifecycle export, production wiring, and removal of the duplicate local predicate.
+
+### GREEN Evidence
+
+Executable lifecycle and payload flow:
+
+```text
+node --test tests/source_workspace_lifecycle.test.js
+12 tests passed
+```
+
+UI/static suites:
+
+```text
+python3 -m unittest \
+  tests.test_web_controls_static \
+  tests.test_resizable_panel_static \
+  tests.test_ui_functional_acceptance -q
+Ran 155 tests in 1.092s
+OK
+```
+
+Repository-wide Python suite:
+
+```text
+python3 -m unittest discover -s tests -q
+Ran 742 tests in 221.594s
+OK
+```
+
+Additional checks:
+
+```text
+node --check extension/codex.mn.assistant/web/app.js
+node --check extension/codex.mn.assistant/web/source_workspace_lifecycle.js
+git diff --check
+```
+
+All returned exit `0`.
+
+### Concerns
+
+- The pure readiness boundary and existing executable three-source Hilton migration flow pass, but a live Lee-to-Hilton MarginNote WebView switch was not available in this fix round. The updated Web assets still require the normal runtime refresh/reload before live confirmation.

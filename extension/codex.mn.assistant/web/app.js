@@ -1,5 +1,7 @@
 (function() {
   var sourceWorkspaceLifecycle = window.SourceWorkspaceLifecycle.createController();
+  var documentContextReadyForAutomaticSwitch =
+    window.SourceWorkspaceLifecycle.documentContextReadyForAutomaticSwitch;
   var state = {
     busy: false,
     runActive: false,
@@ -11604,16 +11606,6 @@
     var title = String((ctx && (ctx.documentTitle || ctx.documentFileName)) || '当前文件');
     addMessage('assistant', '已切换到《' + title + '》，后续消息将使用这个文件，并保存到独立的历史对话。');
     closeConversationHistory();
-  }
-
-  function documentContextReadyForAutomaticSwitch(ctx, docKey) {
-    ctx = ctx || {};
-    return !!(
-      docKey &&
-      String(ctx.topicid || ctx.notebookid || '') &&
-      String(ctx.bookmd5 || ctx.docmd5 || '') &&
-      String(ctx.documentTitle || ctx.documentFileName || ctx.pdfPath || ctx.documentPath || '')
-    );
   }
 
   function captureAutomaticDocumentSwitchState() {

@@ -2440,6 +2440,23 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("deferQueuedGenerationForLifecycle", queued_body)
         self.assertIn("generationLifecycleUnavailableReason", drain_body)
 
+    def test_automatic_switch_readiness_uses_exported_lifecycle_predicate(self) -> None:
+        lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
+
+        self.assertIn("function documentContextReadyForAutomaticSwitch(ctx, docKey)", lifecycle_js)
+        self.assertIn(
+            "documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch",
+            lifecycle_js,
+        )
+        self.assertIn(
+            "window.SourceWorkspaceLifecycle.documentContextReadyForAutomaticSwitch",
+            self.js,
+        )
+        self.assertNotIn(
+            "function documentContextReadyForAutomaticSwitch(ctx, docKey)",
+            self.js,
+        )
+
     def test_document_scoped_payloads_use_exported_implicit_object_policy(self) -> None:
         payload_body = self.js.split("function companionPayload", 1)[1].split(
             "\n  function parseCompanionResult", 1

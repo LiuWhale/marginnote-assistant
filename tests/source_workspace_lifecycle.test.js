@@ -66,6 +66,55 @@ function payloadState(overrides) {
   }, overrides || {});
 }
 
+test('automatic switch readiness accepts stable identity without title or path metadata', () => {
+  const context = {
+    topicid: 'TOPIC-HILTON',
+    bookmd5: 'BOOK-HILTON',
+    documentTitle: '',
+    documentFileName: '',
+    pdfPath: '',
+    documentPath: '',
+  };
+
+  assert.equal(
+    lifecycle.documentContextReadyForAutomaticSwitch?.(
+      context,
+      'TOPIC-HILTON|BOOK-HILTON',
+    ),
+    true,
+  );
+});
+
+test('automatic switch readiness rejects context without a topic or notebook identity', () => {
+  assert.equal(
+    lifecycle.documentContextReadyForAutomaticSwitch?.(
+      {bookmd5: 'BOOK-HILTON'},
+      'TOPIC-HILTON|BOOK-HILTON',
+    ),
+    false,
+  );
+});
+
+test('automatic switch readiness rejects context without a book or document identity', () => {
+  assert.equal(
+    lifecycle.documentContextReadyForAutomaticSwitch?.(
+      {topicid: 'TOPIC-HILTON'},
+      'TOPIC-HILTON|BOOK-HILTON',
+    ),
+    false,
+  );
+});
+
+test('automatic switch readiness rejects an empty document key', () => {
+  assert.equal(
+    lifecycle.documentContextReadyForAutomaticSwitch?.(
+      {topicid: 'TOPIC-HILTON', bookmd5: 'BOOK-HILTON'},
+      '',
+    ),
+    false,
+  );
+});
+
 test('migration superseded before conversation callback stays blocked by newer epoch', () => {
   const controller = lifecycle.createController();
   const first = controller.beginMigration({contextDocumentKey: 'transient'}).handle;

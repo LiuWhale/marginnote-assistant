@@ -8,6 +8,15 @@
     return action !== 'conversation_new' && action.indexOf('source_workspace_') !== 0;
   }
 
+  function documentContextReadyForAutomaticSwitch(ctx, docKey) {
+    ctx = ctx || {};
+    return !!(
+      String(docKey || '') &&
+      String(ctx.topicid || ctx.notebookid || '') &&
+      String(ctx.bookmd5 || ctx.docmd5 || '')
+    );
+  }
+
   function createHandle(kind, epoch, meta) {
     return {
       kind: kind,
@@ -134,6 +143,7 @@
 
   return {
     createController: createController,
+    documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
     shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload
   };
