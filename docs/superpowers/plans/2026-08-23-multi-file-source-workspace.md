@@ -485,3 +485,109 @@ git commit -m "Document multi-file source workspaces"
 ```
 
 Do not push or create a GitHub Release unless the user explicitly requests release after reviewing the completed implementation.
+
+---
+
+## Approved Repair Cycle — 2026-08-24
+
+The user explicitly approved continuing after the final re-review and added one bounded requirement: the source picker must support selecting multiple entries or all entries and removing them from the current conversation workspace without deleting original files or upload records.
+
+### Task 7: Keep The Install Token On Loopback
+
+**Files:**
+- Modify: `send_action.py`
+- Modify: `refresh_mn_runtime.py`
+- Modify: `release_acceptance.py`
+- Modify: `tests/test_send_action.py`
+- Modify: `tests/test_refresh_mn_runtime.py`
+- Modify: `tests/test_release_acceptance.py`
+
+**Interfaces:**
+- Produces: `is_local_companion_url(url: str) -> bool` or an equivalent shared predicate.
+- Rule: the install token is attached only to `http://127.0.0.1:48761`, `http://localhost:48761`, or `http://[::1]:48761`. Any custom URL receives no implicit token.
+
+- [ ] Write failing tests showing exact loopback URLs receive the token and HTTPS, remote hosts, alternate ports, userinfo, redirects, and deceptive hostnames do not.
+- [ ] Run focused tests and verify RED.
+- [ ] Implement one canonical URL predicate and apply it before reading or attaching the token in all three clients. Redirect handling must not forward the token to a changed origin.
+- [ ] Run focused tests and verify GREEN.
+- [ ] Commit with message `fix: keep companion token on loopback`.
+
+### Task 8: Prevent Deleted Sessions From Returning
+
+**Files:**
+- Modify: `companion.py`
+- Modify: `extension/codex.mn.assistant/web/app.js`
+- Modify: `tests/test_companion_controls.py`
+- Modify: `tests/test_web_controls_static.py`
+
+**Interfaces:**
+- Produces: persisted `sessionEpoch`, payload/queue binding for that epoch, and ownership-proven tombstones for deleted sessions.
+- Rule: new conversations receive a random epoch; append/source/queued mutations require the current epoch. Delete writes a tombstone before unlinking. History clear advances the epoch before clearing. Missing/tombstoned/mismatched sessions cannot be recreated by ordinary mutations.
+
+- [ ] Write deterministic failing tests for generation finishing after delete, source save after history clear, stale queued command after epoch advance, and normal current-epoch writes.
+- [ ] Run focused tests and verify RED.
+- [ ] Implement epoch persistence, Web payload propagation, queue binding, tombstone checks, and atomic locked mutation.
+- [ ] Run focused and Companion tests and verify GREEN.
+- [ ] Commit with message `fix: reject stale session mutations`.
+
+### Task 9: Preserve Failed Queue Work And Confirm Queued Writes
+
+**Files:**
+- Modify: `extension/codex.mn.assistant/web/app.js`
+- Modify: `extension/codex.mn.assistant/web/source_workspace_lifecycle.js` if a pure queue-result policy helper is needed.
+- Modify: `tests/source_workspace_lifecycle.test.js`
+- Modify: `tests/test_web_controls_static.py`
+
+**Interfaces:**
+- Produces: one shared queue-result handler used by direct queue drain and native/Web queued execution.
+- Rule: failed queue work is not acknowledged and is marked deferred/retryable. Inactive-session chat may persist without rendering. Card, mind-map, full-reading, expand, and reorganize results execute only in the bound active session and enter the existing draft/confirmation UI; no queued write is applied automatically.
+
+- [ ] Write executable failing tests for failed result no-ack, inactive session no-render, active chat success ack, inactive write defer, and active write draft/confirmation routing.
+- [ ] Run Node/UI tests and verify RED.
+- [ ] Implement the shared result policy and wire every queue execution path through it.
+- [ ] Run Node/static/full tests and verify GREEN.
+- [ ] Commit with message `fix: preserve queued failures and confirmations`.
+
+### Task 10: Bulk Select And Remove Sources
+
+**Files:**
+- Modify: `extension/codex.mn.assistant/web/index.html`
+- Modify: `extension/codex.mn.assistant/web/app.js`
+- Modify: `extension/codex.mn.assistant/web/app.css`
+- Modify: `extension/codex.mn.assistant/web/source_workspace_lifecycle.js` if a pure bulk-selection helper is needed.
+- Modify: `ui_functional_acceptance.py`
+- Modify: `tests/source_workspace_lifecycle.test.js`
+- Modify: `tests/test_web_controls_static.py`
+- Modify: `tests/test_resizable_panel_static.py`
+- Modify: `tests/test_ui_functional_acceptance.py`
+
+**Interfaces:**
+- Produces: bulk-management mode with a removal-selection set independent from source membership.
+- Rule: `全选可移除`, `取消全选`, and `移除所选` act only on current conversation membership. Original files and upload records remain untouched. A followed current document is protected until follow-current is disabled. Save/rebuild/validation is atomic and restores membership after failure.
+
+- [ ] Write executable and static failing tests for subset removal, select-all, protected current file, cancel, rollback after failed save, upload/migration gating, and 390 px layout.
+- [ ] Run tests and verify RED.
+- [ ] Implement dedicated bulk selection state, command bar, confirmation summary, atomic save, and rollback.
+- [ ] Run Node/static/full tests and verify GREEN.
+- [ ] Commit with message `feat: add bulk source removal`.
+
+### Task 11: Repair-Cycle Documentation And Acceptance
+
+**Files:**
+- Modify: `README.md`
+- Modify: `README.zh-CN.md`
+- Modify: `docs/USER_MANUAL.md`
+- Modify: `docs/RELEASE_CHECKLIST.md`
+- Modify: `CHANGELOG.md`
+- Modify: release/version tests only when documentation contracts require them.
+
+**Interfaces:**
+- Consumes: Tasks 7–10.
+- Produces: final `0.4.53` artifacts and installed local runtime. No push, tag, merge, or GitHub Release.
+
+- [ ] Document token loopback behavior, session lifecycle rejection, retryable failed queue work, confirmed queued writes, and bulk source removal safety.
+- [ ] Run the complete Python/Node/syntax/version/diff suite.
+- [ ] Rebuild zip, mnaddon, and pkg; run smoke and install dry-run.
+- [ ] Install packaged `0.4.53`, restart Companion/MarginNote, verify runtime and controls.
+- [ ] Live-test multiple upload, subset/select-all removal, original-file preservation, follow-off Lee→Hilton, one real source request, failed queue retention, and draft confirmation without writing a real mind map.
+- [ ] Commit documentation changes and run final whole-branch review.
