@@ -11,6 +11,23 @@ class ReleaseDocsTests(unittest.TestCase):
     def read_doc(self, name: str) -> str:
         return (ROOT / name).read_text(encoding="utf-8")
 
+    def contract_unit(self, text: str, anchor: str, required: list[str]) -> str | None:
+        paragraphs = [item.strip() for item in text.split("\n\n") if item.strip()]
+        lines = [item.strip() for item in text.splitlines() if item.strip()]
+        for unit in paragraphs + lines:
+            if anchor in unit and all(marker in unit for marker in required):
+                return unit
+        return None
+
+    def assert_contract_unit(self, text: str, anchor: str, required: list[str]) -> None:
+        self.assertIsNotNone(
+            self.contract_unit(text, anchor, required),
+            "expected one paragraph or checklist line to bind "
+            + repr(anchor)
+            + " to "
+            + repr(required),
+        )
+
     def test_user_guides_document_multi_file_source_workspace_contract(self) -> None:
         for name in ["README.md", "README.zh-CN.md", "docs/USER_MANUAL.md"]:
             with self.subTest(name=name):
@@ -132,82 +149,79 @@ class ReleaseDocsTests(unittest.TestCase):
             self.assertIn(marker, section)
 
     def test_release_docs_cover_repair_cycle_safety_contract(self) -> None:
-        expectations = {
-            "README.md": [
-                "127.0.0.1:48761",
-                "localhost:48761",
-                "[::1]:48761",
-                "custom URL",
-                "session epoch",
-                "tombstone",
-                "retryable",
-                "confirmation",
-                "全选可移除",
-                "only current conversation membership",
-                "rollback fails",
-                "not been published",
-            ],
-            "README.zh-CN.md": [
-                "127.0.0.1:48761",
-                "localhost:48761",
-                "[::1]:48761",
-                "自定义 URL",
-                "session epoch",
-                "tombstone",
-                "可重试",
-                "确认",
-                "全选可移除",
-                "成员关系",
-                "回滚失败",
-                "尚未作为",
-            ],
-            "docs/USER_MANUAL.md": [
-                "127.0.0.1:48761",
-                "localhost:48761",
-                "[::1]:48761",
-                "自定义 URL",
-                "session epoch",
-                "tombstone",
-                "可重试",
-                "确认",
-                "全选可移除",
-                "成员关系",
-                "回滚失败",
-                "尚未作为",
-            ],
-            "docs/RELEASE_CHECKLIST.md": [
-                "127.0.0.1:48761",
-                "localhost:48761",
-                "[::1]:48761",
-                "自定义 URL",
-                "session epoch",
-                "tombstone",
-                "可重试",
-                "确认",
-                "全选可移除",
-                "成员关系",
-                "回滚失败",
-                "尚未作为",
-            ],
-        }
-        for name, markers in expectations.items():
-            with self.subTest(name=name):
-                text = self.read_doc(name)
-                for marker in markers:
-                    self.assertIn(marker, text)
+        marker_soup = "token\n\n127.0.0.1:48761\n\ncustom URL"
+        self.assertIsNone(
+            self.contract_unit(marker_soup, "token", ["127.0.0.1:48761", "custom URL"]),
+            "markers split across unrelated paragraphs must not satisfy a contract",
+        )
 
-        changelog = self.read_doc("CHANGELOG.md")
-        section = changelog.partition("## 0.4.53")[2].split("\n## ", 1)[0]
-        for marker in [
-            "session epoch",
-            "tombstone",
-            "retryable",
-            "confirmation",
-            "全选可移除",
-            "rollback",
-            "not published",
-        ]:
-            self.assertIn(marker, section)
+        readme = self.read_doc("README.md")
+        self.assert_contract_unit(
+            readme,
+            "Token-aware Python clients",
+            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "custom URLs never receive it"],
+        )
+        self.assert_contract_unit(
+            readme,
+            "active conversation is durably restored",
+            ["session epoch", "rejected", "tombstone", "retryable", "draft", "explicit confirmation", "native write"],
+        )
+        self.assert_contract_unit(
+            readme,
+            "source-management mode",
+            ["全选可移除", "取消全选", "移除所选", "only current conversation membership", "never delete originals", "protected", "disable follow-current", "restores the previous membership", "rollback fails", "explicit warning"],
+        )
+        self.assert_contract_unit(readme, "current source candidate", ["0.4.53", "not been published as a GitHub Release"])
+
+        readme_zh = self.read_doc("README.zh-CN.md")
+        self.assert_contract_unit(
+            readme_zh,
+            "支持 token 的 Python 客户端",
+            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "自定义 URL 绝不会收到"],
+        )
+        self.assert_contract_unit(
+            readme_zh,
+            "活动对话在面板重新加载后",
+            ["session epoch", "拒绝", "tombstone", "可重试", "草稿", "明确确认", "原生写入"],
+        )
+        self.assert_contract_unit(
+            readme_zh,
+            "需要缩小当前会话",
+            ["全选可移除", "取消全选", "移除所选", "成员关系", "不会删除原文件", "受保护", "关闭跟随", "恢复旧成员关系", "回滚失败", "明确警告"],
+        )
+        self.assert_contract_unit(readme_zh, "当前源码候选版本", ["0.4.53", "尚未作为 GitHub Release 发布"])
+
+        manual = self.read_doc("docs/USER_MANUAL.md")
+        self.assert_contract_unit(
+            manual,
+            "支持 token 的 Python 客户端",
+            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "自定义 URL 绝不会收到"],
+        )
+        self.assert_contract_unit(manual, "活动会话可从持久化", ["session epoch", "tombstone", "拒绝", "不能恢复或覆盖"])
+        self.assert_contract_unit(manual, "队列失败", ["可重试", "未确认", "草稿", "明确确认", "原生写入", "不能后台自动写入"])
+        self.assert_contract_unit(manual, "要缩小范围", ["全选可移除", "取消全选", "移除所选", "成员关系", "不删除原文件", "上传注册记录"])
+        self.assert_contract_unit(manual, "跟随当前文件` 开启时", ["受保护", "关闭后", "恢复旧成员关系", "回滚失败", "明确警告", "不得把这次操作视为成功"])
+        self.assert_contract_unit(manual, "当前源码候选版本", ["0.4.53", "尚未作为 GitHub Release 发布"])
+
+        checklist = self.read_doc("docs/RELEASE_CHECKLIST.md")
+        self.assert_contract_unit(
+            checklist,
+            "支持 token 的 Python 客户端",
+            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "自定义 URL 不带 token", "重定向", "不泄露"],
+        )
+        self.assert_contract_unit(checklist, "新建/重新打开对话", ["session epoch", "tombstone", "拒绝", "可重试", "草稿", "确认", "不能自动调用原生写入"])
+        self.assert_contract_unit(checklist, "打开资料管理模式", ["全选可移除", "取消全选", "移除所选", "成员关系", "原文件", "上传注册记录", "受保护", "关闭后"])
+        self.assert_contract_unit(checklist, "对子集移除", ["空集", "验证", "恢复旧成员关系", "回滚失败", "明确警告", "不能报告操作成功"])
+        self.assert_contract_unit(checklist, "当前发布候选", ["0.4.53"])
+        self.assert_contract_unit(checklist, "尚未作为 GitHub Release 发布", ["0.4.53", "不是发布或公开可用性证明"])
+
+        changelog = self.read_doc("CHANGELOG.md").partition("## 0.4.53")[2].split("\n## ", 1)[0]
+        self.assert_contract_unit(changelog, "active-conversation restoration", ["session epoch", "tombstone", "stale callbacks cannot"])
+        self.assert_contract_unit(changelog, "全选可移除", ["conversation-membership-only", "followed-current protection", "rollback"])
+        self.assert_contract_unit(changelog, "Token-aware Python clients", ["127.0.0.1", "localhost", "::1", "custom URLs never receive"])
+        self.assert_contract_unit(changelog, "Queued failures", ["retryable", "unacknowledged", "draft", "confirmation", "never write automatically"])
+        self.assert_contract_unit(changelog, "Source removal restores", ["update or validation failure", "rollback failure", "explicit warning"])
+        self.assert_contract_unit(changelog, "Local release candidate only", ["not published as a GitHub Release"])
 
     def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
         text = self.read_doc("docs/RELEASE_STATUS_MATRIX.md")
