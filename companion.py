@@ -8172,14 +8172,14 @@ def _write_active_conversations_state(state: dict[str, Any]) -> None:
     )
 
 
-def remember_active_conversation(item: dict[str, Any]) -> bool:
+def _active_conversation_binding(item: dict[str, Any]) -> dict[str, Any] | None:
     context_document_key = str(item.get("contextDocumentKey") or "").strip()
     session_id = safe_session_id(item.get("sessionId") or item.get("session_id"))
     conversation_id = str(item.get("conversationId") or "").strip()
     epoch = session_epoch(item)
     if not context_document_key or not session_id or not conversation_id or not epoch:
-        return False
-    binding = {
+        return None
+    return {
         "active": True,
         "contextDocumentKey": context_document_key,
         "conversationId": conversation_id,
@@ -8187,8 +8187,51 @@ def remember_active_conversation(item: dict[str, Any]) -> bool:
         "sessionEpoch": epoch,
         "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
+
+
+def _active_conversation_identity(item: dict[str, Any] | None) -> tuple[str, str, str, str, str]:
+    if not isinstance(item, dict):
+        return ("absent", "", "", "", "")
+    if item.get("active") is False:
+        return (
+            "inactive",
+            str(item.get("contextDocumentKey") or ""),
+            "",
+            "",
+            "",
+        )
+    return (
+        "active",
+        str(item.get("contextDocumentKey") or ""),
+        str(item.get("conversationId") or ""),
+        safe_session_id(item.get("sessionId") or item.get("session_id")),
+        session_epoch(item),
+    )
+
+
+def remember_active_conversation(item: dict[str, Any]) -> bool:
+    binding = _active_conversation_binding(item)
+    if not binding:
+        return False
     with ACTIVE_CONVERSATIONS_LOCK:
         state = _active_conversations_state()
+        state["bindings"][binding["contextDocumentKey"]] = binding
+        _write_active_conversations_state(state)
+    return True
+
+
+def remember_active_conversation_if_current(
+    item: dict[str, Any], expected: dict[str, Any] | None
+) -> bool:
+    binding = _active_conversation_binding(item)
+    if not binding:
+        return False
+    context_document_key = binding["contextDocumentKey"]
+    with ACTIVE_CONVERSATIONS_LOCK:
+        state = _active_conversations_state()
+        current = state["bindings"].get(context_document_key)
+        if _active_conversation_identity(current) != _active_conversation_identity(expected):
+            return False
         state["bindings"][context_document_key] = binding
         _write_active_conversations_state(state)
     return True
@@ -8230,6 +8273,18 @@ def _no_active_conversation_result() -> dict[str, Any]:
     }
 
 
+def _active_conversation_changed_result() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "restoreComplete": False,
+        "active": False,
+        "conversation": None,
+        "blocked": "active_conversation_changed",
+        "retryable": True,
+        "message": "恢复期间活动对话已切换，将重新读取最新会话。",
+    }
+
+
 def restore_active_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     context_document_key = normalize_document_context_key(payload)
     if not context_document_key:
@@ -8254,7 +8309,8 @@ def restore_active_conversation(payload: dict[str, Any]) -> dict[str, Any]:
             return _no_active_conversation_result()
         binding = dict(conversations[0])
         try:
-            remember_active_conversation(binding)
+            if not remember_active_conversation_if_current(binding, None):
+                return _active_conversation_changed_result()
         except OSError as exc:
             return {
                 "ok": False,
@@ -8286,7 +8342,8 @@ def restore_active_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     workspace = restore_conversation_source_workspace(item, payload)
     latest_item = read_conversation_file(SESSIONS_DIR / f"{session_id}.json") or item
     try:
-        remember_active_conversation(latest_item)
+        if not remember_active_conversation_if_current(latest_item, binding):
+            return _active_conversation_changed_result()
     except OSError as exc:
         return {
             "ok": False,

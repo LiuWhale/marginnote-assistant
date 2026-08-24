@@ -1025,6 +1025,108 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(empty["active"])
             self.assertIsNone(empty["conversation"])
 
+    def test_cold_restore_cannot_overwrite_a_newer_same_document_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            document = {
+                "topicid": "T-CAS",
+                "bookmd5": "B-CAS",
+                "contextDocumentKey": "DOC-CAS",
+                "source": "unittest",
+            }
+            first = companion.new_conversation(document)["conversation"]
+            second = companion.new_conversation(document)["conversation"]
+            first_payload = {
+                **document,
+                "conversationId": first["conversationId"],
+                "sessionId": first["sessionId"],
+                "sessionEpoch": first["sessionEpoch"],
+            }
+            second_payload = {
+                **document,
+                "conversationId": second["conversationId"],
+                "sessionId": second["sessionId"],
+                "sessionEpoch": second["sessionEpoch"],
+            }
+            self.assertTrue(companion.load_conversation(first_payload)["ok"])
+
+            original_restore_workspace = companion.restore_conversation_source_workspace
+            switched = False
+
+            def switch_to_second_during_restore(item, payload):
+                nonlocal switched
+                if not switched:
+                    switched = True
+                    loaded = companion.load_conversation(second_payload)
+                    self.assertTrue(loaded["ok"], loaded)
+                return original_restore_workspace(item, payload)
+
+            companion.restore_conversation_source_workspace = switch_to_second_during_restore
+            try:
+                stale_restore = companion.restore_active_conversation(document)
+            finally:
+                companion.restore_conversation_source_workspace = original_restore_workspace
+
+            durable = json.loads(companion.ACTIVE_CONVERSATIONS_PATH.read_text(encoding="utf-8"))
+            binding = durable["bindings"][document["contextDocumentKey"]]
+            self.assertFalse(stale_restore["ok"], stale_restore)
+            self.assertEqual(stale_restore["blocked"], "active_conversation_changed")
+            self.assertTrue(stale_restore["retryable"])
+            self.assertEqual(binding["conversationId"], second["conversationId"])
+            self.assertEqual(binding["sessionId"], second["sessionId"])
+            self.assertEqual(binding["sessionEpoch"], second["sessionEpoch"])
+
+    def test_legacy_restore_fallback_cannot_overwrite_concurrent_explicit_no_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            document = {
+                "topicid": "T-NONE-CAS",
+                "bookmd5": "B-NONE-CAS",
+                "contextDocumentKey": "DOC-NONE-CAS",
+                "source": "unittest",
+            }
+            created = companion.new_conversation(document)["conversation"]
+            companion._write_active_conversations_state(
+                {"schema": companion.ACTIVE_CONVERSATIONS_SCHEMA, "bindings": {}}
+            )
+            original_list = companion.list_conversations
+            injected = False
+
+            def mark_no_active_during_legacy_scan(payload):
+                nonlocal injected
+                result = original_list(payload)
+                if not injected:
+                    injected = True
+                    companion._write_active_conversations_state(
+                        {
+                            "schema": companion.ACTIVE_CONVERSATIONS_SCHEMA,
+                            "bindings": {
+                                document["contextDocumentKey"]: {
+                                    "active": False,
+                                    "contextDocumentKey": document["contextDocumentKey"],
+                                    "updatedAt": "now",
+                                }
+                            },
+                        }
+                    )
+                return result
+
+            companion.list_conversations = mark_no_active_during_legacy_scan
+            try:
+                stale_restore = companion.restore_active_conversation(document)
+            finally:
+                companion.list_conversations = original_list
+
+            durable = json.loads(companion.ACTIVE_CONVERSATIONS_PATH.read_text(encoding="utf-8"))
+            binding = durable["bindings"][document["contextDocumentKey"]]
+            self.assertFalse(stale_restore["ok"], stale_restore)
+            self.assertEqual(stale_restore["blocked"], "active_conversation_changed")
+            self.assertTrue(stale_restore["retryable"])
+            self.assertFalse(binding["active"])
+            self.assertNotEqual(binding.get("conversationId"), created["conversationId"])
+
     def test_queue_poll_batch_includes_the_earliest_command_for_every_session_owner(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
