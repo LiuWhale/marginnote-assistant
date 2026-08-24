@@ -1,4 +1,5 @@
 (function() {
+  var sourceWorkspaceLifecycle = window.SourceWorkspaceLifecycle.createController();
   var state = {
     busy: false,
     runActive: false,
@@ -77,6 +78,7 @@
     newConversationRequestToken: 0,
     stableContextDocumentKey: '',
     documentSwitchPending: false,
+    documentSwitchInFlight: false,
     documentSwitchDebounceTimer: null,
     documentSwitchToken: 0,
     pendingDocumentSwitch: null,
@@ -85,6 +87,7 @@
     sourceWorkspaceUploadToken: 0,
     sourceWorkspaceConversationCreateInFlight: false,
     sourceWorkspaceConversationCreateCallbacks: [],
+    queueMigrationDeferTimer: null,
     conversationHistoryScope: 'document',
     conversations: [],
     notebookWorkspace: {schema: 'codex.mn.notebookWorkspace.v1', available: false},
@@ -2322,10 +2325,16 @@
     }, {showReply: false});
   }
 
-  function saveSourceWorkspaceSelection(closeAfterSave, done) {
+  function sourceWorkspaceOperationAllowed(lifecycleHandle) {
+    return !sourceWorkspaceLifecycle.isMigrationActive() ||
+      sourceWorkspaceLifecycle.isMigrationCurrent(lifecycleHandle);
+  }
+
+  function saveSourceWorkspaceSelection(closeAfterSave, done, lifecycleHandle) {
+    if (!sourceWorkspaceOperationAllowed(lifecycleHandle)) return;
     var sourceIds = sourceWorkspaceSelectionIds();
     if (!sourceIds.length) {
-      clearSourceWorkspace(closeAfterSave, done);
+      clearSourceWorkspace(closeAfterSave, done, lifecycleHandle);
       return;
     }
     ensureSourceWorkspaceConversation(function() {
@@ -2355,17 +2364,33 @@
       identity.contextDocumentKey === String(state.contextDocumentKey || '');
   }
 
-  function requestNewConversation(done, extra) {
+  function requestNewConversation(done, extra, lifecycleOptions) {
+    lifecycleOptions = lifecycleOptions || {};
     state.newConversationRequestToken += 1;
     var requestIdentity = {
       token: state.newConversationRequestToken,
       conversationId: String(state.conversationId || ''),
       contextDocumentKey: String(state.contextDocumentKey || '')
     };
+    var originalRequestPayload = null;
+    function handleStaleResult(result, requestPayload) {
+      if (lifecycleOptions.onStaleResult) {
+        lifecycleOptions.onStaleResult(result || {}, requestPayload || originalRequestPayload || {});
+      } else {
+        cleanupStaleConversation(result || {}, requestPayload || originalRequestPayload || {}, null);
+      }
+    }
     postCompanion('conversation_new', extra || {}, function(result) {
-      if (!newConversationRequestIsCurrent(requestIdentity)) return;
-      if (done) done(result || {});
-    }, {showReply: false});
+      if (!newConversationRequestIsCurrent(requestIdentity)) {
+        handleStaleResult(result, originalRequestPayload);
+        return;
+      }
+      if (done) done(result || {}, originalRequestPayload || {});
+    }, {
+      showReply: false,
+      onRequestPayload: function(payload) { originalRequestPayload = payload; },
+      onStaleResponse: handleStaleResult
+    });
   }
 
   function initializeNewConversationState(conversation) {
@@ -2419,6 +2444,7 @@
 
   function refreshSourceWorkspace(selectCurrentByDefault, options) {
     options = options || {};
+    if (!sourceWorkspaceOperationAllowed(options.lifecycleHandle)) return;
     ensureSourceWorkspaceConversation(function() {
       state.sourceWorkspaceInFlight = true;
       setSourceWorkspaceStatus('warning', '正在读取资料列表...');
@@ -2440,7 +2466,8 @@
     });
   }
 
-  function validateSavedSourceWorkspace(done) {
+  function validateSavedSourceWorkspace(done, lifecycleHandle) {
+    if (!sourceWorkspaceOperationAllowed(lifecycleHandle)) return;
     if (!sourceWorkspaceSelectionIds().length) {
       if (done) done({ok: true, empty: true});
       return;
@@ -2461,13 +2488,15 @@
   }
 
   function validateSourceWorkspace() {
+    if (!sourceWorkspaceOperationAllowed(null)) return;
     saveSourceWorkspaceSelection(false, function(saved) {
       if (!saved || !saved.ok) return;
       validateSavedSourceWorkspace();
     });
   }
 
-  function clearSourceWorkspace(closeAfterClear, done) {
+  function clearSourceWorkspace(closeAfterClear, done, lifecycleHandle) {
+    if (!sourceWorkspaceOperationAllowed(lifecycleHandle)) return;
     state.followCurrentDocument = false;
     ensureSourceWorkspaceConversation(function() {
       state.sourceWorkspaceInFlight = true;
@@ -2492,6 +2521,35 @@
     errors = errors || [];
     target.className = 'source-workspace-upload-errors' + (errors.length ? '' : ' hidden');
     target.textContent = errors.join('\n');
+  }
+
+  function syncSourceWorkspaceLifecycleFlags() {
+    state.documentSwitchPending = sourceWorkspaceLifecycle.isMigrationActive();
+    state.documentSwitchInFlight = sourceWorkspaceLifecycle.isMigrationInFlight();
+    state.documentSwitchCommitting = state.documentSwitchInFlight;
+    state.sourceWorkspaceUploadInFlight = sourceWorkspaceLifecycle.isUploadActive();
+  }
+
+  function generationLifecycleUnavailableReason() {
+    return sourceWorkspaceLifecycle.isGenerationBlocked()
+      ? '正在切换当前文件并重建资料，完成前不能执行生成任务。'
+      : '';
+  }
+
+  function cancelSourceWorkspaceUpload(reason) {
+    var canceled = sourceWorkspaceLifecycle.cancelUpload(reason || 'canceled');
+    syncSourceWorkspaceLifecycleFlags();
+    if (!canceled) return null;
+    state.sourceWorkspaceUploadToken += 1;
+    var addButton = byId('sourceWorkspaceAddFilesButton');
+    if (addButton) addButton.disabled = false;
+    var successful = canceled.meta && canceled.meta.successfulUploadIds ? canceled.meta.successfulUploadIds : [];
+    renderSourceWorkspaceUploadStatus(
+      '上传已取消；已成功的 ' + successful.length + ' 个文件仍保留，请重新选择未完成文件。',
+      canceled.meta && canceled.meta.errors ? canceled.meta.errors : []
+    );
+    updateActionAvailability();
+    return canceled;
   }
 
   function sourceWorkspaceArrayBufferBase64(buffer) {
@@ -2534,35 +2592,50 @@
       });
       return;
     }
-    state.sourceWorkspaceUploadToken += 1;
-    var uploadToken = state.sourceWorkspaceUploadToken;
     var originConversationId = String(state.conversationId || '');
     var originDocumentKey = String(state.contextDocumentKey || '');
     var errors = [];
     var successfulUploadIds = [];
+    var uploadLifecycle = sourceWorkspaceLifecycle.beginUpload({
+      successfulUploadIds: successfulUploadIds,
+      errors: errors,
+      total: files.length,
+      conversationId: originConversationId,
+      contextDocumentKey: originDocumentKey
+    });
+    var uploadHandle = uploadLifecycle.handle;
     var addButton = byId('sourceWorkspaceAddFilesButton');
-    state.sourceWorkspaceUploadInFlight = true;
+    syncSourceWorkspaceLifecycleFlags();
     if (addButton) addButton.disabled = true;
     updateActionAvailability();
 
-    function finishUploads() {
-      if (uploadToken !== state.sourceWorkspaceUploadToken) return;
-      state.sourceWorkspaceUploadInFlight = false;
+    function finalizeUpload(text) {
+      if (!sourceWorkspaceLifecycle.finishUpload(uploadHandle)) return false;
+      syncSourceWorkspaceLifecycleFlags();
       if (addButton) addButton.disabled = false;
+      renderSourceWorkspaceUploadStatus(text, errors);
+      updateActionAvailability();
+      return true;
+    }
+
+    function finishUploads() {
       renderSourceWorkspaceUploadStatus(
-        '上传完成：成功 ' + successfulUploadIds.length + '/' + files.length + (errors.length ? '，失败 ' + errors.length : '') + '。',
+        '文件传输完成：成功 ' + successfulUploadIds.length + '/' + files.length + (errors.length ? '，失败 ' + errors.length : '') + '；正在更新资料。',
         errors
       );
-      updateActionAvailability();
-      if (!successfulUploadIds.length) return;
+      if (!successfulUploadIds.length) {
+        finalizeUpload('上传完成：没有成功文件。');
+        return;
+      }
       if (originConversationId !== String(state.conversationId || '') || originDocumentKey !== String(state.contextDocumentKey || '')) {
         errors.push('文件已上传，但对话或当前文件已切换，未自动加入当前资料。');
-        renderSourceWorkspaceUploadStatus('上传完成，未修改当前资料。', errors);
+        finalizeUpload('上传完成，未修改当前资料；请在当前文件中重新选择。');
         return;
       }
       refreshSourceWorkspace(false, {
         allowInvalidWorkspace: true,
         after: function() {
+          if (!sourceWorkspaceLifecycle.isUploadCurrent(uploadHandle)) return;
           for (var successIndex = 0; successIndex < successfulUploadIds.length; successIndex++) {
             for (var candidateIndex = 0; candidateIndex < state.sourceWorkspaceCandidates.length; candidateIndex++) {
               var candidate = state.sourceWorkspaceCandidates[candidateIndex] || {};
@@ -2575,13 +2648,19 @@
           }
           setSourceWorkspaceStatus('warning', '新文件已加入资料，正在保存并验证...');
           saveSourceWorkspaceSelection(false, function(saved) {
-            if (!saved || !saved.ok) return;
+            if (!sourceWorkspaceLifecycle.isUploadCurrent(uploadHandle)) return;
+            if (!saved || !saved.ok) {
+              errors.push('新文件已上传，但资料保存失败，请重试选择。');
+              finalizeUpload('上传完成，资料保存失败。');
+              return;
+            }
             validateSavedSourceWorkspace(function(validated) {
+              if (!sourceWorkspaceLifecycle.isUploadCurrent(uploadHandle)) return;
               if (validated && validated.ok) {
-                renderSourceWorkspaceUploadStatus(
-                  '已添加并验证 ' + successfulUploadIds.length + ' 个文件。',
-                  errors
-                );
+                finalizeUpload('已添加并验证 ' + successfulUploadIds.length + ' 个文件。');
+              } else {
+                errors.push('新文件已上传，但资料验证失败，请修正后重试。');
+                finalizeUpload('上传完成，资料验证失败。');
               }
             });
           });
@@ -2590,6 +2669,7 @@
     }
 
     function uploadNext(index) {
+      if (!sourceWorkspaceLifecycle.isUploadCurrent(uploadHandle)) return;
       if (index >= files.length) {
         finishUploads();
         return;
@@ -2602,6 +2682,7 @@
         return;
       }
       readSourceWorkspaceFile(file, function(readError, fileContentBase64) {
+        if (!sourceWorkspaceLifecycle.isUploadCurrent(uploadHandle)) return;
         if (readError) {
           errors.push(file.name + '：读取失败。');
           uploadNext(index + 1);
@@ -2611,6 +2692,7 @@
           fileName: file.name,
           fileContentBase64: fileContentBase64
         }, function(result) {
+          if (!sourceWorkspaceLifecycle.isUploadCurrent(uploadHandle)) return;
           if (result && result.ok && result.file && result.file.id) {
             successfulUploadIds.push(String(result.file.id));
           } else {
@@ -2625,6 +2707,10 @@
   }
 
   function openSourceWorkspacePage() {
+    if (!sourceWorkspaceOperationAllowed(null)) {
+      addMessage('assistant', generationLifecycleUnavailableReason());
+      return;
+    }
     closeConfigPage();
     closeConversationHistory();
     var page = byId('sourceWorkspacePage');
@@ -2815,6 +2901,7 @@
       addMessage('assistant', '正在切换当前文件，请等待资料重建完成后再新建对话。');
       return;
     }
+    cancelSourceWorkspaceUpload('new-conversation');
     requestNewConversation(function(result) {
       if (!result || !result.ok) {
         addFailureMessage('新对话失败', result);
@@ -2834,6 +2921,7 @@
       addMessage('assistant', '正在切换当前文件，请等待资料重建完成后再打开历史对话。');
       return;
     }
+    cancelSourceWorkspaceUpload('load-conversation');
     var payload = conversationHistoryPayload();
     payload.sessionId = item.sessionId;
     postCompanion('conversation_load', payload, function(result) {
@@ -3024,6 +3112,7 @@
     options = options || {};
     var xhr = new XMLHttpRequest();
     var requestPayload = companionPayload(action, extra);
+    if (options.onRequestPayload) options.onRequestPayload(requestPayload);
     var requestDocumentKey = String(requestPayload.contextDocumentKey || state.contextDocumentKey || '');
     xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
@@ -3033,6 +3122,7 @@
     );
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
+      var parsedResult = parseCompanionResult(xhr);
       if (requestDocumentKey && state.contextDocumentKey && requestDocumentKey !== state.contextDocumentKey) {
         var staleDocumentResponse = {
           ok: true,
@@ -3042,10 +3132,11 @@
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
         finishProgressStage('已切换文件', staleDocumentResponse.message);
+        if (options.onStaleResponse) options.onStaleResponse(parsedResult || {}, requestPayload);
         return;
       }
       setProgressStage('已收到结果', 'Companion 已返回，正在解析结果并更新面板。');
-      var result = displayCompanionResult(parseCompanionResult(xhr), options.showReply !== false, action);
+      var result = displayCompanionResult(parsedResult, options.showReply !== false, action);
       if (done) done(result || {});
     };
     xhr.onerror = function() {
@@ -3090,6 +3181,39 @@
     xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
     xhr.send(JSON.stringify(companionPayload(action, extra)));
+  }
+
+  function postCompanionExactPayload(payload, done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState !== 4) return;
+      if (done) done(parseCompanionResult(xhr));
+    };
+    xhr.onerror = function() {
+      if (done) done(companionConnectionFailureResult());
+    };
+    xhr.send(JSON.stringify(payload || {}));
+  }
+
+  function cleanupStaleConversation(result, ownershipPayload, lifecycleHandle) {
+    result = result || {};
+    var conversation = result.conversation || {};
+    var conversationId = String(conversation.conversationId || '');
+    var sessionId = String(conversation.sessionId || '');
+    if (!conversationId || !sessionId) return false;
+    if (lifecycleHandle && lifecycleHandle.meta) {
+      if (lifecycleHandle.meta.cleanupConversationId === conversationId) return false;
+      lifecycleHandle.meta.cleanupConversationId = conversationId;
+    }
+    var cleanupPayload = window.SourceWorkspaceLifecycle.staleConversationCleanupPayload(conversation, ownershipPayload || {});
+    postCompanionExactPayload(cleanupPayload, function(cleaned) {
+      if (!cleaned || !cleaned.ok) {
+        window.CodexPanel.setStatus({text: '过期文件对话清理失败：' + (cleaned && cleaned.message ? cleaned.message : conversationId)});
+      }
+    });
+    return true;
   }
 
   function agentObjectLabel(kind) {
@@ -7675,6 +7799,15 @@
     return true;
   }
 
+  function deferQueuedGenerationForLifecycle() {
+    window.CodexPanel.setStatus({text: '文件切换中，队列任务保持等待。'});
+    if (state.queueMigrationDeferTimer) return;
+    state.queueMigrationDeferTimer = window.setTimeout(function() {
+      state.queueMigrationDeferTimer = null;
+      drainNextQueuedAction();
+    }, 700);
+  }
+
   function runQueuedCommand(command) {
     command = command || {};
     if (!command._queue_id && !command.rawAction && !command.action && !command.nativeAction) {
@@ -7683,6 +7816,10 @@
     }
     if (command.nativeAction) {
       deferNativeQueuedCommand(command);
+      return;
+    }
+    if (generationLifecycleUnavailableReason()) {
+      deferQueuedGenerationForLifecycle();
       return;
     }
     var queuedDocumentKey = String(command.contextDocumentKey || '');
@@ -7725,6 +7862,10 @@
 
   function drainNextQueuedAction() {
     if (isActiveRun() || state.drainingQueue) return;
+    if (generationLifecycleUnavailableReason()) {
+      deferQueuedGenerationForLifecycle();
+      return;
+    }
     var ctx = state.context || {};
     var topic = encodeURIComponent(ctx.topicid || ctx.notebookid || '');
     var book = encodeURIComponent(ctx.bookmd5 || ctx.docmd5 || '');
@@ -7759,6 +7900,11 @@
   function requestTextAction(action, prompt, userText, queueId, extraPayload) {
     state.currentQueueId = queueId || '';
     extraPayload = extraPayload || {};
+    if (generationLifecycleUnavailableReason()) {
+      if (queueId) deferQueuedGenerationForLifecycle();
+      else addMessage('assistant', generationLifecycleUnavailableReason());
+      return;
+    }
     addMessage('user', userText || '[' + action + ']');
     addSourceRequestStatus();
     setWebRunLock(true);
@@ -8023,10 +8169,9 @@
   }
 
   function sourceWorkspaceGenerationUnavailableReason() {
-    if (state.documentSwitchPending || state.documentSwitchCommitting) {
-      return '正在等待新文件上下文稳定并重建资料，完成前不能发送。';
-    }
-    if (state.sourceWorkspaceUploadInFlight) return '资料文件正在上传，完成并验证前不能发送。';
+    var lifecycleReason = generationLifecycleUnavailableReason();
+    if (lifecycleReason) return lifecycleReason;
+    if (sourceWorkspaceLifecycle.isUploadActive()) return '资料文件正在上传，完成并验证前不能发送。';
     var sourceIds = sourceWorkspaceSelectionIds();
     if (!sourceIds.length) return '';
     if (state.sourceWorkspaceInFlight) return '资料仍在验证，请等待验证完成后再发送。';
@@ -10060,6 +10205,11 @@
   function requestGoalAction(goalText, userText, queueId, extraPayload) {
     state.currentQueueId = queueId || '';
     extraPayload = extraPayload || {};
+    if (generationLifecycleUnavailableReason()) {
+      if (queueId) deferQueuedGenerationForLifecycle();
+      else addMessage('assistant', generationLifecycleUnavailableReason());
+      return;
+    }
     var goal = goalTextToPayload(goalText);
     if (!goal.title && !goal.detail) {
       addMessage('assistant', '队列目标为空，已跳过。');
@@ -10109,6 +10259,11 @@
   function requestDraftAction(action, prompt, userText, queueId, extraPayload) {
     state.currentQueueId = queueId || '';
     extraPayload = extraPayload || {};
+    if (generationLifecycleUnavailableReason()) {
+      if (queueId) deferQueuedGenerationForLifecycle();
+      else addMessage('assistant', generationLifecycleUnavailableReason());
+      return;
+    }
     if (!ensureMindmapTargetReady(action)) {
       ackQueueAndContinue(queueId);
       return;
@@ -11425,6 +11580,7 @@
   }
 
   function resetConversationForDocumentChange(ctx) {
+    cancelSourceWorkspaceUpload('document-switch');
     invalidateSourceWorkspaceRequests();
     state.newConversationRequestToken += 1;
     state.sourceWorkspaceConversationCreateInFlight = false;
@@ -11457,32 +11613,96 @@
     );
   }
 
+  function captureAutomaticDocumentSwitchState() {
+    return {
+      conversationId: String(state.conversationId || ''),
+      sessionId: String(state.sessionId || ''),
+      sourceWorkspace: Object.assign({}, state.sourceWorkspace || {}, {
+        sources: ((state.sourceWorkspace || {}).sources || []).slice(),
+        errors: ((state.sourceWorkspace || {}).errors || []).slice()
+      }),
+      sourceWorkspaceCandidates: state.sourceWorkspaceCandidates.slice(),
+      sourceIds: sourceWorkspaceSelectionIds(),
+      followCurrentDocument: state.followCurrentDocument,
+      currentDocumentId: state.sourceWorkspaceCurrentDocumentId,
+      currentDocumentIds: state.sourceWorkspaceCurrentDocumentIds.slice(),
+      sourceWorkspaceStatus: Object.assign({}, state.sourceWorkspaceStatus || {})
+    };
+  }
+
+  function restoreAutomaticDocumentSwitchState(originalState) {
+    originalState = originalState || {};
+    state.conversationId = String(originalState.conversationId || '');
+    state.sessionId = String(originalState.sessionId || '');
+    state.sourceWorkspace = originalState.sourceWorkspace || {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''};
+    state.sourceWorkspaceCandidates = (originalState.sourceWorkspaceCandidates || []).slice();
+    state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(originalState.sourceIds || []);
+    state.followCurrentDocument = originalState.followCurrentDocument !== false;
+    state.sourceWorkspaceCurrentDocumentId = String(originalState.currentDocumentId || '');
+    state.sourceWorkspaceCurrentDocumentIds = (originalState.currentDocumentIds || []).slice();
+    state.sourceWorkspaceStatus = originalState.sourceWorkspaceStatus || {tone: 'neutral', text: '资料尚未验证'};
+    renderSourceWorkspacePage();
+  }
+
   function cancelAutomaticDocumentSwitch() {
-    if (state.documentSwitchCommitting) return;
     if (state.documentSwitchDebounceTimer) window.clearTimeout(state.documentSwitchDebounceTimer);
     state.documentSwitchDebounceTimer = null;
     state.documentSwitchToken += 1;
-    state.documentSwitchPending = false;
+    var canceled = sourceWorkspaceLifecycle.cancelMigration('context-returned');
+    if (canceled && canceled.meta && canceled.meta.conversationResult) {
+      cleanupStaleConversation(canceled.meta.conversationResult, canceled.meta.ownershipPayload || {}, canceled);
+    }
+    if (canceled && canceled.meta && canceled.meta.originalState) {
+      restoreAutomaticDocumentSwitchState(canceled.meta.originalState);
+    }
+    syncSourceWorkspaceLifecycleFlags();
     state.pendingDocumentSwitch = null;
     state.contextDocumentKey = state.stableContextDocumentKey || state.contextDocumentKey;
     updateActionAvailability();
   }
 
   function scheduleAutomaticDocumentSwitch(docKey) {
-    if (state.documentSwitchCommitting) return;
-    if (!state.pendingDocumentSwitch) {
-      state.pendingDocumentSwitch = {
+    cancelSourceWorkspaceUpload('document-switch');
+    closeSourceWorkspacePage();
+    if (
+      sourceWorkspaceLifecycle.isMigrationInFlight() &&
+      state.pendingDocumentSwitch &&
+      state.pendingDocumentSwitch.contextDocumentKey === docKey
+    ) {
+      state.contextDocumentKey = docKey;
+      return;
+    }
+    if (!state.pendingDocumentSwitch || sourceWorkspaceLifecycle.isMigrationInFlight()) {
+      var inheritedOriginalState = state.pendingDocumentSwitch && state.pendingDocumentSwitch.originalState
+        ? state.pendingDocumentSwitch.originalState
+        : captureAutomaticDocumentSwitchState();
+      var lifecycleResult = sourceWorkspaceLifecycle.beginMigration({
         previousDocumentKey: state.stableContextDocumentKey || state.contextDocumentKey,
         contextDocumentKey: docKey,
         sourceIds: sourceWorkspaceSelectionIds(),
         followCurrentDocument: state.followCurrentDocument,
-        currentDocumentIds: state.sourceWorkspaceCurrentDocumentIds.slice()
-      };
+        currentDocumentIds: state.sourceWorkspaceCurrentDocumentIds.slice(),
+        originalState: inheritedOriginalState
+      });
+      if (lifecycleResult.superseded && lifecycleResult.superseded.meta && lifecycleResult.superseded.meta.conversationResult) {
+        cleanupStaleConversation(
+          lifecycleResult.superseded.meta.conversationResult,
+          lifecycleResult.superseded.meta.ownershipPayload || {},
+          lifecycleResult.superseded
+        );
+      }
+      state.pendingDocumentSwitch = Object.assign({}, lifecycleResult.handle.meta, {
+        lifecycleHandle: lifecycleResult.handle
+      });
     } else {
       state.pendingDocumentSwitch.contextDocumentKey = docKey;
+      sourceWorkspaceLifecycle.updateMigration(
+        state.pendingDocumentSwitch.lifecycleHandle,
+        {contextDocumentKey: docKey}
+      );
     }
     state.contextDocumentKey = docKey;
-    state.documentSwitchPending = true;
+    syncSourceWorkspaceLifecycleFlags();
     invalidateSourceWorkspaceRequests();
     setSourceWorkspaceStatus('warning', '正在等待新文件上下文稳定...');
     updateActionAvailability();
@@ -11499,14 +11719,15 @@
 
   function completeAutomaticDocumentSwitch(pending) {
     pending = pending || {};
+    var migrationHandle = pending.lifecycleHandle;
     if (
-      !state.documentSwitchPending ||
-      state.documentSwitchCommitting ||
+      !sourceWorkspaceLifecycle.isMigrationCurrent(migrationHandle) ||
       !(pending.contextDocumentKey === state.contextDocumentKey) ||
       !documentContextReadyForAutomaticSwitch(state.context, pending.contextDocumentKey)
     ) return;
     state.documentSwitchDebounceTimer = null;
-    state.documentSwitchCommitting = true;
+    if (!sourceWorkspaceLifecycle.startMigration(migrationHandle)) return;
+    syncSourceWorkspaceLifecycleFlags();
     var reboundSelection = sourceWorkspaceSelectionMap(pending.sourceIds || []);
     if (pending.followCurrentDocument) {
       var oldCurrentIds = pending.currentDocumentIds || [];
@@ -11517,42 +11738,60 @@
     state.followCurrentDocument = !!pending.followCurrentDocument;
     state.sourceWorkspace.revision = '';
     state.sourceWorkspace.active = false;
-    requestNewConversation(function(result) {
-      if (!result || !result.ok) {
-        state.documentSwitchCommitting = false;
-        setSourceWorkspaceStatus('error', '新文件对话创建失败，发送已暂停');
-        addFailureMessage('切换文件失败', result);
-        updateActionAvailability();
+    function finishMigration(success) {
+      if (!sourceWorkspaceLifecycle.finishMigration(migrationHandle)) {
+        syncSourceWorkspaceLifecycleFlags();
+        return false;
+      }
+      syncSourceWorkspaceLifecycleFlags();
+      if (state.pendingDocumentSwitch === pending) state.pendingDocumentSwitch = null;
+      if (success) state.stableContextDocumentKey = pending.contextDocumentKey;
+      updateActionAvailability();
+      return true;
+    }
+    requestNewConversation(function(result, ownershipPayload) {
+      if (!sourceWorkspaceLifecycle.isMigrationCurrent(migrationHandle)) {
+        cleanupStaleConversation(result, ownershipPayload, migrationHandle);
+        syncSourceWorkspaceLifecycleFlags();
         return;
       }
+      if (!result || !result.ok) {
+        finishMigration(false);
+        setSourceWorkspaceStatus('error', '新文件对话创建失败，发送已暂停');
+        addFailureMessage('切换文件失败', result);
+        return;
+      }
+      sourceWorkspaceLifecycle.updateMigration(migrationHandle, {
+        conversationResult: result,
+        ownershipPayload: ownershipPayload
+      });
       initializeNewConversationState(result.conversation || {});
       state.sourceWorkspaceSelection = reboundSelection;
       state.followCurrentDocument = !!pending.followCurrentDocument;
       refreshSourceWorkspace(false, {
+        lifecycleHandle: migrationHandle,
         selectionOverride: Object.keys(reboundSelection),
         followCurrentDocumentOverride: pending.followCurrentDocument,
         allowInvalidWorkspace: true,
         after: function() {
+          if (!sourceWorkspaceLifecycle.isMigrationCurrent(migrationHandle)) return;
           var current = state.followCurrentDocument ? currentDocumentSourceCandidate() : null;
           if (current) state.sourceWorkspaceSelection[String(current.id || '')] = true;
           saveSourceWorkspaceSelection(false, function(saved) {
+            if (!sourceWorkspaceLifecycle.isMigrationCurrent(migrationHandle)) return;
             if (!saved || !saved.ok) {
-              state.documentSwitchCommitting = false;
-              updateActionAvailability();
+              finishMigration(false);
               return;
             }
             validateSavedSourceWorkspace(function(validated) {
-              state.documentSwitchCommitting = false;
+              if (!sourceWorkspaceLifecycle.isMigrationCurrent(migrationHandle)) return;
               if (!validated || !validated.ok) {
-                updateActionAvailability();
+                finishMigration(false);
                 return;
               }
-              state.stableContextDocumentKey = pending.contextDocumentKey;
-              state.documentSwitchPending = false;
-              state.pendingDocumentSwitch = null;
-              updateActionAvailability();
-            });
-          });
+              finishMigration(true);
+            }, migrationHandle);
+          }, migrationHandle);
         }
       });
     }, {
@@ -11560,6 +11799,11 @@
       sourceIds: pending.sourceIds,
       followCurrentDocument: pending.followCurrentDocument,
       sourceWorkspaceRevision: ''
+    }, {
+      onStaleResult: function(staleResult, ownershipPayload) {
+        cleanupStaleConversation(staleResult, ownershipPayload, migrationHandle);
+        syncSourceWorkspaceLifecycleFlags();
+      }
     });
   }
 

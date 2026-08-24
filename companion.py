@@ -92,6 +92,7 @@ UPLOAD_INDEX_PATH = UPLOAD_DIR / "index.json"
 UPLOAD_MAX_BYTES = 20_000_000
 UPLOAD_TEXT_MAX_BYTES = 2_000_000
 UPLOAD_INDEX_MAX_FILES = 200
+HTTP_JSON_POST_MAX_BYTES = ((UPLOAD_MAX_BYTES + 2) // 3) * 4 + 1_000_000
 PDF_CACHE_DIR = UPLOAD_DIR / "pdf-cache"
 PDF_CACHE_INDEX_PATH = PDF_CACHE_DIR / "index.json"
 PDF_TEXT_CACHE_DIR = PDF_CACHE_DIR / "text"
@@ -3758,6 +3759,8 @@ def register_upload(payload: dict[str, Any]) -> dict[str, Any]:
             data = base64.b64decode(content_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
             return {"ok": False, "message": f"fileContentBase64 base64 无效：{exc}"}
+        if base64.b64encode(data).decode("ascii") != content_base64:
+            return {"ok": False, "message": "fileContentBase64 不是 canonical base64，已拒绝。"}
         if len(data) > UPLOAD_MAX_BYTES:
             return {"ok": False, "message": "上传文件超过 20 MB，已拒绝。"}
         temporary_target = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
@@ -15452,6 +15455,31 @@ def handle_action_logged(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def read_json_post_payload(headers: Any, body_stream: Any) -> dict[str, Any]:
+    transfer_encoding = str(headers.get("Transfer-Encoding") or "").strip()
+    if transfer_encoding:
+        return {"ok": False, "status": 400, "message": "不支持 Transfer-Encoding；JSON POST 必须使用 Content-Length。"}
+    raw_length = headers.get("Content-Length")
+    if raw_length is None:
+        return {"ok": False, "status": 411, "message": "缺少 Content-Length。"}
+    try:
+        length = int(str(raw_length).strip())
+    except (TypeError, ValueError):
+        return {"ok": False, "status": 400, "message": "Content-Length 无效。"}
+    if length <= 0:
+        return {"ok": False, "status": 400, "message": "Content-Length 必须为正整数。"}
+    if length > HTTP_JSON_POST_MAX_BYTES:
+        return {"ok": False, "status": 413, "message": "JSON 请求体超过允许上限。"}
+    raw = body_stream.read(length)
+    if len(raw) != length:
+        return {"ok": False, "status": 400, "message": "JSON 请求体长度与 Content-Length 不一致。"}
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        return {"ok": False, "status": 400, "message": f"JSON 解析失败：{exc}"}
+    return {"ok": True, "status": 200, "payload": payload}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CodexMarginNoteCompanion/0.3"
 
@@ -15493,13 +15521,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"ok": False, "message": "Not found"})
 
     def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length") or "0")
-        raw = self.rfile.read(length) if length else b"{}"
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except Exception as exc:
-            self._send_json(400, {"ok": False, "message": f"JSON 解析失败：{exc}"})
+        parsed_body = read_json_post_payload(self.headers, self.rfile)
+        if not parsed_body.get("ok"):
+            self._send_json(
+                int(parsed_body.get("status") or 400),
+                {"ok": False, "message": str(parsed_body.get("message") or "JSON 请求失败。")},
+            )
             return
+        payload = parsed_body.get("payload")
         if self.path == "/marginnote/event":
             try:
                 result = append_event(payload if isinstance(payload, dict) else {})

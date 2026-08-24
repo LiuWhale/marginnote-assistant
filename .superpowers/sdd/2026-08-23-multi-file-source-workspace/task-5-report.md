@@ -16,7 +16,7 @@ Implementation changes are limited to:
 - `tests/test_web_controls_static.py`
 - `tests/test_resizable_panel_static.py`
 
-This report is the only additional file. No backend file was changed.
+This report was the only additional file in the initial Task 5 implementation. Fix Rounds 2 and 3 later expanded the approved scope to `companion.py`, backend tests, and HTTP/upload behavior as documented below.
 
 ## TDD Evidence
 
@@ -105,7 +105,7 @@ No screenshot artifact was produced. The responsive static suite verifies:
 - Confirmed missing source acknowledgements fail closed for every answer-derived write path.
 - Confirmed ordinary rows and tooltips expose names and status, not absolute paths or hashes.
 - Confirmed only the five authorized implementation/test files changed before the implementation commit.
-- Confirmed no backend contract or backend implementation was modified.
+- The initial Task 5 implementation did not modify backend contracts; Fix Rounds 2 and 3 below intentionally add the approved upload and HTTP safety changes.
 
 ## Concerns
 
@@ -172,7 +172,7 @@ exit 0
 - Confirmed stale source callbacks cannot mutate selection, count, rows, status, revision, or send eligibility because the guard runs before the action callback.
 - Confirmed the source-clean branch affects only `conversation_new`; direct and queued generation payloads retain their source snapshot contract.
 - Confirmed document-switch follow behavior is reapplied only after a clean new conversation exists: enabled follow replaces old current-document members, while disabled follow restores the explicit selection through a subsequent guarded workspace update.
-- No backend file was changed.
+- Fix Round 1 itself did not change backend files; Fix Round 2 subsequently changed `companion.py` under the expanded approved write set.
 - Live MarginNote WebView timing and visual interaction remain unverified in this static fix round.
 
 ## Fix Round 2
@@ -284,3 +284,129 @@ exit 0
 - Confirmed raw bytes are never inserted into chat history or ordinary diagnostics.
 - Confirmed the new picker button is classified as a file-picker control by UI functional acceptance.
 - Live MarginNote WebView timing, native picker interaction, and real 20 MB transfers were not exercised in this implementation run.
+
+## Fix Round 3
+
+### Findings Addressed
+
+- **C1:** cross-document response suppression could hide an automatic `conversation_new` result before cleanup, orphan the persisted conversation, and strand migration flags.
+- **I1:** queued goal/write/text execution and queue drain did not share the migration gate.
+- **I2:** a document or conversation switch could suppress upload completion and leave upload controls/generation disabled.
+- **I3:** the HTTP handler read the declared request body before enforcing any encoded upload ceiling.
+- **I4:** strict decoding still accepted noncanonical padded base64 such as `Zh==` and `AB==`.
+- **I5:** previous lifecycle tests checked source markers but did not execute asynchronous epoch/interleaving behavior.
+- **M1:** earlier report wording said no backend file changed without limiting that statement to the initial implementation/fix round.
+
+### RED Evidence
+
+Added backend RED tests for:
+
+```text
+test_json_post_body_limit_rejects_before_reading_request_bytes
+test_json_post_body_requires_valid_length_and_rejects_chunked_encoding
+```
+
+Extended the strict upload rejection test with noncanonical `Zh==` and `AB==` cases. Before implementation, both payloads were stored successfully, the HTTP pre-read helper was absent, and the lifecycle helper/static wiring test failed.
+
+Added `tests/source_workspace_lifecycle.test.js` before the helper implementation. Its initial Node run failed because `source_workspace_lifecycle.js` did not exist.
+
+### Executable Lifecycle Helper
+
+- Added `source_workspace_lifecycle.js`, loaded before `app.js` and exported for both the WebView and Node.
+- Migration and upload handles carry monotonically increasing epochs. `finish*()` succeeds only for the active handle, so an older callback cannot unlock a newer lifecycle.
+- The helper exposes pending/in-flight migration state, upload cancellation state, and one central generation-blocked predicate.
+- Executable Node tests cover:
+  - migration superseded before its conversation callback;
+  - exact stale-conversation cleanup ownership payload;
+  - upload cancellation after one successful file;
+  - an older upload callback failing to unlock a newer upload;
+  - generation remaining blocked for the complete migration lifecycle.
+
+### Migration and Cleanup
+
+- `postCompanion()` now parses a cross-document response and sends it to an explicit stale-response callback before returning.
+- Every stale `conversation_new` result with a persisted conversation is deleted through a raw exact-payload request. The cleanup payload retains the original topic, book, context key, document/object ownership, conversation ID, and session ID rather than inheriting current context.
+- A migration handle records the newly persisted conversation and original request payload. Superseding or canceling that handle triggers cleanup immediately; a later stale callback is idempotently ignored for the same conversation ID.
+- Pending, in-flight, canceled, superseded, failed, and completed migration states synchronize UI booleans only from the active helper handle.
+- Cancellation restores the original conversation and source-workspace snapshot if that state was already cleared before the user returned to the original document.
+- Source-page operations are closed/blocked during migration unless they carry the active internal migration handle, preventing an unrelated refresh from suppressing an internal rebuild callback.
+
+### Central Generation Gate
+
+- Direct generation continues through the common source/lifecycle availability check.
+- `runQueuedCommand()`, `drainNextQueuedAction()`, and the text/goal/draft request entry points now check the same migration predicate.
+- A blocked queued command is neither acknowledged nor executed. One bounded defer timer retries queue drain after migration instead of accumulating repeated callbacks.
+- Chat, goal, card, mind-map, full-reading, node expansion/reorganization, and reply-derived write paths therefore cannot execute against the old source binding while migration is active.
+
+### Upload Cancellation
+
+- Upload remains active through candidate refresh, auto-selection, source save, and validation, not only through byte transfer.
+- Document switch, new conversation, and conversation load explicitly cancel the active upload handle, release the file-picker button, preserve server-side successes, and tell the user to reselect unfinished files.
+- Every FileReader, upload response, refresh, save, and validation continuation checks the active upload epoch before mutating UI or source state.
+- An older upload completion cannot release controls owned by a newer upload lifecycle.
+
+### HTTP and Base64 Safety
+
+- Added a JSON POST ceiling sized for one canonical 20 MB binary upload plus bounded JSON/context overhead.
+- `do_POST()` now rejects missing, invalid, nonpositive, transfer-encoded/chunked, or oversized `Content-Length` before `rfile.read()`.
+- It also rejects short reads before JSON parsing.
+- After `b64decode(..., validate=True)`, the backend re-encodes decoded bytes with standard `b64encode()` and requires exact string equality. Noncanonical padding and alternate representations are rejected before file creation.
+- Decoded file bytes remain limited to 20 MB; data URLs and unsafe names remain rejected.
+
+### GREEN Evidence
+
+Focused backend safety tests:
+
+```text
+Ran 6 tests in 0.707s
+OK
+```
+
+Executable Node interleavings:
+
+```text
+node --test tests/source_workspace_lifecycle.test.js
+5 tests passed
+```
+
+Complete backend controls:
+
+```text
+python3 -m unittest tests.test_companion_controls -q
+Ran 270 tests in 186.079s
+OK
+```
+
+Changed Web/UI modules:
+
+```text
+python3 -m unittest \
+  tests.test_web_controls_static \
+  tests.test_resizable_panel_static \
+  tests.test_ui_functional_acceptance -q
+Ran 153 tests in 0.696s
+OK
+```
+
+Final repository-wide Python suite:
+
+```text
+python3 -m unittest discover -s tests -q
+Ran 737 tests in 193.078s
+OK
+```
+
+Additional checks:
+
+```text
+node --check extension/codex.mn.assistant/web/app.js
+node --check extension/codex.mn.assistant/web/source_workspace_lifecycle.js
+git diff --check
+```
+
+All returned exit `0`.
+
+### Concerns
+
+- The executable helper tests cover lifecycle interleavings deterministically, but a live MarginNote WebView switch/upload run was not available in this fix round.
+- Stale conversation cleanup is best-effort over the localhost Companion endpoint; cleanup failure is surfaced in panel status and no stale callback can unlock the active newer lifecycle.

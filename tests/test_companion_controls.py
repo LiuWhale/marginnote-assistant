@@ -6849,6 +6849,8 @@ class CompanionControlsTests(unittest.TestCase):
                 {"fileName": "data.png", "fileContentBase64": "data:image/png;base64,QUJD"},
                 {"fileName": "../escape.png", "fileContentBase64": base64.b64encode(b"ok").decode("ascii")},
                 {"fileName": "large.bin", "fileContentBase64": base64.b64encode(b"12345").decode("ascii")},
+                {"fileName": "padding-one.bin", "fileContentBase64": "Zh=="},
+                {"fileName": "padding-two.bin", "fileContentBase64": "AB=="},
             ]
 
             results = [companion.handle_action({"action": "upload_file", **case}) for case in cases]
@@ -6858,7 +6860,50 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("data URL", results[1]["message"])
             self.assertIn("文件名", results[2]["message"])
             self.assertIn("超过", results[3]["message"])
+            self.assertIn("canonical", results[4]["message"])
+            self.assertIn("canonical", results[5]["message"])
             self.assertEqual(companion.uploaded_files(), [])
+
+    def test_json_post_body_limit_rejects_before_reading_request_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            class NoReadBody:
+                called = False
+
+                def read(self, _length: int) -> bytes:
+                    self.called = True
+                    raise AssertionError("oversized body must not be read")
+
+            body = NoReadBody()
+            self.assertTrue(hasattr(companion, "read_json_post_payload"))
+            result = companion.read_json_post_payload(
+                {"Content-Length": str(companion.HTTP_JSON_POST_MAX_BYTES + 1)}, body
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["status"], 413)
+            self.assertFalse(body.called)
+
+    def test_json_post_body_requires_valid_length_and_rejects_chunked_encoding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+
+            class EmptyBody:
+                def read(self, _length: int) -> bytes:
+                    return b"{}"
+
+            cases = [
+                {},
+                {"Content-Length": "invalid"},
+                {"Content-Length": "-1"},
+                {"Content-Length": "2", "Transfer-Encoding": "chunked"},
+            ]
+            self.assertTrue(hasattr(companion, "read_json_post_payload"))
+            results = [companion.read_json_post_payload(headers, EmptyBody()) for headers in cases]
+
+            self.assertEqual([result["status"] for result in results], [411, 400, 400, 400])
+            self.assertTrue(all(not result["ok"] for result in results))
 
     def test_upload_file_partial_batch_failure_preserves_successful_binary_upload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

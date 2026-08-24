@@ -2382,7 +2382,7 @@ class WebControlsStaticTests(unittest.TestCase):
             "window.clearTimeout",
             "window.setTimeout",
             "documentContextReadyForAutomaticSwitch",
-            "state.documentSwitchPending = true",
+            "syncSourceWorkspaceLifecycleFlags",
             "sourceIds: sourceWorkspaceSelectionIds()",
             "followCurrentDocument: state.followCurrentDocument",
         ]:
@@ -2401,15 +2401,44 @@ class WebControlsStaticTests(unittest.TestCase):
             "pending.contextDocumentKey === state.contextDocumentKey",
         ]:
             self.assertIn(marker, complete_body)
-        self.assertIn("state.documentSwitchPending", unavailable_body)
+        self.assertIn("generationLifecycleUnavailableReason", unavailable_body)
         self.assertIn("payload.automaticDocumentSwitch === true", payload_body)
         self.assertIn("delete payload.sourceIds", payload_body)
+        self.assertIn("sourceWorkspaceLifecycle.beginMigration", schedule_body)
+        self.assertIn("sourceWorkspaceLifecycle.isMigrationCurrent", complete_body)
+        self.assertIn("cleanupStaleConversation", complete_body)
         for marker in [
             "state.sourceWorkspaceConversationCreateInFlight",
             "state.sourceWorkspaceConversationCreateCallbacks.push(done)",
             "state.sourceWorkspaceConversationCreateCallbacks.slice()",
         ]:
             self.assertIn(marker, ensure_body)
+
+    def test_lifecycle_helper_is_loaded_and_centrally_gates_queue_execution(self) -> None:
+        self.assertIn('<script src="source_workspace_lifecycle.js', self.html)
+        self.assertLess(
+            self.html.index('source_workspace_lifecycle.js'),
+            self.html.index('app.js'),
+        )
+        for marker in [
+            "window.SourceWorkspaceLifecycle.createController()",
+            "sourceWorkspaceLifecycle.isGenerationBlocked()",
+            "sourceWorkspaceLifecycle.beginUpload",
+            "sourceWorkspaceLifecycle.cancelUpload",
+            "sourceWorkspaceLifecycle.finishUpload",
+            "cleanupStaleConversation",
+            "onStaleResponse",
+        ]:
+            self.assertIn(marker, self.js)
+        queued_body = self.js.split("function runQueuedCommand", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+        self.assertIn("generationLifecycleUnavailableReason", queued_body)
+        self.assertIn("deferQueuedGenerationForLifecycle", queued_body)
+        self.assertIn("generationLifecycleUnavailableReason", drain_body)
 
     def test_source_workspace_page_supports_ordered_multi_file_binary_uploads(self) -> None:
         for marker in [
