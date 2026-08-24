@@ -2239,6 +2239,12 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("sourceWorkspaceControlsLocked()", row_body)
         self.assertIn("isCurrentDocumentCandidate(candidate)", row_body)
         self.assertIn("checkbox.setAttribute('aria-label'", row_body)
+        membership_change_body = row_body.split("checkbox.addEventListener('change'", 1)[1].split(
+            "\n    var body", 1
+        )[0]
+        self.assertIn("sourceWorkspaceControlsLocked()", membership_change_body)
+        removal_change_body = row_body.split("remove.addEventListener('change'", 1)[1]
+        self.assertIn("sourceWorkspaceControlsLocked()", removal_change_body)
 
         required_controls = self.js.split("var requiredControlIds = [", 1)[1].split("];", 1)[0]
         self.assertNotIn("'sourceWorkspaceClearButton'", required_controls)
@@ -2256,6 +2262,11 @@ class WebControlsStaticTests(unittest.TestCase):
             "\n  function newConversationRequestIsCurrent", 1
         )[0]
         self.assertIn("clearSourceWorkspace", save_body)
+
+        follow_change_body = self.js.split("sourceWorkspaceFollow.addEventListener('change'", 1)[1].split(
+            "\n    var sourceWorkspaceDiagnostics", 1
+        )[0]
+        self.assertIn("sourceWorkspaceControlsLocked()", follow_change_body)
 
     def test_source_workspace_bulk_removal_is_membership_only_and_transactional(self) -> None:
         removal_body = self.js.split("function applyBulkSourceWorkspaceRemoval", 1)[1].split(

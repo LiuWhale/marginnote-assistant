@@ -2316,6 +2316,10 @@
     checkbox.setAttribute('data-source-id', sourceId);
     checkbox.setAttribute('aria-label', '选择资料 ' + String(candidate.title || sourceId));
     checkbox.addEventListener('change', function() {
+      if (sourceWorkspaceControlsLocked()) {
+        checkbox.checked = !!state.sourceWorkspaceSelection[sourceId];
+        return;
+      }
       if (state.followCurrentDocument && isCurrentDocumentCandidate(candidate)) {
         checkbox.checked = true;
         state.sourceWorkspaceSelection[sourceId] = true;
@@ -2356,6 +2360,15 @@
       '跟随当前文件开启时，当前文件不能移除' : '选择从本次对话移除';
     remove.setAttribute('aria-label', '选择移除 ' + String(candidate.title || sourceId));
     remove.addEventListener('change', function() {
+      if (
+        sourceWorkspaceControlsLocked() ||
+        !state.sourceWorkspaceRemovalManagementActive ||
+        isSourceWorkspaceRemovalProtected(sourceId)
+      ) {
+        remove.checked = !!state.sourceWorkspaceRemovalSelection[sourceId] &&
+          !isSourceWorkspaceRemovalProtected(sourceId);
+        return;
+      }
       if (remove.checked) state.sourceWorkspaceRemovalSelection[sourceId] = true;
       else delete state.sourceWorkspaceRemovalSelection[sourceId];
       renderSourceWorkspacePage();
@@ -13481,7 +13494,7 @@
     var sourceWorkspaceFollow = byId('sourceWorkspaceFollowCurrentDocument');
     if (sourceWorkspaceFollow) {
       sourceWorkspaceFollow.addEventListener('change', function(ev) {
-        if (!sourceWorkspaceOperationAllowed(null)) {
+        if (!sourceWorkspaceOperationAllowed(null) || sourceWorkspaceControlsLocked()) {
           ev.currentTarget.checked = !!state.followCurrentDocument;
           return;
         }
