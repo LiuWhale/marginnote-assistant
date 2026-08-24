@@ -8535,6 +8535,77 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(wrong_action["ok"], wrong_action)
             self.assertEqual(wrong_action.get("blocked"), "queue_effect_identity_mismatch")
 
+    def test_queued_generation_without_document_binding_is_rejected_before_model_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "conversationId": "CONV-MISSING-DOCUMENT-BINDING",
+                    "source": "unittest",
+                },
+            )
+            queued = companion.enqueue_command(
+                {**bound, "action": "generate_card", "_queue_raw": True, "prompt": "must reject"}
+            )["queued"]
+            command = companion.poll_commands("T1", "B1")["command"]
+            invocations: list[str] = []
+            companion.generate_reply = lambda payload, task: (
+                invocations.append(task) or "should not run",
+                "codex-cli",
+            )
+
+            result = companion.handle_action(
+                {**bound, **command, "action": "generate_card", "_queue_id": queued["id"]}
+            )
+
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "queue_effect_identity_mismatch")
+            self.assertEqual(invocations, [])
+            self.assertEqual(companion.history_payload(bound)["history"], [])
+
+    def test_queued_generation_releases_queue_lock_before_session_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "contextDocumentKey": "T1|B1|lock-order",
+                    "conversationId": "CONV-LOCK-ORDER",
+                    "source": "unittest",
+                },
+            )
+            queued = companion.enqueue_command(
+                {**bound, "action": "chat", "_queue_raw": True, "prompt": "lock order"}
+            )["queued"]
+            command = companion.poll_commands("T1", "B1")["command"]
+            execution = {**bound, **command, "action": "chat", "_queue_id": queued["id"]}
+            path = companion.queue_path("T1", "B1")
+            lock_acquired = threading.Event()
+
+            def execute() -> dict[str, Any]:
+                def acquire_from_other_thread() -> None:
+                    with companion.queue_lock(path):
+                        lock_acquired.set()
+
+                probe = threading.Thread(target=acquire_from_other_thread, daemon=True)
+                probe.start()
+                self.assertTrue(
+                    lock_acquired.wait(1),
+                    "queue lock remained held while generation/session effects executed",
+                )
+                probe.join(timeout=1)
+                return {"ok": True, "reply": "done"}
+
+            result = companion.execute_queued_generation_once("chat", execution, execute)
+
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(lock_acquired.is_set())
+
     def test_queued_write_replay_reuses_generation_result_and_exact_draft(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

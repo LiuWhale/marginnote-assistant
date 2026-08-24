@@ -228,6 +228,84 @@ test('bulk source removal adopts authoritative membership after an initial CAS c
   assert.equal(state.sourceWorkspaceBulkInFlight, false);
 });
 
+test('bulk source removal adopts authoritative membership after a validation CAS conflict', () => {
+  const state = {
+    conversationId: 'CONV-A',
+    followCurrentDocument: false,
+    sourceWorkspace: {revision: 'REV-OLD'},
+    sourceWorkspaceSelection: {'source-a': true, 'source-b': true},
+    sourceWorkspaceRemovalSelection: {'source-b': true},
+    sourceWorkspaceBulkInFlight: false,
+    sourceWorkspaceInFlight: false,
+  };
+  const actions = [];
+  let completed = null;
+  const applyBulkSourceWorkspaceRemoval = loadAppFunction(
+    'applyBulkSourceWorkspaceRemoval',
+    'clearSourceWorkspace',
+    {
+      state,
+      sourceWorkspaceOperationAllowed: () => true,
+      sourceWorkspaceControlsLocked: () => false,
+      sourceWorkspaceRemovalSelectionIds: () => ['source-b'],
+      sourceWorkspaceSelectionIds: () => Object.keys(state.sourceWorkspaceSelection),
+      sourceWorkspaceSelectionMap: (ids) => Object.fromEntries(ids.map((id) => [id, true])),
+      sourceWorkspaceResultRevision: (result, fallback) => String((result.workspace || {}).revision || result.sourceWorkspaceRevision || fallback || ''),
+      setSourceWorkspaceStatus: () => {},
+      renderSourceWorkspacePage: () => {},
+      ensureSourceWorkspaceConversation: (done) => done(),
+      postSourceWorkspace: (action, payload, done) => {
+        actions.push({action, payload});
+        if (actions.length === 1) {
+          return done({
+            ok: true,
+            sourceIds: ['source-a'],
+            followCurrentDocument: false,
+            sourceWorkspaceRevision: 'REV-REDUCED',
+            workspace: {ok: true, revision: 'REV-REDUCED'},
+          });
+        }
+        if (actions.length === 2) return done({
+          ok: false,
+          blocked: 'source_workspace_revision_mismatch',
+          sourceIds: ['source-a'],
+          followCurrentDocument: false,
+          sourceWorkspaceRevision: 'REV-NEW',
+          workspace: {ok: true, revision: 'REV-NEW'},
+        });
+        return done({
+          ok: true,
+          sourceIds: ['source-a', 'source-c'],
+          followCurrentDocument: false,
+          sourceWorkspaceRevision: 'REV-NEW',
+          workspace: {ok: true, revision: 'REV-NEW'},
+        });
+      },
+      applySourceWorkspaceResult: (result) => {
+        state.sourceWorkspaceSelection = Object.fromEntries(
+          (result.sourceIds || []).map((id) => [id, true]),
+        );
+        state.sourceWorkspace.revision = result.sourceWorkspaceRevision || '';
+      },
+      window: {SourceWorkspaceLifecycle: lifecycle, confirm: () => true},
+      addFailureMessage: () => {},
+    },
+  );
+
+  applyBulkSourceWorkspaceRemoval((result) => { completed = result; });
+
+  assert.deepEqual(actions.map((item) => item.action), [
+    'source_workspace_update',
+    'source_workspace_validate',
+    'source_workspace_get',
+  ]);
+  assert.equal(actions[1].payload.sourceWorkspaceRevision, 'REV-REDUCED');
+  assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), ['source-a', 'source-c']);
+  assert.equal(state.sourceWorkspace.revision, 'REV-NEW');
+  assert.equal(completed.blocked, 'source_workspace_revision_mismatch');
+  assert.equal(state.sourceWorkspaceBulkInFlight, false);
+});
+
 test('bulk source removal rolls membership back after validation failure without deleting data', () => {
   const state = {
     conversationId: 'CONV-A',
@@ -256,11 +334,17 @@ test('bulk source removal rolls membership back after validation failure without
       postSourceWorkspace: (action, payload, done) => {
         actions.push({action, payload});
         if (actions.length === 1) return done({ok: true, workspace: {revision: 'REV-REDUCED'}});
-        if (actions.length === 2) return done({ok: false, workspace: {revision: 'REV-VALIDATE-FAILED'}});
+        if (actions.length === 2) return done({ok: false, workspace: {revision: 'REV-REDUCED'}});
         if (actions.length === 3) return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
         return done({ok: true, workspace: {revision: 'REV-RESTORED'}});
       },
-      applySourceWorkspaceResult: () => {},
+      applySourceWorkspaceResult: (result, options) => {
+        if (options && options.selectionOverride) {
+          state.sourceWorkspaceSelection = Object.fromEntries(
+            options.selectionOverride.map((id) => [id, true]),
+          );
+        }
+      },
       window: {SourceWorkspaceLifecycle: lifecycle, confirm: () => true},
       addFailureMessage: () => {},
     },
@@ -274,7 +358,7 @@ test('bulk source removal rolls membership back after validation failure without
     'source_workspace_update',
     'source_workspace_validate',
   ]);
-  assert.equal(actions[2].payload.sourceWorkspaceRevision, 'REV-VALIDATE-FAILED');
+  assert.equal(actions[2].payload.sourceWorkspaceRevision, 'REV-REDUCED');
   assert.deepEqual(Object.keys(state.sourceWorkspaceSelection), ['current', 'upload-a', 'upload-b']);
   assert.equal(state.sourceWorkspaceBulkInFlight, false);
   assert.equal(actions.some((item) => /delete/.test(item.action)), false);

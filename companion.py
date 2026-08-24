@@ -7689,7 +7689,13 @@ def queued_effect_identity_matches_record(
         return False
     if str(payload.get("sourceWorkspaceRevision") or "") != str(command.get("sourceWorkspaceRevision") or ""):
         return False
-    return bool(identity["queueId"] and identity["sessionId"] and identity["sessionEpoch"] and identity["action"])
+    return bool(
+        identity["queueId"]
+        and identity["sessionId"]
+        and identity["sessionEpoch"]
+        and identity["contextDocumentKey"]
+        and identity["action"]
+    )
 
 
 def execute_queued_generation_once(
@@ -7698,7 +7704,15 @@ def execute_queued_generation_once(
     identity = queued_effect_identity(action, payload)
     if not all(
         identity.get(field)
-        for field in ("queueId", "topicid", "action", "conversationId", "sessionId", "sessionEpoch")
+        for field in (
+            "queueId",
+            "topicid",
+            "action",
+            "conversationId",
+            "sessionId",
+            "sessionEpoch",
+            "contextDocumentKey",
+        )
     ):
         return {
             "ok": False,
@@ -7706,13 +7720,18 @@ def execute_queued_generation_once(
             "message": "队列执行缺少完整的持久化身份绑定。",
         }
     path = queue_path(identity["topicid"], identity["bookmd5"])
-    with queue_lock(path):
+
+    def read_target() -> tuple[list[str], int, dict[str, Any] | None, dict[str, Any] | None]:
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:
             lines = []
         except OSError as exc:
-            return {"ok": False, "blocked": "queue_effect_read_failed", "message": str(exc)}
+            return [], -1, None, {
+                "ok": False,
+                "blocked": "queue_effect_read_failed",
+                "message": str(exc),
+            }
         target_index = -1
         target_record: dict[str, Any] | None = None
         for index, line in enumerate(lines):
@@ -7726,24 +7745,32 @@ def execute_queued_generation_once(
             target_record = record
             break
         if target_record is None:
-            return {
+            return lines, -1, None, {
                 "ok": False,
                 "blocked": "queue_effect_identity_mismatch",
                 "message": "队列记录不存在或不再属于当前执行。",
             }
         if not queued_effect_identity_matches_record(identity, target_record, payload):
-            return {
+            return lines, target_index, target_record, {
                 "ok": False,
                 "blocked": "queue_effect_identity_mismatch",
                 "message": "队列 ID、动作或会话版本与持久化记录不匹配。",
             }
         effect = target_record.get("queuedEffect") if isinstance(target_record.get("queuedEffect"), dict) else {}
         if effect and effect.get("identity") != identity:
-            return {
+            return lines, target_index, target_record, {
                 "ok": False,
                 "blocked": "queue_effect_identity_mismatch",
                 "message": "队列执行结果的持久化身份不匹配。",
             }
+        return lines, target_index, target_record, None
+
+    with queue_lock(path):
+        lines, target_index, target_record, error = read_target()
+        if error:
+            return error
+        assert target_record is not None
+        effect = target_record.get("queuedEffect") if isinstance(target_record.get("queuedEffect"), dict) else {}
         if effect.get("state") == "completed" and isinstance(effect.get("result"), dict):
             return {**dict(effect["result"]), "queueReplay": True, "queueId": identity["queueId"]}
         if effect.get("state") == "started":
@@ -7765,14 +7792,37 @@ def execute_queued_generation_once(
         except OSError as exc:
             return {"ok": False, "blocked": "queue_effect_claim_failed", "message": str(exc)}
 
-        result = execute()
-        if not isinstance(result, dict):
-            result = {"ok": False, "message": "生成动作没有返回可用结果。"}
+    result = execute()
+    if not isinstance(result, dict):
+        result = {"ok": False, "message": "生成动作没有返回可用结果。"}
+
+    with queue_lock(path):
+        lines, target_index, target_record, error = read_target()
+        if error:
+            return error
+        assert target_record is not None
+        effect = target_record.get("queuedEffect") if isinstance(target_record.get("queuedEffect"), dict) else {}
         if not result.get("ok"):
-            target_record.pop("queuedEffect", None)
-            lines[target_index] = json.dumps(target_record, ensure_ascii=False)
-            atomic_rewrite_queue(path, lines)
+            if effect.get("state") == "started" and effect.get("identity") == identity:
+                target_record.pop("queuedEffect", None)
+                lines[target_index] = json.dumps(target_record, ensure_ascii=False)
+                try:
+                    atomic_rewrite_queue(path, lines)
+                except OSError as exc:
+                    return {
+                        "ok": False,
+                        "blocked": "queue_effect_reset_failed",
+                        "message": str(exc),
+                    }
             return result
+        if effect.get("state") == "completed" and isinstance(effect.get("result"), dict):
+            return {**dict(effect["result"]), "queueReplay": True, "queueId": identity["queueId"]}
+        if effect.get("state") != "started" or effect.get("identity") != identity:
+            return {
+                "ok": False,
+                "blocked": "queue_effect_identity_mismatch",
+                "message": "队列执行 claim 在完成前发生变化，已拒绝覆盖。",
+            }
         durable_result = json.loads(json.dumps(result, ensure_ascii=False))
         target_record["queuedEffect"] = {
             "schema": "codex.mn.queuedEffect.v1",
@@ -7783,7 +7833,14 @@ def execute_queued_generation_once(
             "result": durable_result,
         }
         lines[target_index] = json.dumps(target_record, ensure_ascii=False)
-        atomic_rewrite_queue(path, lines)
+        try:
+            atomic_rewrite_queue(path, lines)
+        except OSError as exc:
+            return {
+                "ok": False,
+                "blocked": "queue_effect_result_persist_failed",
+                "message": str(exc),
+            }
         return result
 
 

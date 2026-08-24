@@ -2729,29 +2729,66 @@
       if (done) done(result || {});
     }
 
-    function restoreSnapshot(failureResult, failureStage) {
-      var rollbackRevision = sourceWorkspaceResultRevision(
-        failureResult,
-        String((state.sourceWorkspace || {}).revision || snapshot.sourceWorkspaceRevision)
-      );
-      state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(snapshot.sourceIds);
-      state.followCurrentDocument = snapshot.followCurrentDocument;
+    function adoptAuthoritativeConflict(result, message) {
+      if (result && Array.isArray(result.sourceIds)) applySourceWorkspaceResult(result);
+      state.sourceWorkspaceRemovalSelection = {};
+      state.sourceWorkspaceRemovalManagementActive = false;
+      finish(result || {}, 'error', message);
+    }
+
+    function refreshAuthoritativeConflict(result, message) {
+      postSourceWorkspace('source_workspace_get', {
+        conversationId: state.conversationId
+      }, function(authoritativeResult) {
+        if (authoritativeResult && authoritativeResult.ok) {
+          applySourceWorkspaceResult(authoritativeResult);
+        } else if (result && Array.isArray(result.sourceIds)) {
+          applySourceWorkspaceResult(result);
+        }
+        state.sourceWorkspaceRemovalSelection = {};
+        state.sourceWorkspaceRemovalManagementActive = false;
+        finish(result || authoritativeResult || {}, 'error', message);
+      });
+    }
+
+    function restoreSnapshot(failureResult, failureStage, committedRevision) {
+      var failureRevision = sourceWorkspaceResultRevision(failureResult, '');
+      if (
+        failureResult &&
+        (
+          failureResult.blocked === 'source_workspace_revision_mismatch' ||
+          (failureRevision && committedRevision && failureRevision !== committedRevision)
+        )
+      ) {
+        refreshAuthoritativeConflict(
+          failureResult,
+          '资料在验证期间被其他操作更新，已刷新当前成员；未执行陈旧回滚。'
+        );
+        return;
+      }
       setSourceWorkspaceStatus('warning', '移除未完成，正在回滚资料成员...');
       renderSourceWorkspacePage();
       postSourceWorkspace('source_workspace_update', {
         conversationId: state.conversationId,
         sourceIds: snapshot.sourceIds,
         followCurrentDocument: snapshot.followCurrentDocument,
-        sourceWorkspaceRevision: rollbackRevision
+        sourceWorkspaceRevision: committedRevision
       }, function(rollbackResult) {
         var rollbackOk = !!(rollbackResult && rollbackResult.ok);
         if (rollbackOk) {
           applySourceWorkspaceResult(rollbackResult, {selectionOverride: snapshot.sourceIds});
-        } else {
-          state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(snapshot.sourceIds);
-          state.followCurrentDocument = snapshot.followCurrentDocument;
+        } else if (
+          rollbackResult &&
+          rollbackResult.blocked === 'source_workspace_revision_mismatch' &&
+          Array.isArray(rollbackResult.sourceIds)
+        ) {
+          adoptAuthoritativeConflict(
+            rollbackResult,
+            '资料在回滚前被其他操作更新，已刷新当前成员；未覆盖新的选择。'
+          );
+          return;
         }
-        var restoredRevision = sourceWorkspaceResultRevision(rollbackResult, rollbackRevision);
+        var restoredRevision = sourceWorkspaceResultRevision(rollbackResult, committedRevision);
         if (!rollbackOk || !snapshot.sourceIds.length) {
           finish(rollbackResult || failureResult, 'error', rollbackOk ?
             '移除失败，资料成员已回滚。' :
@@ -2811,14 +2848,18 @@
           return;
         }
         applySourceWorkspaceResult(updateResult, {selectionOverride: reducedSourceIds});
+        var committedRevision = sourceWorkspaceResultRevision(
+          updateResult,
+          snapshot.sourceWorkspaceRevision
+        );
         postSourceWorkspace('source_workspace_validate', {
           conversationId: state.conversationId,
           sourceIds: reducedSourceIds,
           followCurrentDocument: snapshot.followCurrentDocument,
-          sourceWorkspaceRevision: sourceWorkspaceResultRevision(updateResult, snapshot.sourceWorkspaceRevision)
+          sourceWorkspaceRevision: committedRevision
         }, function(validationResult) {
           if (!validationResult || !validationResult.ok) {
-            restoreSnapshot(validationResult || {}, '验证');
+            restoreSnapshot(validationResult || {}, '验证', committedRevision);
             return;
           }
           applySourceWorkspaceResult(validationResult, {selectionOverride: reducedSourceIds});
