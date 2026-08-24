@@ -798,6 +798,15 @@
         <p>开启后，切换文件只更新当前文件，其他已选资料保持不变。</p>
       </section>
 
+      <section class="source-workspace-add-files" aria-label="添加资料文件">
+        <div>
+          <div id="sourceWorkspaceUploadProgress" class="source-workspace-upload-progress" role="status">可一次添加最多 20 个文件，每个不超过 20 MB。</div>
+          <div id="sourceWorkspaceUploadErrors" class="source-workspace-upload-errors hidden"></div>
+        </div>
+        <button id="sourceWorkspaceAddFilesButton" class="small-button" type="button">添加文件</button>
+        <input id="sourceWorkspaceFileInput" class="source-workspace-file-input" type="file" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt,.json,.csv,.tsv,.ipynb,.tex,.bib,.rst,.py,.js,.jsx,.ts,.tsx,.java,.c,.h,.cpp,.hpp,.cc,.cs,.go,.rs,.rb,.php,.swift,.kt,.kts,.m,.mm,.sh,.bash,.zsh,.fish,.sql,.yaml,.yml,.toml,.ini,.cfg,.xml,.html,.css,.scss,.less,.r,.R,.jl,.lua,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.ico">
+      </section>
+
       <section class="source-workspace-section" aria-labelledby="sourceWorkspaceCurrentDocumentTitle">
         <h3 id="sourceWorkspaceCurrentDocumentTitle">当前文件</h3>
         <div id="sourceWorkspaceCurrentDocumentList" class="source-workspace-list"></div>
@@ -1006,6 +1015,6 @@
     </div>
   </section>
   <input id="pdfCacheFileInput" class="pdf-cache-file-input" type="file" accept="application/pdf,.pdf">
-  <script src="app.js?v=20260823-source-workspace-v1"></script>
+  <script src="app.js?v=20260824-source-workspace-v2"></script>
 </body>
 </html>

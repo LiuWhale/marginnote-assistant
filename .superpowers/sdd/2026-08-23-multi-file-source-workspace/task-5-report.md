@@ -174,3 +174,113 @@ exit 0
 - Confirmed document-switch follow behavior is reapplied only after a clean new conversation exists: enabled follow replaces old current-document members, while disabled follow restores the explicit selection through a subsequent guarded workspace update.
 - No backend file was changed.
 - Live MarginNote WebView timing and visual interaction remain unverified in this static fix round.
+
+## Fix Round 2
+
+### Findings Addressed
+
+- **A:** transient document context keys could reset the active conversation immediately. With `followCurrentDocument=false`, the Web state still showed the explicit set while a transient missing-topic conversation was persisted with empty/default source metadata.
+- **B:** the source page could select only already registered candidates and had no one-operation multi-file upload path. The backend accepted UTF-8 text or local paths, but not strict raw-byte payloads from the WebView.
+
+### RED Evidence
+
+Backend tests were added first for:
+
+```text
+test_upload_file_accepts_strict_base64_binary_bytes
+test_upload_file_base64_rejects_ambiguous_unsafe_or_oversized_payloads
+test_upload_file_partial_batch_failure_preserves_successful_binary_upload
+test_source_text_artifact_allows_supported_binary_originals_without_utf8_decode
+test_automatic_document_conversation_persists_explicit_source_binding
+```
+
+Static/UI tests were added first for:
+
+```text
+test_automatic_document_switch_waits_for_stable_identity_and_rebinds_sources
+test_source_workspace_page_supports_ordered_multi_file_binary_uploads
+test_source_workspace_multi_file_upload_status_wraps_at_minimum_width
+test_source_workspace_buttons_are_classified_by_real_interaction_type
+```
+
+The initial focused run failed at the intended missing boundaries: `fileContentBase64` was rejected as absent input; unsafe/data-URL/oversized cases had no strict classifier; binary originals were routed through UTF-8 handling; debounce/rebinding functions and picker controls were absent; upload status CSS and acceptance classification were absent. The direct backend persistence regression already passed, confirming that a stable automatic `conversation_new` payload containing `sourceIds` and `followCurrentDocument=false` is persisted correctly by the server.
+
+### Automatic Document Switch
+
+- Added a `450 ms` debounce around automatic document switching.
+- A switch cannot commit until the latest context contains a topic/notebook ID, book/document ID, and document title or path.
+- Transient payloads update the pending key and restart the timer; they do not call `conversation_new` or reset the current conversation.
+- Generation is disabled while the switch is pending, committing, rebuilding, or validating.
+- The first switch observation snapshots ordered source IDs, follow mode, and current-document member IDs. Repeated transient/full payloads reuse that snapshot.
+- The internal automatic `conversation_new` payload carries the preserved source IDs and follow value with an empty revision. User-clicked `新对话` still removes source IDs/revision and defaults follow mode to true.
+- After the stable conversation is persisted, the Web layer refreshes candidates, replaces only old current-document members when follow is enabled, saves the source set, and explicitly validates the rebuilt workspace.
+- Internal source-page conversation creation is coalesced, preventing the initial source refresh and a fast upload click from creating duplicate empty conversations.
+- Manual new/load actions wait while an automatic switch commits so a stale automatic response cannot override the user's conversation choice.
+
+### Multi-File Upload
+
+- Added `添加文件`, a hidden `type=file multiple` input, progress status, and per-file error output to the dedicated source page.
+- One picker operation accepts at most `20` files; each file is limited to `20,000,000` decoded bytes.
+- Files are read and uploaded sequentially in picker order. Each success is retained independently; a later read/upload failure does not remove earlier uploads.
+- Successful upload IDs are resolved against refreshed trusted candidates, auto-selected in original order, saved, and validated.
+- The picker accepts PDF, DOCX, PPTX, Markdown/text, JSON/CSV, notebooks, TeX/BibTeX, common source-code formats, and common image formats.
+- `register_upload()` now accepts `fileContentBase64`, rejects data URLs, uses strict base64 validation, rejects path separators/NUL in binary-upload names, checks decoded size, and atomically moves decoded bytes into the upload directory.
+- Existing `fileContent` and `filePath` behavior remains available with the existing text/path size boundaries.
+- DOCX, PPTX, and common image files remain readable original links in source workspaces rather than being incorrectly forced through UTF-8 decoding. PDFs retain page-aware extraction; text and source files retain UTF-8 validation.
+- The upload index retains up to `200` records so one 20-file operation does not evict a smaller existing selected set before workspace rebuild.
+- The HTTP binding remains unchanged at localhost `127.0.0.1`.
+
+### GREEN Evidence
+
+Focused lifecycle/backend/UI run:
+
+```text
+Ran 10 tests in 0.839s
+OK
+```
+
+Complete backend controls:
+
+```text
+python3 -m unittest tests.test_companion_controls -q
+Ran 268 tests in 192.850s
+OK
+```
+
+Final static/UI/acceptance run:
+
+```text
+python3 -m unittest \
+  tests.test_web_controls_static \
+  tests.test_resizable_panel_static \
+  tests.test_ui_functional_acceptance -q
+Ran 152 tests in 1.047s
+OK
+```
+
+Final repository-wide run after all code changes:
+
+```text
+python3 -m unittest discover -s tests -q
+Ran 734 tests in 264.772s
+OK
+```
+
+Additional checks:
+
+```text
+node --check extension/codex.mn.assistant/web/app.js
+exit 0
+
+git diff --check
+exit 0
+```
+
+### Self-Review and Concerns
+
+- Confirmed automatic creation is the only `conversation_new` path allowed to retain source metadata; manual creation remains source-clean.
+- Confirmed a missing-topic transient context cannot dispatch automatic conversation creation.
+- Confirmed successful binary uploads survive partial batch failure and no failure path deletes prior upload records or files.
+- Confirmed raw bytes are never inserted into chat history or ordinary diagnostics.
+- Confirmed the new picker button is classified as a file-picker control by UI functional acceptance.
+- Live MarginNote WebView timing, native picker interaction, and real 20 MB transfers were not exercised in this implementation run.

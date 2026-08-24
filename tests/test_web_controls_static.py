@@ -1518,9 +1518,14 @@ class WebControlsStaticTests(unittest.TestCase):
         post_body = self.js.split("function postCompanion(action", 1)[1].split(
             "\n  function postCompanionPath", 1
         )[0]
+        complete_switch_body = self.js.split("function completeAutomaticDocumentSwitch", 1)[1].split(
+            "\n  function renderContext", 1
+        )[0]
 
         self.assertIn("state.context.contextDocumentKey", render_context_body)
-        self.assertIn("resetConversationForDocumentChange", render_context_body)
+        self.assertIn("scheduleAutomaticDocumentSwitch", render_context_body)
+        self.assertNotIn("resetConversationForDocumentChange", render_context_body)
+        self.assertIn("resetConversationForDocumentChange", complete_switch_body)
         self.assertIn("state.conversationId = ''", self.js)
         self.assertIn("state.sessionId = ''", self.js)
         self.assertIn("state.autoPdfCacheRequestedKey = ''", self.js)
@@ -2262,21 +2267,21 @@ class WebControlsStaticTests(unittest.TestCase):
         context_body = self.js.split("function renderContext(ctx)", 1)[1].split(
             "\n  function renderContextSourceLine", 1
         )[0]
-        follow_body = self.js.split("function syncFollowCurrentDocumentMembership", 1)[1].split(
-            "\n  function renderHistoryItems", 1
+        follow_body = self.js.split("function completeAutomaticDocumentSwitch", 1)[1].split(
+            "\n  function renderContext", 1
         )[0]
         conversation_body = self.js.split("function setCurrentConversation", 1)[1].split(
             "\n  function currentMnObjectRef", 1
         )[0]
 
         for marker in [
-            "syncFollowCurrentDocumentMembership",
-            "previousDocumentKey",
-            "docKey !== previousDocumentKey",
+            "scheduleAutomaticDocumentSwitch",
+            "stableContextDocumentKey",
+            "docKey !== state.stableContextDocumentKey",
         ]:
             self.assertIn(marker, context_body)
-        self.assertIn("state.followCurrentDocument", follow_body)
-        self.assertIn("preservedSelection", follow_body)
+        self.assertIn("pending.followCurrentDocument", follow_body)
+        self.assertIn("reboundSelection", follow_body)
         for marker in [
             "conversation.sourceIds",
             "conversation.followCurrentDocument",
@@ -2341,6 +2346,98 @@ class WebControlsStaticTests(unittest.TestCase):
             "source_workspace_clear",
         ]:
             self.assertIn("postSourceWorkspace('" + action + "'", self.js)
+
+    def test_automatic_document_switch_waits_for_stable_identity_and_rebinds_sources(self) -> None:
+        state_body = self.js.split("var state = {", 1)[1].split("};", 1)[0]
+        render_body = self.js.split("function renderContext(ctx)", 1)[1].split(
+            "\n  function renderContextSourceLine", 1
+        )[0]
+        self.assertIn("function scheduleAutomaticDocumentSwitch", self.js)
+        schedule_body = self.js.partition("function scheduleAutomaticDocumentSwitch")[2].split(
+            "\n  function completeAutomaticDocumentSwitch", 1
+        )[0]
+        self.assertIn("function completeAutomaticDocumentSwitch", self.js)
+        complete_body = self.js.partition("function completeAutomaticDocumentSwitch")[2].split(
+            "\n  function renderContext", 1
+        )[0]
+        unavailable_body = self.js.split("function sourceWorkspaceGenerationUnavailableReason", 1)[1].split(
+            "\n  function addSourceRequestStatus", 1
+        )[0]
+        ensure_body = self.js.split("function ensureSourceWorkspaceConversation", 1)[1].split(
+            "\n  function refreshSourceWorkspace", 1
+        )[0]
+        payload_body = self.js.split("function companionPayload", 1)[1].split(
+            "\n  function parseCompanionResult", 1
+        )[0]
+
+        for marker in [
+            "stableContextDocumentKey",
+            "documentSwitchPending",
+            "documentSwitchDebounceTimer",
+            "pendingDocumentSwitch",
+        ]:
+            self.assertIn(marker, state_body)
+        for marker in [
+            "DOCUMENT_SWITCH_DEBOUNCE_MS",
+            "window.clearTimeout",
+            "window.setTimeout",
+            "documentContextReadyForAutomaticSwitch",
+            "state.documentSwitchPending = true",
+            "sourceIds: sourceWorkspaceSelectionIds()",
+            "followCurrentDocument: state.followCurrentDocument",
+        ]:
+            self.assertIn(marker, schedule_body)
+        self.assertNotIn("requestNewConversation", schedule_body)
+        self.assertIn("scheduleAutomaticDocumentSwitch", render_body)
+        self.assertNotIn("resetConversationForDocumentChange(state.context)", render_body)
+        self.assertNotIn("syncFollowCurrentDocumentMembership(previousDocumentKey, docKey)", render_body)
+        for marker in [
+            "automaticDocumentSwitch: true",
+            "sourceIds: pending.sourceIds",
+            "followCurrentDocument: pending.followCurrentDocument",
+            "requestNewConversation",
+            "saveSourceWorkspaceSelection(false",
+            "validateSavedSourceWorkspace",
+            "pending.contextDocumentKey === state.contextDocumentKey",
+        ]:
+            self.assertIn(marker, complete_body)
+        self.assertIn("state.documentSwitchPending", unavailable_body)
+        self.assertIn("payload.automaticDocumentSwitch === true", payload_body)
+        self.assertIn("delete payload.sourceIds", payload_body)
+        for marker in [
+            "state.sourceWorkspaceConversationCreateInFlight",
+            "state.sourceWorkspaceConversationCreateCallbacks.push(done)",
+            "state.sourceWorkspaceConversationCreateCallbacks.slice()",
+        ]:
+            self.assertIn(marker, ensure_body)
+
+    def test_source_workspace_page_supports_ordered_multi_file_binary_uploads(self) -> None:
+        for marker in [
+            'id="sourceWorkspaceAddFilesButton"',
+            'id="sourceWorkspaceFileInput"',
+            'type="file"',
+            'multiple',
+            'id="sourceWorkspaceUploadProgress"',
+            'id="sourceWorkspaceUploadErrors"',
+        ]:
+            self.assertIn(marker, self.html)
+        for marker in [
+            "MAX_SOURCE_WORKSPACE_UPLOAD_FILES = 20",
+            "MAX_SOURCE_WORKSPACE_UPLOAD_BYTES = 20000000",
+            "function uploadSourceWorkspaceFiles",
+            "readAsArrayBuffer",
+            "fileContentBase64",
+            "upload_file",
+            "正在上传 ",
+            "sourceWorkspaceUploadProgress",
+            "sourceWorkspaceUploadErrors",
+            "successfulUploadIds",
+            "metadata.uploadId",
+            "refreshSourceWorkspace(false",
+            "saveSourceWorkspaceSelection(false",
+            "validateSavedSourceWorkspace",
+        ]:
+            self.assertIn(marker, self.js)
 
     def test_parity_matrix_document_tracks_builtin_ai_chat_requirements(self) -> None:
         doc = (Path(__file__).resolve().parents[1] / "docs/MN4_AI_CHAT_PARITY.md").read_text(encoding="utf-8")

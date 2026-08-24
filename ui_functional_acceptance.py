@@ -501,6 +501,7 @@ BUTTON_COVERAGE_FORM_OR_DESTRUCTIVE_BUTTONS = [
 BUTTON_COVERAGE_FILE_PICKER_BUTTONS = [
     "pdfCacheFileBannerButton",
     "pdfCacheFileButton",
+    "sourceWorkspaceAddFilesButton",
 ]
 
 BUTTON_COVERAGE_CLOSE_ONLY_BUTTONS = [

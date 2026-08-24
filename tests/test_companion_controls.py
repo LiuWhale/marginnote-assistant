@@ -6821,6 +6821,116 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(Path(artifact["textPath"]), source_path.resolve())
             self.assertEqual(artifact["error"], "")
 
+    def test_upload_file_accepts_strict_base64_binary_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            content = b"\x89PNG\r\n\x1a\n\x00binary-image\xff"
+
+            result = companion.handle_action(
+                {
+                    "action": "upload_file",
+                    "fileName": "diagram.png",
+                    "fileContentBase64": base64.b64encode(content).decode("ascii"),
+                }
+            )
+
+            self.assertTrue(result["ok"], result)
+            target = Path(result["file"]["path"])
+            self.assertEqual(target.read_bytes(), content)
+            self.assertEqual(result["file"]["size"], len(content))
+            self.assertEqual(result["file"]["name"], "diagram.png")
+
+    def test_upload_file_base64_rejects_ambiguous_unsafe_or_oversized_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.UPLOAD_MAX_BYTES = 4
+            cases = [
+                {"fileName": "bad.bin", "fileContentBase64": "%%%"},
+                {"fileName": "data.png", "fileContentBase64": "data:image/png;base64,QUJD"},
+                {"fileName": "../escape.png", "fileContentBase64": base64.b64encode(b"ok").decode("ascii")},
+                {"fileName": "large.bin", "fileContentBase64": base64.b64encode(b"12345").decode("ascii")},
+            ]
+
+            results = [companion.handle_action({"action": "upload_file", **case}) for case in cases]
+
+            self.assertTrue(all(not result["ok"] for result in results), results)
+            self.assertIn("base64", results[0]["message"])
+            self.assertIn("data URL", results[1]["message"])
+            self.assertIn("文件名", results[2]["message"])
+            self.assertIn("超过", results[3]["message"])
+            self.assertEqual(companion.uploaded_files(), [])
+
+    def test_upload_file_partial_batch_failure_preserves_successful_binary_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            first_bytes = b"PK\x03\x04presentation-bytes"
+
+            first = companion.handle_action(
+                {
+                    "action": "upload_file",
+                    "fileName": "slides.pptx",
+                    "fileContentBase64": base64.b64encode(first_bytes).decode("ascii"),
+                }
+            )
+            second = companion.handle_action(
+                {
+                    "action": "upload_file",
+                    "fileName": "broken.docx",
+                    "fileContentBase64": "not valid base64",
+                }
+            )
+
+            self.assertTrue(first["ok"], first)
+            self.assertFalse(second["ok"], second)
+            files = companion.uploaded_files()
+            self.assertEqual([item["id"] for item in files], [first["file"]["id"]])
+            self.assertEqual(Path(files[0]["path"]).read_bytes(), first_bytes)
+
+    def test_source_text_artifact_allows_supported_binary_originals_without_utf8_decode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            for name, content in [
+                ("paper.docx", b"PK\x03\x04docx"),
+                ("talk.pptx", b"PK\x03\x04pptx"),
+                ("figure.png", b"\x89PNG\r\n\x1a\n"),
+            ]:
+                path = root / name
+                path.write_bytes(content)
+                artifact = companion.source_text_artifact(
+                    {"id": "upload:" + name, "kind": "upload", "title": name, "path": str(path)}
+                )
+                self.assertEqual(artifact["error"], "", artifact)
+                self.assertEqual(artifact["textPath"], "")
+
+    def test_automatic_document_conversation_persists_explicit_source_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            payload = {
+                "action": "conversation_new",
+                "automaticDocumentSwitch": True,
+                "topicid": "TOPIC-STABLE",
+                "bookmd5": "BOOK-STABLE",
+                "contextDocumentKey": "TOPIC-STABLE|BOOK-STABLE|/papers/stable.pdf",
+                "documentTitle": "Stable.pdf",
+                "sourceIds": ["upload:one", "upload:two", "upload:three"],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": "",
+            }
+
+            result = companion.handle_action(payload)
+
+            self.assertTrue(result["ok"], result)
+            conversation = result["conversation"]
+            saved = json.loads(
+                (companion.SESSIONS_DIR / f"{conversation['sessionId']}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved["topicid"], "TOPIC-STABLE")
+            self.assertEqual(saved["bookmd5"], "BOOK-STABLE")
+            self.assertEqual(saved["contextDocumentKey"], payload["contextDocumentKey"])
+            self.assertEqual(saved["sourceIds"], payload["sourceIds"])
+            self.assertFalse(saved["followCurrentDocument"])
+
     def test_notebook_study_program_does_not_treat_missing_upload_as_readable_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

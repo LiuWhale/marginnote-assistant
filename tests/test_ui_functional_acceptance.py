@@ -81,6 +81,7 @@ class UiFunctionalAcceptanceTests(unittest.TestCase):
         evidence = check["evidence"]
         self.assertIn("sourceWorkspaceButton", evidence["interactionButtons"])
         self.assertIn("sourceWorkspaceBackButton", evidence["interactionButtons"])
+        self.assertIn("sourceWorkspaceAddFilesButton", evidence["filePickerButtons"])
         self.assertIn("sourceWorkspaceValidateButton", evidence["panelControlButtons"])
         self.assertIn("sourceWorkspaceDoneButton", evidence["panelControlButtons"])
         self.assertIn("sourceWorkspaceClearButton", evidence["formOrDestructiveButtons"])

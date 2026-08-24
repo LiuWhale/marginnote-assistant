@@ -75,6 +75,16 @@
     sourceWorkspaceCurrentDocumentIds: [],
     sourceWorkspaceRequestToken: 0,
     newConversationRequestToken: 0,
+    stableContextDocumentKey: '',
+    documentSwitchPending: false,
+    documentSwitchDebounceTimer: null,
+    documentSwitchToken: 0,
+    pendingDocumentSwitch: null,
+    documentSwitchCommitting: false,
+    sourceWorkspaceUploadInFlight: false,
+    sourceWorkspaceUploadToken: 0,
+    sourceWorkspaceConversationCreateInFlight: false,
+    sourceWorkspaceConversationCreateCallbacks: [],
     conversationHistoryScope: 'document',
     conversations: [],
     notebookWorkspace: {schema: 'codex.mn.notebookWorkspace.v1', available: false},
@@ -119,6 +129,9 @@
     activeWorkbenchPane: 'object'
   };
   var MAIN_PINNED_BUTTON_LIMIT = 4;
+  var DOCUMENT_SWITCH_DEBOUNCE_MS = 450;
+  var MAX_SOURCE_WORKSPACE_UPLOAD_FILES = 20;
+  var MAX_SOURCE_WORKSPACE_UPLOAD_BYTES = 20000000;
   var requiredControlIds = [
     'aiChatShell',
     'knowledgeOsContractPanel',
@@ -354,6 +367,10 @@
     'sourceWorkspacePage',
     'sourceWorkspaceBackButton',
     'sourceWorkspaceFollowCurrentDocument',
+    'sourceWorkspaceAddFilesButton',
+    'sourceWorkspaceFileInput',
+    'sourceWorkspaceUploadProgress',
+    'sourceWorkspaceUploadErrors',
     'sourceWorkspaceCurrentDocumentList',
     'sourceWorkspaceNotebookList',
     'sourceWorkspaceUploadList',
@@ -2338,14 +2355,14 @@
       identity.contextDocumentKey === String(state.contextDocumentKey || '');
   }
 
-  function requestNewConversation(done) {
+  function requestNewConversation(done, extra) {
     state.newConversationRequestToken += 1;
     var requestIdentity = {
       token: state.newConversationRequestToken,
       conversationId: String(state.conversationId || ''),
       contextDocumentKey: String(state.contextDocumentKey || '')
     };
-    postCompanion('conversation_new', {}, function(result) {
+    postCompanion('conversation_new', extra || {}, function(result) {
       if (!newConversationRequestIsCurrent(requestIdentity)) return;
       if (done) done(result || {});
     }, {showReply: false});
@@ -2379,7 +2396,16 @@
       done();
       return;
     }
+    if (state.sourceWorkspaceConversationCreateInFlight) {
+      state.sourceWorkspaceConversationCreateCallbacks.push(done);
+      return;
+    }
+    state.sourceWorkspaceConversationCreateInFlight = true;
+    state.sourceWorkspaceConversationCreateCallbacks = [done];
     requestNewConversation(function(result) {
+      var callbacks = state.sourceWorkspaceConversationCreateCallbacks.slice();
+      state.sourceWorkspaceConversationCreateCallbacks = [];
+      state.sourceWorkspaceConversationCreateInFlight = false;
       if (!result || !result.ok) {
         state.sourceWorkspaceInFlight = false;
         setSourceWorkspaceStatus('error', '无法创建资料对话');
@@ -2387,7 +2413,7 @@
         return;
       }
       initializeNewConversationState(result.conversation || {});
-      done();
+      for (var i = 0; i < callbacks.length; i++) callbacks[i]();
     });
   }
 
@@ -2409,26 +2435,35 @@
           saveSourceWorkspaceSelection(false);
           return;
         }
-        if (result && result.ok && options.after) options.after(result || {});
+        if (result && (result.ok || options.allowInvalidWorkspace) && options.after) options.after(result || {});
       });
+    });
+  }
+
+  function validateSavedSourceWorkspace(done) {
+    if (!sourceWorkspaceSelectionIds().length) {
+      if (done) done({ok: true, empty: true});
+      return;
+    }
+    state.sourceWorkspaceInFlight = true;
+    setSourceWorkspaceStatus('warning', '正在验证资料...');
+    postSourceWorkspace('source_workspace_validate', {
+      conversationId: state.conversationId,
+      sourceIds: sourceWorkspaceSelectionIds(),
+      followCurrentDocument: state.followCurrentDocument,
+      sourceWorkspaceRevision: state.sourceWorkspace.revision || ''
+    }, function(result) {
+      state.sourceWorkspaceInFlight = false;
+      applySourceWorkspaceResult(result || {});
+      if (!result || !result.ok) addFailureMessage('验证资料失败', result);
+      if (done) done(result || {});
     });
   }
 
   function validateSourceWorkspace() {
     saveSourceWorkspaceSelection(false, function(saved) {
-      if (!saved || !saved.ok || !sourceWorkspaceSelectionIds().length) return;
-      state.sourceWorkspaceInFlight = true;
-      setSourceWorkspaceStatus('warning', '正在验证资料...');
-      postSourceWorkspace('source_workspace_validate', {
-        conversationId: state.conversationId,
-        sourceIds: sourceWorkspaceSelectionIds(),
-        followCurrentDocument: state.followCurrentDocument,
-        sourceWorkspaceRevision: state.sourceWorkspace.revision || ''
-      }, function(result) {
-        state.sourceWorkspaceInFlight = false;
-        applySourceWorkspaceResult(result || {});
-        if (!result || !result.ok) addFailureMessage('验证资料失败', result);
-      });
+      if (!saved || !saved.ok) return;
+      validateSavedSourceWorkspace();
     });
   }
 
@@ -2450,6 +2485,145 @@
     });
   }
 
+  function renderSourceWorkspaceUploadStatus(text, errors) {
+    setText('sourceWorkspaceUploadProgress', text || '可一次添加最多 20 个文件，每个不超过 20 MB。');
+    var target = byId('sourceWorkspaceUploadErrors');
+    if (!target) return;
+    errors = errors || [];
+    target.className = 'source-workspace-upload-errors' + (errors.length ? '' : ' hidden');
+    target.textContent = errors.join('\n');
+  }
+
+  function sourceWorkspaceArrayBufferBase64(buffer) {
+    var bytes = new Uint8Array(buffer || new ArrayBuffer(0));
+    var chunks = [];
+    var chunkSize = 0x8000;
+    for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+      chunks.push(String.fromCharCode.apply(null, bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))));
+    }
+    return window.btoa(chunks.join(''));
+  }
+
+  function readSourceWorkspaceFile(file, done) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      try {
+        done(null, sourceWorkspaceArrayBufferBase64(reader.result));
+      } catch (err) {
+        done(err || new Error('文件编码失败'));
+      }
+    };
+    reader.onerror = function() {
+      done(reader.error || new Error('文件读取失败'));
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function uploadSourceWorkspaceFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    var input = byId('sourceWorkspaceFileInput');
+    if (input) input.value = '';
+    if (!files.length) return;
+    if (files.length > MAX_SOURCE_WORKSPACE_UPLOAD_FILES) {
+      renderSourceWorkspaceUploadStatus('未开始上传。', ['一次最多选择 20 个文件；本次选择了 ' + files.length + ' 个。']);
+      return;
+    }
+    if (!state.conversationId) {
+      ensureSourceWorkspaceConversation(function() {
+        uploadSourceWorkspaceFiles(files);
+      });
+      return;
+    }
+    state.sourceWorkspaceUploadToken += 1;
+    var uploadToken = state.sourceWorkspaceUploadToken;
+    var originConversationId = String(state.conversationId || '');
+    var originDocumentKey = String(state.contextDocumentKey || '');
+    var errors = [];
+    var successfulUploadIds = [];
+    var addButton = byId('sourceWorkspaceAddFilesButton');
+    state.sourceWorkspaceUploadInFlight = true;
+    if (addButton) addButton.disabled = true;
+    updateActionAvailability();
+
+    function finishUploads() {
+      if (uploadToken !== state.sourceWorkspaceUploadToken) return;
+      state.sourceWorkspaceUploadInFlight = false;
+      if (addButton) addButton.disabled = false;
+      renderSourceWorkspaceUploadStatus(
+        '上传完成：成功 ' + successfulUploadIds.length + '/' + files.length + (errors.length ? '，失败 ' + errors.length : '') + '。',
+        errors
+      );
+      updateActionAvailability();
+      if (!successfulUploadIds.length) return;
+      if (originConversationId !== String(state.conversationId || '') || originDocumentKey !== String(state.contextDocumentKey || '')) {
+        errors.push('文件已上传，但对话或当前文件已切换，未自动加入当前资料。');
+        renderSourceWorkspaceUploadStatus('上传完成，未修改当前资料。', errors);
+        return;
+      }
+      refreshSourceWorkspace(false, {
+        allowInvalidWorkspace: true,
+        after: function() {
+          for (var successIndex = 0; successIndex < successfulUploadIds.length; successIndex++) {
+            for (var candidateIndex = 0; candidateIndex < state.sourceWorkspaceCandidates.length; candidateIndex++) {
+              var candidate = state.sourceWorkspaceCandidates[candidateIndex] || {};
+              var metadata = candidate.metadata || {};
+              if (String(metadata.uploadId || '') === String(successfulUploadIds[successIndex] || '')) {
+                state.sourceWorkspaceSelection[String(candidate.id || '')] = true;
+                break;
+              }
+            }
+          }
+          setSourceWorkspaceStatus('warning', '新文件已加入资料，正在保存并验证...');
+          saveSourceWorkspaceSelection(false, function(saved) {
+            if (!saved || !saved.ok) return;
+            validateSavedSourceWorkspace(function(validated) {
+              if (validated && validated.ok) {
+                renderSourceWorkspaceUploadStatus(
+                  '已添加并验证 ' + successfulUploadIds.length + ' 个文件。',
+                  errors
+                );
+              }
+            });
+          });
+        }
+      });
+    }
+
+    function uploadNext(index) {
+      if (index >= files.length) {
+        finishUploads();
+        return;
+      }
+      var file = files[index];
+      renderSourceWorkspaceUploadStatus('正在上传 ' + (index + 1) + '/' + files.length + '：' + file.name, errors);
+      if (Number(file.size || 0) > MAX_SOURCE_WORKSPACE_UPLOAD_BYTES) {
+        errors.push(file.name + '：超过 20 MB，已跳过。');
+        uploadNext(index + 1);
+        return;
+      }
+      readSourceWorkspaceFile(file, function(readError, fileContentBase64) {
+        if (readError) {
+          errors.push(file.name + '：读取失败。');
+          uploadNext(index + 1);
+          return;
+        }
+        postCompanion('upload_file', {
+          fileName: file.name,
+          fileContentBase64: fileContentBase64
+        }, function(result) {
+          if (result && result.ok && result.file && result.file.id) {
+            successfulUploadIds.push(String(result.file.id));
+          } else {
+            errors.push(file.name + '：' + (result && result.message ? result.message : '上传失败。'));
+          }
+          uploadNext(index + 1);
+        }, {showReply: false});
+      });
+    }
+
+    uploadNext(0);
+  }
+
   function openSourceWorkspacePage() {
     closeConfigPage();
     closeConversationHistory();
@@ -2461,33 +2635,6 @@
   function closeSourceWorkspacePage() {
     var page = byId('sourceWorkspacePage');
     if (page) page.className = 'config-page source-workspace-page hidden';
-  }
-
-  function syncFollowCurrentDocumentMembership(previousDocumentKey, docKey) {
-    if (!previousDocumentKey || !docKey || docKey === previousDocumentKey) return;
-    var preservedFollowCurrentDocument = state.followCurrentDocument;
-    var preservedSelection = sourceWorkspaceSelectionMap(sourceWorkspaceSelectionIds());
-    if (preservedFollowCurrentDocument) {
-      for (var i = 0; i < state.sourceWorkspaceCurrentDocumentIds.length; i++) {
-        delete preservedSelection[state.sourceWorkspaceCurrentDocumentIds[i]];
-      }
-    }
-    state.sourceWorkspaceSelection = preservedSelection;
-    state.sourceWorkspaceCurrentDocumentId = '';
-    state.sourceWorkspaceCurrentDocumentIds = [];
-    state.sourceWorkspace.revision = '';
-    state.sourceWorkspace.active = false;
-    state.sourceWorkspaceInFlight = true;
-    setSourceWorkspaceStatus('warning', '当前文件已切换，正在更新资料...');
-    refreshSourceWorkspace(false, {
-      selectionOverride: Object.keys(preservedSelection),
-      followCurrentDocumentOverride: preservedFollowCurrentDocument,
-      after: function() {
-        var current = state.followCurrentDocument ? currentDocumentSourceCandidate() : null;
-        if (current) state.sourceWorkspaceSelection[String(current.id || '')] = true;
-        saveSourceWorkspaceSelection(false);
-      }
-    });
   }
 
   function renderHistoryItems(items) {
@@ -2514,6 +2661,8 @@
     conversation = conversation || {};
     invalidateSourceWorkspaceRequests();
     state.newConversationRequestToken += 1;
+    state.sourceWorkspaceConversationCreateInFlight = false;
+    state.sourceWorkspaceConversationCreateCallbacks = [];
     state.conversationId = String(conversation.conversationId || '');
     state.sessionId = String(conversation.sessionId || '');
     if (conversation.sourceIds !== undefined) {
@@ -2662,6 +2811,10 @@
   }
 
   function newConversation() {
+    if (state.documentSwitchPending || state.documentSwitchCommitting) {
+      addMessage('assistant', '正在切换当前文件，请等待资料重建完成后再新建对话。');
+      return;
+    }
     requestNewConversation(function(result) {
       if (!result || !result.ok) {
         addFailureMessage('新对话失败', result);
@@ -2677,6 +2830,10 @@
   function loadConversation(item) {
     item = item || {};
     if (!item.sessionId) return;
+    if (state.documentSwitchPending || state.documentSwitchCommitting) {
+      addMessage('assistant', '正在切换当前文件，请等待资料重建完成后再打开历史对话。');
+      return;
+    }
     var payload = conversationHistoryPayload();
     payload.sessionId = item.sessionId;
     postCompanion('conversation_load', payload, function(result) {
@@ -2789,9 +2946,14 @@
     if (action === 'conversation_new') {
       delete payload.conversationId;
       delete payload.sessionId;
-      delete payload.sourceIds;
       delete payload.sourceWorkspaceRevision;
-      payload.followCurrentDocument = true;
+      if (payload.automaticDocumentSwitch === true) {
+        payload.sourceIds = Array.isArray(payload.sourceIds) ? payload.sourceIds.slice() : [];
+        payload.followCurrentDocument = !!payload.followCurrentDocument;
+      } else {
+        delete payload.sourceIds;
+        payload.followCurrentDocument = true;
+      }
     } else {
       if (!payload.conversationId && state.conversationId) payload.conversationId = state.conversationId;
       if (!payload.sessionId && state.sessionId) payload.sessionId = state.sessionId;
@@ -7861,6 +8023,10 @@
   }
 
   function sourceWorkspaceGenerationUnavailableReason() {
+    if (state.documentSwitchPending || state.documentSwitchCommitting) {
+      return '正在等待新文件上下文稳定并重建资料，完成前不能发送。';
+    }
+    if (state.sourceWorkspaceUploadInFlight) return '资料文件正在上传，完成并验证前不能发送。';
     var sourceIds = sourceWorkspaceSelectionIds();
     if (!sourceIds.length) return '';
     if (state.sourceWorkspaceInFlight) return '资料仍在验证，请等待验证完成后再发送。';
@@ -11261,6 +11427,8 @@
   function resetConversationForDocumentChange(ctx) {
     invalidateSourceWorkspaceRequests();
     state.newConversationRequestToken += 1;
+    state.sourceWorkspaceConversationCreateInFlight = false;
+    state.sourceWorkspaceConversationCreateCallbacks = [];
     state.conversationId = '';
     state.sessionId = '';
     state.conversations = [];
@@ -11279,15 +11447,134 @@
     closeConversationHistory();
   }
 
+  function documentContextReadyForAutomaticSwitch(ctx, docKey) {
+    ctx = ctx || {};
+    return !!(
+      docKey &&
+      String(ctx.topicid || ctx.notebookid || '') &&
+      String(ctx.bookmd5 || ctx.docmd5 || '') &&
+      String(ctx.documentTitle || ctx.documentFileName || ctx.pdfPath || ctx.documentPath || '')
+    );
+  }
+
+  function cancelAutomaticDocumentSwitch() {
+    if (state.documentSwitchCommitting) return;
+    if (state.documentSwitchDebounceTimer) window.clearTimeout(state.documentSwitchDebounceTimer);
+    state.documentSwitchDebounceTimer = null;
+    state.documentSwitchToken += 1;
+    state.documentSwitchPending = false;
+    state.pendingDocumentSwitch = null;
+    state.contextDocumentKey = state.stableContextDocumentKey || state.contextDocumentKey;
+    updateActionAvailability();
+  }
+
+  function scheduleAutomaticDocumentSwitch(docKey) {
+    if (state.documentSwitchCommitting) return;
+    if (!state.pendingDocumentSwitch) {
+      state.pendingDocumentSwitch = {
+        previousDocumentKey: state.stableContextDocumentKey || state.contextDocumentKey,
+        contextDocumentKey: docKey,
+        sourceIds: sourceWorkspaceSelectionIds(),
+        followCurrentDocument: state.followCurrentDocument,
+        currentDocumentIds: state.sourceWorkspaceCurrentDocumentIds.slice()
+      };
+    } else {
+      state.pendingDocumentSwitch.contextDocumentKey = docKey;
+    }
+    state.contextDocumentKey = docKey;
+    state.documentSwitchPending = true;
+    invalidateSourceWorkspaceRequests();
+    setSourceWorkspaceStatus('warning', '正在等待新文件上下文稳定...');
+    updateActionAvailability();
+    if (state.documentSwitchDebounceTimer) window.clearTimeout(state.documentSwitchDebounceTimer);
+    state.documentSwitchDebounceTimer = null;
+    if (!documentContextReadyForAutomaticSwitch(state.context, docKey)) return;
+    state.documentSwitchToken += 1;
+    var switchToken = state.documentSwitchToken;
+    state.documentSwitchDebounceTimer = window.setTimeout(function() {
+      if (switchToken !== state.documentSwitchToken) return;
+      completeAutomaticDocumentSwitch(state.pendingDocumentSwitch);
+    }, DOCUMENT_SWITCH_DEBOUNCE_MS);
+  }
+
+  function completeAutomaticDocumentSwitch(pending) {
+    pending = pending || {};
+    if (
+      !state.documentSwitchPending ||
+      state.documentSwitchCommitting ||
+      !(pending.contextDocumentKey === state.contextDocumentKey) ||
+      !documentContextReadyForAutomaticSwitch(state.context, pending.contextDocumentKey)
+    ) return;
+    state.documentSwitchDebounceTimer = null;
+    state.documentSwitchCommitting = true;
+    var reboundSelection = sourceWorkspaceSelectionMap(pending.sourceIds || []);
+    if (pending.followCurrentDocument) {
+      var oldCurrentIds = pending.currentDocumentIds || [];
+      for (var i = 0; i < oldCurrentIds.length; i++) delete reboundSelection[oldCurrentIds[i]];
+    }
+    resetConversationForDocumentChange(state.context);
+    state.sourceWorkspaceSelection = reboundSelection;
+    state.followCurrentDocument = !!pending.followCurrentDocument;
+    state.sourceWorkspace.revision = '';
+    state.sourceWorkspace.active = false;
+    requestNewConversation(function(result) {
+      if (!result || !result.ok) {
+        state.documentSwitchCommitting = false;
+        setSourceWorkspaceStatus('error', '新文件对话创建失败，发送已暂停');
+        addFailureMessage('切换文件失败', result);
+        updateActionAvailability();
+        return;
+      }
+      initializeNewConversationState(result.conversation || {});
+      state.sourceWorkspaceSelection = reboundSelection;
+      state.followCurrentDocument = !!pending.followCurrentDocument;
+      refreshSourceWorkspace(false, {
+        selectionOverride: Object.keys(reboundSelection),
+        followCurrentDocumentOverride: pending.followCurrentDocument,
+        allowInvalidWorkspace: true,
+        after: function() {
+          var current = state.followCurrentDocument ? currentDocumentSourceCandidate() : null;
+          if (current) state.sourceWorkspaceSelection[String(current.id || '')] = true;
+          saveSourceWorkspaceSelection(false, function(saved) {
+            if (!saved || !saved.ok) {
+              state.documentSwitchCommitting = false;
+              updateActionAvailability();
+              return;
+            }
+            validateSavedSourceWorkspace(function(validated) {
+              state.documentSwitchCommitting = false;
+              if (!validated || !validated.ok) {
+                updateActionAvailability();
+                return;
+              }
+              state.stableContextDocumentKey = pending.contextDocumentKey;
+              state.documentSwitchPending = false;
+              state.pendingDocumentSwitch = null;
+              updateActionAvailability();
+            });
+          });
+        }
+      });
+    }, {
+      automaticDocumentSwitch: true,
+      sourceIds: pending.sourceIds,
+      followCurrentDocument: pending.followCurrentDocument,
+      sourceWorkspaceRevision: ''
+    });
+  }
+
   function renderContext(ctx) {
-    var previousDocumentKey = state.contextDocumentKey;
     state.context = repairContextPayload(ctx || {});
     var docKey = String(state.context.contextDocumentKey || fallbackContextDocumentKey(state.context));
-    if (docKey && previousDocumentKey && docKey !== previousDocumentKey) {
-      resetConversationForDocumentChange(state.context);
+    if (!state.stableContextDocumentKey) {
+      state.contextDocumentKey = docKey;
+      if (documentContextReadyForAutomaticSwitch(state.context, docKey)) state.stableContextDocumentKey = docKey;
+    } else if (docKey && docKey !== state.stableContextDocumentKey) {
+      scheduleAutomaticDocumentSwitch(docKey);
+    } else {
+      state.contextDocumentKey = docKey || state.stableContextDocumentKey;
+      if (state.documentSwitchPending) cancelAutomaticDocumentSwitch();
     }
-    if (docKey) state.contextDocumentKey = docKey;
-    if (docKey !== previousDocumentKey) syncFollowCurrentDocumentMembership(previousDocumentKey, docKey);
     renderContextSourceLine(state.context);
     var connected = state.context.topicid || state.context.notebookid || state.context.docmd5 || state.context.bookmd5;
     setText('contextLine', connected ? '已连接 MarginNote 上下文' : '等待 MarginNote 上下文');
@@ -11570,6 +11857,16 @@
     bindButton('sourceWorkspaceClearButton', function() { clearSourceWorkspace(false); });
     bindButton('sourceWorkspaceValidateButton', validateSourceWorkspace);
     bindButton('sourceWorkspaceDoneButton', function() { saveSourceWorkspaceSelection(true); });
+    bindButton('sourceWorkspaceAddFilesButton', function() {
+      var input = byId('sourceWorkspaceFileInput');
+      if (input) input.click();
+    });
+    var sourceWorkspaceFileInput = byId('sourceWorkspaceFileInput');
+    if (sourceWorkspaceFileInput) {
+      sourceWorkspaceFileInput.addEventListener('change', function(ev) {
+        uploadSourceWorkspaceFiles(ev.currentTarget.files || []);
+      });
+    }
     var sourceWorkspaceFollow = byId('sourceWorkspaceFollowCurrentDocument');
     if (sourceWorkspaceFollow) {
       sourceWorkspaceFollow.addEventListener('change', function(ev) {

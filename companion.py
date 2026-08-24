@@ -89,6 +89,9 @@ SETTINGS_PATH = ROOT / "companion_settings.json"
 GOAL_PATH = ROOT / "goal.json"
 UPLOAD_DIR = ROOT / "uploads"
 UPLOAD_INDEX_PATH = UPLOAD_DIR / "index.json"
+UPLOAD_MAX_BYTES = 20_000_000
+UPLOAD_TEXT_MAX_BYTES = 2_000_000
+UPLOAD_INDEX_MAX_FILES = 200
 PDF_CACHE_DIR = UPLOAD_DIR / "pdf-cache"
 PDF_CACHE_INDEX_PATH = PDF_CACHE_DIR / "index.json"
 PDF_TEXT_CACHE_DIR = PDF_CACHE_DIR / "text"
@@ -98,6 +101,22 @@ WEB_BUSY_PATH = CONTROL_DIR / "web-busy.json"
 RUN_STATE_PATH = CONTROL_DIR / "current-run.json"
 MINDMAP_TARGETS_PATH = CONTROL_DIR / "mindmap-targets.json"
 SOURCE_TEXT_DIR = CONTROL_DIR / "source-text"
+SOURCE_WORKSPACE_DIRECT_BINARY_EXTENSIONS = {
+    ".docx",
+    ".pptx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
+    ".ico",
+}
 MINDMAP_TREES_DIR = CONTROL_DIR / "mindmap-trees"
 NOTEBOOK_RUNBOOK_PREFLIGHT_RUNS_PATH = CONTROL_DIR / "notebook-runbook-preflight-runs.json"
 OBJECT_GRAPH_RELATIONS_PATH = ROOT / "object-graph-relations.json"
@@ -2379,6 +2398,8 @@ def source_text_artifact(source: dict[str, Any]) -> dict[str, Any]:
     if path is None:
         result["error"] = "source path is not a readable regular file"
         return result
+    if path.suffix.lower() in SOURCE_WORKSPACE_DIRECT_BINARY_EXTENSIONS:
+        return result
     if path.suffix.lower() != ".pdf":
         try:
             path.read_text(encoding="utf-8")
@@ -3277,7 +3298,7 @@ def uploaded_files() -> list[dict[str, Any]]:
     if not isinstance(files, list):
         return []
     clean: list[dict[str, Any]] = []
-    for item in files[-20:]:
+    for item in files[-UPLOAD_INDEX_MAX_FILES:]:
         if not isinstance(item, dict):
             continue
         clean.append(
@@ -3293,7 +3314,7 @@ def uploaded_files() -> list[dict[str, Any]]:
 
 
 def save_uploaded_files(files: list[dict[str, Any]]) -> None:
-    write_json_file(UPLOAD_INDEX_PATH, files[-20:])
+    write_json_file(UPLOAD_INDEX_PATH, files[-UPLOAD_INDEX_MAX_FILES:])
 
 
 def safe_upload_name(name: str) -> str:
@@ -3708,25 +3729,60 @@ def cache_pdf_from_source_path(payload: dict[str, Any], source_pdf: Path) -> dic
 
 def register_upload(payload: dict[str, Any]) -> dict[str, Any]:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    name = safe_upload_name(str(payload.get("fileName") or payload.get("name") or "upload.txt"))
+    raw_name = str(payload.get("fileName") or payload.get("name") or "upload.txt")
+    base64_supplied = "fileContentBase64" in payload
+    if base64_supplied:
+        normalized_name = raw_name.replace("\\", "/")
+        if (
+            not raw_name.strip()
+            or "\x00" in raw_name
+            or "/" in normalized_name
+            or normalized_name in {".", ".."}
+        ):
+            return {"ok": False, "message": "上传文件名不安全，已拒绝。"}
+    name = safe_upload_name(raw_name)
     content = payload.get("fileContent")
+    content_base64 = payload.get("fileContentBase64")
     source_path = str(payload.get("filePath") or "").strip()
     upload_id = hashlib.sha256(f"{name}|{time.time()}|{uuid.uuid4()}".encode("utf-8")).hexdigest()[:16]
     target = UPLOAD_DIR / f"{upload_id}-{name}"
-    if isinstance(content, str):
+    if base64_supplied:
+        if not isinstance(content_base64, str):
+            return {"ok": False, "message": "fileContentBase64 必须是 base64 字符串。"}
+        if content_base64.lower().startswith("data:"):
+            return {"ok": False, "message": "fileContentBase64 不接受 data URL，请只发送原始 base64。"}
+        max_base64_chars = ((UPLOAD_MAX_BYTES + 2) // 3) * 4
+        if len(content_base64) > max_base64_chars:
+            return {"ok": False, "message": "上传文件超过 20 MB，已拒绝。"}
+        try:
+            data = base64.b64decode(content_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            return {"ok": False, "message": f"fileContentBase64 base64 无效：{exc}"}
+        if len(data) > UPLOAD_MAX_BYTES:
+            return {"ok": False, "message": "上传文件超过 20 MB，已拒绝。"}
+        temporary_target = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary_target.write_bytes(data)
+            os.replace(temporary_target, target)
+        finally:
+            try:
+                temporary_target.unlink()
+            except FileNotFoundError:
+                pass
+    elif isinstance(content, str):
         data = content.encode("utf-8")
-        if len(data) > 2_000_000:
+        if len(data) > UPLOAD_TEXT_MAX_BYTES:
             return {"ok": False, "message": "上传文本超过 2 MB，已拒绝。"}
         target.write_bytes(data)
     elif source_path:
         src = Path(source_path).expanduser()
         if not src.exists() or not src.is_file():
             return {"ok": False, "message": f"上传文件不存在：{src}"}
-        if src.stat().st_size > 20_000_000:
+        if src.stat().st_size > UPLOAD_MAX_BYTES:
             return {"ok": False, "message": "上传文件超过 20 MB，已拒绝。"}
         shutil.copy2(src, target)
     else:
-        return {"ok": False, "message": "缺少 fileContent 或 filePath。"}
+        return {"ok": False, "message": "缺少 fileContent、fileContentBase64 或 filePath。"}
     record = {
         "id": upload_id,
         "name": name,

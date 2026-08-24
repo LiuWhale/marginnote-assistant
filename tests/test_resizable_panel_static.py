@@ -672,6 +672,18 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertNotIn("width: 42px", minimum_css)
         self.assertNotIn("width: 46px", minimum_css)
 
+    def test_source_workspace_multi_file_upload_status_wraps_at_minimum_width(self) -> None:
+        self.assertIn(".source-workspace-add-files {", self.css)
+        add_body = self.css.partition(".source-workspace-add-files {")[2].split("}", 1)[0]
+        progress_body = self.css.split(".source-workspace-upload-progress {", 1)[1].split("}", 1)[0]
+        errors_body = self.css.split(".source-workspace-upload-errors {", 1)[1].split("}", 1)[0]
+
+        self.assertIn("grid-template-columns: minmax(0, 1fr) auto;", add_body)
+        self.assertIn("min-width: 0;", progress_body)
+        self.assertIn("overflow-wrap: anywhere;", progress_body)
+        self.assertIn("overflow-wrap: anywhere;", errors_body)
+        self.assertNotIn("width:", add_body)
+
     def test_reply_mindmap_source_metadata_survives_direct_and_queued_execution(self) -> None:
         next_action_body = self.app.split("function runAgentNextAction", 1)[1].split(
             "\n  function buildReplyAgentActions", 1

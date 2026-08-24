@@ -7659,6 +7659,49 @@ button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton):
   font-size: 11px;
 }
 
+.source-workspace-add-files {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 2px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.source-workspace-add-files > div {
+  min-width: 0;
+}
+
+.source-workspace-file-input {
+  display: none;
+}
+
+.source-workspace-upload-progress {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.source-workspace-upload-errors {
+  margin-top: 5px;
+  color: var(--error);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.source-workspace-upload-errors.hidden {
+  display: none;
+}
+
+.source-workspace-add-files .small-button {
+  min-height: 32px;
+  white-space: normal;
+}
+
 .source-workspace-section {
   padding: 12px 2px;
   border-bottom: 1px solid var(--line);
