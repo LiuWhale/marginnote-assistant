@@ -158,21 +158,22 @@ def _json_write(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _workspace_owned_entries(
+def _workspace_manifest_contract(
     path: Path,
     conversation_id: str = "",
     *,
     allow_legacy_contract: bool = False,
-) -> list[Path]:
+) -> tuple[dict[str, Any], set[str], set[Path], str]:
     if not path.exists() and not path.is_symlink():
-        return []
+        raise ValueError("workspace root is missing")
     if path.is_symlink() or not path.is_dir():
         raise ValueError("workspace root is not a managed directory")
     manifest_path = path / "manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("workspace manifest is missing or not a regular file")
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_text = manifest_path.read_text(encoding="utf-8")
+        manifest = json.loads(manifest_text)
     except (OSError, ValueError) as exc:
         raise ValueError(f"workspace manifest is invalid: {exc}") from exc
     if not isinstance(manifest, dict) or manifest.get("schema") != SOURCE_WORKSPACE_SCHEMA:
@@ -197,15 +198,6 @@ def _workspace_owned_entries(
     sources = manifest.get("sources")
     if not isinstance(sources, list):
         raise ValueError("workspace manifest sources are invalid")
-
-    top_entries = {child.name for child in path.iterdir()}
-    if top_entries != {"manifest.json", "SOURCES.md", "files", "text"}:
-        raise ValueError("workspace contains unrecognized content")
-    for directory_name in ("files", "text"):
-        directory = path / directory_name
-        if directory.is_symlink() or not directory.is_dir():
-            raise ValueError(f"workspace {directory_name} is not a managed directory")
-
     expected_links: set[Path] = set()
     source_ids: set[str] = set()
     for source in sources:
@@ -259,6 +251,65 @@ def _workspace_owned_entries(
             if source.get(name_field) and str(source.get(name_field)) != relative_path.name:
                 raise ValueError("workspace manifest link name does not match its path")
             expected_links.add(relative_path)
+    if manifest_keys == MANIFEST_KEYS:
+        expected_revision = _revision(
+            str(manifest.get("conversationId") or ""),
+            sources,
+            bool(manifest.get("followCurrentDocument", True)),
+            str(manifest.get("sourcesMdSha256") or ""),
+        )
+        if str(manifest.get("revision") or "") != expected_revision:
+            raise ValueError("workspace manifest revision does not match its content")
+    return manifest, manifest_keys, expected_links, manifest_text
+
+
+def _validate_sources_file(
+    path: Path,
+    manifest: dict[str, Any],
+    manifest_keys: set[str],
+    *,
+    required: bool,
+) -> None:
+    sources_file = path / "SOURCES.md"
+    present = sources_file.exists() or sources_file.is_symlink()
+    if not present:
+        if required:
+            raise ValueError("workspace SOURCES.md is missing or not a regular file")
+        return
+    if sources_file.is_symlink() or not sources_file.is_file():
+        raise ValueError("workspace SOURCES.md is missing or not a regular file")
+    if manifest_keys != MANIFEST_KEYS:
+        return
+    try:
+        sources_text = sources_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"workspace SOURCES.md is unreadable: {exc}") from exc
+    if _sha256_text(sources_text) != str(manifest.get("sourcesMdSha256") or ""):
+        raise ValueError("workspace SOURCES.md sha256 does not match the manifest")
+    if sources_text != _sources_markdown(manifest):
+        raise ValueError("workspace SOURCES.md content does not match the manifest")
+
+
+def _workspace_owned_entries(
+    path: Path,
+    conversation_id: str = "",
+    *,
+    allow_legacy_contract: bool = False,
+) -> list[Path]:
+    if not path.exists() and not path.is_symlink():
+        return []
+    manifest, manifest_keys, expected_links, _ = _workspace_manifest_contract(
+        path,
+        conversation_id,
+        allow_legacy_contract=allow_legacy_contract,
+    )
+    top_entries = {child.name for child in path.iterdir()}
+    if top_entries != {"manifest.json", "SOURCES.md", "files", "text"}:
+        raise ValueError("workspace contains unrecognized content")
+    for directory_name in ("files", "text"):
+        directory = path / directory_name
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError(f"workspace {directory_name} is not a managed directory")
     actual_links = {
         Path(directory_name) / child.name
         for directory_name in ("files", "text")
@@ -269,43 +320,104 @@ def _workspace_owned_entries(
     for relative in expected_links:
         if not (path / relative).is_symlink():
             raise ValueError("workspace contains a non-symlink managed link")
-    sources_file = path / "SOURCES.md"
-    if sources_file.is_symlink() or not sources_file.is_file():
-        raise ValueError("workspace SOURCES.md is missing or not a regular file")
-    if manifest_keys == MANIFEST_KEYS:
-        try:
-            sources_text = sources_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise ValueError(f"workspace SOURCES.md is unreadable: {exc}") from exc
-        if _sha256_text(sources_text) != str(manifest.get("sourcesMdSha256") or ""):
-            raise ValueError("workspace SOURCES.md sha256 does not match the manifest")
-        if sources_text != _sources_markdown(manifest):
-            raise ValueError("workspace SOURCES.md content does not match the manifest")
-        expected_revision = _revision(
-            str(manifest.get("conversationId") or ""),
-            sources,
-            bool(manifest.get("followCurrentDocument", True)),
-            str(manifest.get("sourcesMdSha256") or ""),
-        )
-        if str(manifest.get("revision") or "") != expected_revision:
-            raise ValueError("workspace manifest revision does not match its content")
-    return [manifest_path, sources_file, path / "files", path / "text", *[path / relative for relative in sorted(expected_links)]]
+    _validate_sources_file(path, manifest, manifest_keys, required=True)
+    return [
+        path / "manifest.json",
+        path / "SOURCES.md",
+        path / "files",
+        path / "text",
+        *[path / relative for relative in sorted(expected_links)],
+    ]
 
 
-def _remove_owned_tree(path: Path, conversation_id: str = "", *, allow_legacy_contract: bool = False) -> None:
-    entries = _workspace_owned_entries(
+def _workspace_cleanup_plan(
+    path: Path,
+    conversation_id: str = "",
+    *,
+    allow_legacy_contract: bool = False,
+) -> dict[str, Any] | None:
+    if not path.exists() and not path.is_symlink():
+        return None
+    manifest, manifest_keys, expected_links, manifest_text = _workspace_manifest_contract(
         path,
         conversation_id,
         allow_legacy_contract=allow_legacy_contract,
     )
-    if not entries:
+    allowed_top_entries = {"manifest.json", "SOURCES.md", "files", "text"}
+    actual_top_entries = {child.name for child in path.iterdir()}
+    if actual_top_entries - allowed_top_entries:
+        raise ValueError("workspace contains unrecognized content")
+    for directory_name in ("files", "text"):
+        directory = path / directory_name
+        present = directory.exists() or directory.is_symlink()
+        if not present:
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError(f"workspace {directory_name} is not a managed directory")
+        expected_names = {
+            relative.name for relative in expected_links if relative.parts[:1] == (directory_name,)
+        }
+        actual_names = {child.name for child in directory.iterdir()}
+        if actual_names - expected_names:
+            raise ValueError("workspace contains unrecognized content")
+        for child in directory.iterdir():
+            if not child.is_symlink():
+                raise ValueError("workspace contains a non-symlink managed link")
+    _validate_sources_file(path, manifest, manifest_keys, required=False)
+    return {
+        "manifest": manifest,
+        "manifestText": manifest_text,
+        "expectedLinks": sorted(expected_links),
+    }
+
+
+def _unlink_if_present(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
         return
-    for entry in entries:
-        if entry.is_symlink() or entry.is_file():
-            entry.unlink()
-    (path / "files").rmdir()
-    (path / "text").rmdir()
-    path.rmdir()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _rmdir_if_present(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        pass
+
+
+def _remove_owned_tree(path: Path, conversation_id: str = "", *, allow_legacy_contract: bool = False) -> None:
+    plan = _workspace_cleanup_plan(
+        path,
+        conversation_id,
+        allow_legacy_contract=allow_legacy_contract,
+    )
+    if plan is None:
+        return
+    for relative in plan["expectedLinks"]:
+        _unlink_if_present(path / relative)
+    _unlink_if_present(path / "SOURCES.md")
+    _rmdir_if_present(path / "files")
+    _rmdir_if_present(path / "text")
+    manifest_path = path / "manifest.json"
+    manifest_path.unlink()
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return
+    except OSError as remove_error:
+        try:
+            if path.exists() and not path.is_symlink() and path.is_dir():
+                with manifest_path.open("x", encoding="utf-8") as handle:
+                    handle.write(str(plan["manifestText"]))
+        except OSError as restore_error:
+            raise OSError(
+                f"workspace root cleanup failed ({remove_error}); manifest restore failed ({restore_error})"
+            ) from remove_error
+        raise
 
 
 def _normal_source(source: dict[str, Any], index: int) -> tuple[dict[str, Any] | None, list[str]]:
@@ -599,7 +711,7 @@ def clear_workspace(conversation_id: str) -> dict:
         if ownership_error:
             return {"ok": False, "errors": [ownership_error], "sourceCount": 0}
         try:
-            _workspace_owned_entries(path, str(conversation_id), allow_legacy_contract=True)
+            _workspace_cleanup_plan(path, str(conversation_id), allow_legacy_contract=True)
         except (OSError, ValueError) as exc:
             return {"ok": False, "errors": [f"workspace cleanup failed: {exc}"], "sourceCount": 0}
     try:

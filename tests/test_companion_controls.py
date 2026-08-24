@@ -1153,6 +1153,49 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertFalse(session_path.exists())
             self.assertFalse(workspace_path.exists())
 
+    def test_delete_partial_workspace_cleanup_keeps_tombstone_and_retry_completes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, _source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-DELETE-PARTIAL-CLEANUP"
+            )
+            session_path = companion.session_path(bound)
+            tombstone_path = companion.session_tombstone_path_for(session_path)
+            workspace_path = companion.source_workspace.workspace_path(bound["conversationId"])
+            source_record = initial["workspace"]["sources"][0]
+            managed_link = workspace_path / source_record["fileLink"]
+            source_target = Path(source_record["originalPath"])
+            source_bytes = source_target.read_bytes()
+            original_unlink = Path.unlink
+            failed = False
+
+            def fail_managed_link_once(path: Path, *args: Any, **kwargs: Any) -> None:
+                nonlocal failed
+                if not failed and path == managed_link:
+                    failed = True
+                    raise OSError("synthetic managed link cleanup failure")
+                original_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "unlink", fail_managed_link_once):
+                deleted = companion.delete_conversation(bound)
+
+            self.assertTrue(failed)
+            self.assertFalse(deleted["ok"], deleted)
+            self.assertEqual(deleted.get("blocked"), "session_delete_cleanup_failed")
+            self.assertTrue(deleted.get("tombstoned"))
+            self.assertTrue(tombstone_path.is_file())
+            self.assertTrue(session_path.is_file())
+            self.assertTrue(workspace_path.is_dir())
+            self.assertEqual(source_target.read_bytes(), source_bytes)
+
+            retried = companion.delete_conversation(bound)
+
+            self.assertTrue(retried["ok"], retried)
+            self.assertFalse(session_path.exists())
+            self.assertFalse(workspace_path.exists())
+            self.assertEqual(source_target.read_bytes(), source_bytes)
+
     def test_committed_tombstone_blocks_reads_and_writes_when_unlink_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

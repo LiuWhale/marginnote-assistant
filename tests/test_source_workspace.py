@@ -5,6 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import source_workspace
 
@@ -305,6 +306,139 @@ class SourceWorkspaceTests(unittest.TestCase):
         self.assertTrue(unknown.exists())
         self.assertTrue(workspace.exists())
         self.assertTrue((workspace / built["sources"][0]["fileLink"]).is_symlink())
+
+    def test_clear_workspace_retries_every_partial_deletion_stage_without_touching_targets(self):
+        stages = (
+            "file_link",
+            "text_link",
+            "sources_file",
+            "files_dir",
+            "text_dir",
+            "manifest",
+            "workspace_root",
+        )
+        for stage_index, stage in enumerate(stages, start=1):
+            with self.subTest(stage=stage):
+                conversation_id = f"CONV-CLEANUP-STAGE-{stage_index}"
+                extracted = self.root / f"stage-{stage_index}-text.txt"
+                extracted.write_text(f"extracted {stage_index}", encoding="utf-8")
+                source = self._source(
+                    f"stage-{stage_index}.pdf",
+                    f"stage-{stage_index}",
+                    extracted,
+                )
+                source_path = Path(source["path"])
+                source_bytes = source_path.read_bytes()
+                extracted_bytes = extracted.read_bytes()
+                built = source_workspace.build_workspace(conversation_id, [source], False)
+                self.assertTrue(built["ok"], built)
+                workspace = Path(built["workspacePath"])
+                record = built["sources"][0]
+                stage_paths = {
+                    "file_link": workspace / record["fileLink"],
+                    "text_link": workspace / record["textLink"],
+                    "sources_file": workspace / "SOURCES.md",
+                    "files_dir": workspace / "files",
+                    "text_dir": workspace / "text",
+                    "manifest": workspace / "manifest.json",
+                    "workspace_root": workspace,
+                }
+                fail_path = stage_paths[stage]
+                failed = False
+                original_unlink = Path.unlink
+                original_rmdir = Path.rmdir
+
+                def injected_unlink(path: Path, *args, **kwargs):
+                    nonlocal failed
+                    if not failed and stage in {"file_link", "text_link", "sources_file", "manifest"} and path == fail_path:
+                        failed = True
+                        raise OSError(f"synthetic {stage} deletion failure")
+                    return original_unlink(path, *args, **kwargs)
+
+                def injected_rmdir(path: Path, *args, **kwargs):
+                    nonlocal failed
+                    if not failed and stage in {"files_dir", "text_dir", "workspace_root"} and path == fail_path:
+                        failed = True
+                        raise OSError(f"synthetic {stage} deletion failure")
+                    return original_rmdir(path, *args, **kwargs)
+
+                with mock.patch.object(Path, "unlink", injected_unlink):
+                    with mock.patch.object(Path, "rmdir", injected_rmdir):
+                        first = source_workspace.clear_workspace(conversation_id)
+
+                self.assertTrue(failed)
+                self.assertFalse(first["ok"], first)
+                self.assertTrue((workspace / "manifest.json").is_file())
+                self.assertEqual(source_path.read_bytes(), source_bytes)
+                self.assertEqual(extracted.read_bytes(), extracted_bytes)
+
+                retried = source_workspace.clear_workspace(conversation_id)
+
+                self.assertTrue(retried["ok"], retried)
+                self.assertFalse(workspace.exists())
+                self.assertEqual(source_path.read_bytes(), source_bytes)
+                self.assertEqual(extracted.read_bytes(), extracted_bytes)
+
+    def test_partial_cleanup_retry_rejects_unexpected_entries(self):
+        source = self._source("partial-unexpected.txt", "partial-unexpected")
+        source_path = Path(source["path"])
+        original_contents = source_path.read_text(encoding="utf-8")
+        built = source_workspace.build_workspace("CONV-PARTIAL-UNEXPECTED", [source], False)
+        workspace = Path(built["workspacePath"])
+        link = workspace / built["sources"][0]["fileLink"]
+        original_unlink = Path.unlink
+        failed = False
+
+        def fail_link_once(path: Path, *args, **kwargs):
+            nonlocal failed
+            if not failed and path == link:
+                failed = True
+                raise OSError("synthetic link failure")
+            return original_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", fail_link_once):
+            first = source_workspace.clear_workspace("CONV-PARTIAL-UNEXPECTED")
+        self.assertFalse(first["ok"], first)
+        unexpected = workspace / "unexpected.txt"
+        unexpected.write_text("do not remove", encoding="utf-8")
+
+        retried = source_workspace.clear_workspace("CONV-PARTIAL-UNEXPECTED")
+
+        self.assertFalse(retried["ok"], retried)
+        self.assertTrue(unexpected.is_file())
+        self.assertTrue((workspace / "manifest.json").is_file())
+        self.assertTrue(source_path.is_file())
+        self.assertEqual(source_path.read_text(encoding="utf-8"), original_contents)
+
+    def test_cleanup_rejects_manifest_tampering_before_deleting_managed_entries(self):
+        for index, tampering in enumerate(("conversation", "unexpected_field"), start=1):
+            with self.subTest(tampering=tampering):
+                conversation_id = f"CONV-CLEANUP-MANIFEST-{index}"
+                source = self._source(f"manifest-{index}.txt", f"manifest-{index}")
+                source_path = Path(source["path"])
+                original_contents = source_path.read_text(encoding="utf-8")
+                built = source_workspace.build_workspace(conversation_id, [source], False)
+                workspace = Path(built["workspacePath"])
+                manifest_path = workspace / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if tampering == "conversation":
+                    manifest["conversationId"] = "OTHER-CONVERSATION"
+                else:
+                    manifest["unexpected"] = "blocked"
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                before_entries = {
+                    str(path.relative_to(workspace)) for path in workspace.rglob("*")
+                }
+
+                result = source_workspace.clear_workspace(conversation_id)
+
+                self.assertFalse(result["ok"], result)
+                self.assertEqual(
+                    {str(path.relative_to(workspace)) for path in workspace.rglob("*")},
+                    before_entries,
+                )
+                self.assertTrue((workspace / built["sources"][0]["fileLink"]).is_symlink())
+                self.assertEqual(source_path.read_text(encoding="utf-8"), original_contents)
 
     def test_validation_rejects_regular_file_substitution_for_declared_link(self):
         source = self._source("declared.txt", "declared")
