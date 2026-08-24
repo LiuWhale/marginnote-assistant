@@ -36,6 +36,31 @@ def load_companion(root: Path) -> Any:
 
 
 class CompanionControlsTests(unittest.TestCase):
+    def owned_session_payload(self, companion: Any, payload: dict[str, Any]) -> dict[str, Any]:
+        bound = {
+            **payload,
+            "sessionId": companion.session_path(payload).stem,
+            "sessionEpoch": companion.new_session_epoch(),
+        }
+        created = companion.save_history(bound, [], create=True)
+        self.assertIsNotNone(created)
+        return {
+            **bound,
+            "conversationId": str((created or {}).get("conversationId") or bound.get("conversationId") or ""),
+            "sessionId": str((created or {}).get("sessionId") or bound["sessionId"]),
+            "sessionEpoch": str((created or {}).get("sessionEpoch") or bound["sessionEpoch"]),
+        }
+
+    def bound_conversation_payload(
+        self, payload: dict[str, Any], conversation: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            **payload,
+            "conversationId": conversation["conversationId"],
+            "sessionId": conversation["sessionId"],
+            "sessionEpoch": conversation["sessionEpoch"],
+        }
+
     def multi_file_payload(
         self,
         companion: Any,
@@ -50,12 +75,12 @@ class CompanionControlsTests(unittest.TestCase):
             sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
         workspace = companion.source_workspace.build_workspace(conversation_id, sources, False)
         self.assertTrue(workspace["ok"], workspace)
-        return {
+        return self.owned_session_payload(companion, {
             "prompt": "compare selected sources",
             "conversationId": conversation_id,
             "sourceIds": list(source_ids),
             "sourceWorkspaceRevision": workspace["revision"],
-        }
+        })
 
     def test_required_native_handler_features_cover_v2_object_workbench_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -241,7 +266,9 @@ class CompanionControlsTests(unittest.TestCase):
     def test_model_history_drops_stale_missing_pdf_replies_when_document_context_is_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            payload = self.owned_session_payload(
+                companion, {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            )
             companion.append_history(
                 payload,
                 "详细解释这篇论文",
@@ -260,7 +287,9 @@ class CompanionControlsTests(unittest.TestCase):
     def test_history_preserves_full_assistant_markdown_but_bounds_model_replay(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            payload = self.owned_session_payload(
+                companion, {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            )
             assistant_markdown = "## 完整回答\n" + ("详细内容。" * 2500)
 
             companion.append_history(payload, "请详细解释", assistant_markdown)
@@ -274,7 +303,9 @@ class CompanionControlsTests(unittest.TestCase):
     def test_history_preserves_all_entries_and_message_kinds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            payload = self.owned_session_payload(
+                companion, {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            )
             for index in range(12):
                 companion.append_history(payload, f"question {index}", f"answer {index}")
             companion.append_history(payload, "failed request", "backend failed", assistant_kind="error")
@@ -449,7 +480,9 @@ class CompanionControlsTests(unittest.TestCase):
     def test_concurrent_history_appends_do_not_overwrite_each_other(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            payload = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            payload = self.owned_session_payload(
+                companion, {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            )
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                 futures = [
@@ -470,12 +503,16 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.generate_reply = lambda payload, task: ("backend unavailable", "codex-cli-error")
+            payload = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "unittest", "prompt": "hello"},
+            )
 
-            result = companion.chat({"topicid": "T1", "bookmd5": "B1", "prompt": "hello"})
+            result = companion.chat(payload)
 
             self.assertFalse(result["ok"])
             self.assertEqual(result["backend"], "codex-cli-error")
-            self.assertEqual(companion.load_history({"topicid": "T1", "bookmd5": "B1"})[-1]["kind"], "error")
+            self.assertEqual(companion.load_history(payload)[-1]["kind"], "error")
 
     def test_conversation_actions_create_list_load_and_delete_document_scoped_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -488,13 +525,15 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertTrue(second["ok"])
             self.assertNotEqual(first["conversation"]["conversationId"], second["conversation"]["conversationId"])
 
+            first_bound = self.bound_conversation_payload(base, first["conversation"])
+            second_bound = self.bound_conversation_payload(base, second["conversation"])
             companion.append_history(
-                {**base, "conversationId": first["conversation"]["conversationId"]},
+                first_bound,
                 "第一轮问题",
                 "第一轮回答",
             )
             companion.append_history(
-                {**base, "conversationId": second["conversation"]["conversationId"]},
+                second_bound,
                 "第二轮问题",
                 "第二轮回答",
             )
@@ -513,13 +552,13 @@ class CompanionControlsTests(unittest.TestCase):
                 self.assertRegex(item["sessionId"], r"^[a-f0-9]{24}$")
 
             first_item = next(item for item in listed["conversations"] if item["title"] == "第一轮问题")
-            loaded = companion.handle_action({**base, "action": "conversation_load", "sessionId": first_item["sessionId"]})
+            loaded = companion.handle_action({**base, **first_item, "action": "conversation_load"})
 
             self.assertTrue(loaded["ok"])
             self.assertEqual(loaded["conversation"]["sessionId"], first_item["sessionId"])
             self.assertEqual([item["content"] for item in loaded["history"]], ["第一轮问题", "第一轮回答"])
 
-            deleted = companion.handle_action({**base, "action": "conversation_delete", "sessionId": first_item["sessionId"]})
+            deleted = companion.handle_action({**base, **first_item, "action": "conversation_delete"})
             self.assertTrue(deleted["ok"])
             relisted = companion.handle_action({**base, "action": "conversation_list"})
             self.assertEqual(relisted["conversation_count"], 1)
@@ -562,6 +601,7 @@ class CompanionControlsTests(unittest.TestCase):
                 **base,
                 "conversationId": conversation["conversationId"],
                 "sessionId": conversation["sessionId"],
+                "sessionEpoch": conversation["sessionEpoch"],
             }
             workspace = companion.handle_action({**owned, "action": "source_workspace_get"})
             listed = companion.handle_action({**base, "action": "conversation_list"})
@@ -601,6 +641,318 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertNotIn("conversation", result)
             self.assertEqual(list(companion.SESSIONS_DIR.glob("*")), [])
 
+    def test_generation_finishing_after_delete_cannot_recreate_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {
+                "topicid": "T-RACE-GEN",
+                "bookmd5": "B-RACE-GEN",
+                "contextDocumentKey": "T-RACE-GEN|B-RACE-GEN|doc",
+                "source": "unittest",
+            }
+            created = companion.new_conversation(base)["conversation"]
+            bound = {
+                **base,
+                "conversationId": created["conversationId"],
+                "sessionId": created["sessionId"],
+                "sessionEpoch": created.get("sessionEpoch", "missing-epoch"),
+                "prompt": "slow question",
+            }
+            generation_started = threading.Event()
+            finish_generation = threading.Event()
+
+            def blocking_generate_reply(payload: dict[str, Any], task: str) -> tuple[str, str]:
+                generation_started.set()
+                self.assertTrue(finish_generation.wait(5), "test did not release generation")
+                return "late answer", "codex-cli:test"
+
+            with mock.patch.object(companion, "generate_reply", side_effect=blocking_generate_reply):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    generating = executor.submit(companion.handle_action, {**bound, "action": "chat"})
+                    self.assertTrue(generation_started.wait(5), "generation did not reach the race point")
+                    deleted = companion.handle_action({**bound, "action": "conversation_delete"})
+                    finish_generation.set()
+                    result = generating.result(timeout=5)
+
+            session_path = companion.SESSIONS_DIR / f"{created['sessionId']}.json"
+            tombstone_path = companion.SESSIONS_DIR / ".tombstones" / f"{created['sessionId']}.json"
+            self.assertTrue(deleted["ok"], deleted)
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "session_deleted")
+            self.assertFalse(session_path.exists())
+            self.assertTrue(tombstone_path.is_file())
+            tombstone = json.loads(tombstone_path.read_text(encoding="utf-8"))
+            self.assertEqual(tombstone["conversationId"], created["conversationId"])
+            self.assertEqual(tombstone["sessionEpoch"], created["sessionEpoch"])
+
+    def test_source_save_finishing_after_history_clear_cannot_overwrite_new_epoch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "uploads" / "late-source.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("late source", encoding="utf-8")
+            companion.save_uploaded_files(
+                [{"id": "late-source", "name": source.name, "path": str(source), "size": source.stat().st_size}]
+            )
+            base = {
+                "topicid": "T-RACE-SOURCE",
+                "bookmd5": "B-RACE-SOURCE",
+                "contextDocumentKey": "T-RACE-SOURCE|B-RACE-SOURCE|doc",
+                "source": "unittest",
+            }
+            created = companion.new_conversation(base)["conversation"]
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            bound = {
+                **base,
+                "conversationId": created["conversationId"],
+                "sessionId": created["sessionId"],
+                "sessionEpoch": created.get("sessionEpoch", "missing-epoch"),
+                "sourceIds": [source_id],
+                "followCurrentDocument": False,
+                "sourceWorkspaceRevision": "",
+            }
+            workspace_built = threading.Event()
+            finish_source_save = threading.Event()
+            original_build = companion.source_workspace.build_workspace
+
+            def blocking_build(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                result = original_build(*args, **kwargs)
+                workspace_built.set()
+                self.assertTrue(finish_source_save.wait(5), "test did not release source save")
+                return result
+
+            with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=blocking_build):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    saving = executor.submit(companion.source_workspace_action, bound, "source_workspace_update")
+                    self.assertTrue(workspace_built.wait(5), "source build did not reach the race point")
+                    cleared = companion.clear_history(bound)
+                    finish_source_save.set()
+                    result = saving.result(timeout=5)
+
+            self.assertTrue(cleared["ok"], cleared)
+            self.assertRegex(cleared["sessionEpoch"], r"^[a-f0-9]{32}$")
+            self.assertNotEqual(cleared["sessionEpoch"], created["sessionEpoch"])
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "session_epoch_mismatch")
+            session_path = companion.SESSIONS_DIR / f"{created['sessionId']}.json"
+            saved = json.loads(session_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["sessionEpoch"], cleared["sessionEpoch"])
+            self.assertEqual(saved["history"], [])
+            self.assertEqual(saved["sourceIds"], [])
+            self.assertEqual(saved["sourceWorkspaceRevision"], "")
+            self.assertFalse(companion.source_workspace.workspace_path(created["conversationId"]).exists())
+
+    def test_stale_queued_epoch_is_quarantined_after_history_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {
+                "topicid": "T-QUEUE-EPOCH",
+                "bookmd5": "B-QUEUE-EPOCH",
+                "contextDocumentKey": "T-QUEUE-EPOCH|B-QUEUE-EPOCH|doc",
+                "source": "unittest",
+            }
+            created = companion.new_conversation(base)["conversation"]
+            bound = {
+                **base,
+                "conversationId": created["conversationId"],
+                "sessionId": created["sessionId"],
+                "sessionEpoch": created.get("sessionEpoch", "missing-epoch"),
+            }
+            queued = companion.enqueue_command(
+                {**bound, "action": "chat", "_queue_raw": True, "prompt": "stale queued question"}
+            )
+            cleared = companion.clear_history(bound)
+            polled = companion.poll_commands(base["topicid"], base["bookmd5"])
+
+            self.assertTrue(queued["ok"], queued)
+            self.assertEqual(queued["queued"]["sessionEpoch"], created["sessionEpoch"])
+            self.assertEqual(queued["queued"]["command"]["sessionEpoch"], created["sessionEpoch"])
+            self.assertNotEqual(cleared["sessionEpoch"], created["sessionEpoch"])
+            self.assertFalse(polled["ok"], polled)
+            self.assertEqual(polled.get("blocked"), "session_epoch_mismatch")
+            self.assertEqual(polled["pending"], 0)
+            self.assertEqual(polled["commands"], [])
+            self.assertEqual(polled["rejectedCount"], 1)
+            self.assertEqual(polled["rejectedCommands"][0]["reason"], "session_epoch_mismatch")
+
+    def test_current_epoch_allows_append_source_save_and_queue_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            source = root / "uploads" / "current-source.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("current source", encoding="utf-8")
+            companion.save_uploaded_files(
+                [{"id": "current-source", "name": source.name, "path": str(source), "size": source.stat().st_size}]
+            )
+            base = {
+                "topicid": "T-CURRENT-EPOCH",
+                "bookmd5": "B-CURRENT-EPOCH",
+                "contextDocumentKey": "T-CURRENT-EPOCH|B-CURRENT-EPOCH|doc",
+                "source": "unittest",
+            }
+            created = companion.new_conversation(base)["conversation"]
+            self.assertRegex(created.get("sessionEpoch", ""), r"^[a-f0-9]{32}$")
+            bound = {
+                **base,
+                "conversationId": created["conversationId"],
+                "sessionId": created["sessionId"],
+                "sessionEpoch": created["sessionEpoch"],
+            }
+            companion.append_history(bound, "current question", "current answer")
+            source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
+            source_result = companion.source_workspace_action(
+                {
+                    **bound,
+                    "sourceIds": [source_id],
+                    "followCurrentDocument": False,
+                    "sourceWorkspaceRevision": "",
+                },
+                "source_workspace_update",
+            )
+            queued = companion.enqueue_command(
+                {
+                    **bound,
+                    "action": "chat",
+                    "_queue_raw": True,
+                    "prompt": "current queued question",
+                    "sourceIds": [source_id],
+                    "followCurrentDocument": False,
+                    "sourceWorkspaceRevision": source_result.get("sourceWorkspaceRevision", ""),
+                }
+            )
+            polled = companion.poll_commands(base["topicid"], base["bookmd5"])
+
+            self.assertTrue(source_result["ok"], source_result)
+            self.assertEqual(source_result["sessionEpoch"], created["sessionEpoch"])
+            self.assertTrue(queued["ok"], queued)
+            self.assertEqual(queued["queued"]["sessionEpoch"], created["sessionEpoch"])
+            self.assertEqual(queued["queued"]["command"]["sessionEpoch"], created["sessionEpoch"])
+            self.assertEqual(polled["commands"][0]["sessionEpoch"], created["sessionEpoch"])
+            saved = json.loads((companion.SESSIONS_DIR / f"{created['sessionId']}.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["sessionEpoch"], created["sessionEpoch"])
+            self.assertEqual(saved["history"][-1]["content"], "current answer")
+
+    def test_failed_mutation_after_delete_does_not_recreate_session_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T-NO-RECREATE", "bookmd5": "B-NO-RECREATE", "source": "unittest"}
+            created = companion.new_conversation(base)["conversation"]
+            bound = {
+                **base,
+                "conversationId": created["conversationId"],
+                "sessionId": created["sessionId"],
+                "sessionEpoch": created.get("sessionEpoch", "missing-epoch"),
+            }
+            deleted = companion.delete_conversation(bound)
+            session_path = companion.SESSIONS_DIR / f"{created['sessionId']}.json"
+
+            self.assertTrue(deleted["ok"], deleted)
+            with self.assertRaises(companion.SessionMutationRejected) as rejected:
+                companion.append_history(bound, "late question", "late answer")
+
+            self.assertEqual(rejected.exception.blocked, "session_deleted")
+            self.assertFalse(session_path.exists())
+
+    def test_committed_tombstone_blocks_reads_and_writes_when_unlink_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            base = {"topicid": "T-UNLINK", "bookmd5": "B-UNLINK", "source": "unittest"}
+            created = companion.new_conversation(base)["conversation"]
+            bound = self.bound_conversation_payload(base, created)
+            companion.append_history(bound, "question", "answer")
+            session_path = companion.SESSIONS_DIR / f"{created['sessionId']}.json"
+            original_unlink = Path.unlink
+
+            def fail_session_unlink(path: Path, *args: Any, **kwargs: Any) -> None:
+                if path == session_path:
+                    raise OSError("synthetic unlink failure")
+                original_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "unlink", fail_session_unlink):
+                deleted = companion.delete_conversation(bound)
+
+            self.assertFalse(deleted["ok"], deleted)
+            self.assertTrue(session_path.exists())
+            self.assertTrue((companion.SESSION_TOMBSTONES_DIR / f"{created['sessionId']}.json").is_file())
+            self.assertEqual(companion.load_history(bound), [])
+            with self.assertRaises(companion.SessionMutationRejected) as rejected:
+                companion.append_history(bound, "late question", "late answer")
+            self.assertEqual(rejected.exception.blocked, "session_deleted")
+
+    def test_existing_legacy_session_migrates_but_missing_legacy_session_stays_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            legacy = {
+                "topicid": "T-LEGACY",
+                "bookmd5": "B-LEGACY",
+                "source": "unittest",
+                "conversationId": "CONV-LEGACY",
+            }
+            legacy_path = companion.session_path(legacy)
+            legacy_path.write_text(
+                json.dumps({**legacy, "history": [{"role": "user", "content": "legacy question"}]}),
+                encoding="utf-8",
+            )
+
+            companion.append_history(
+                {**legacy, "sessionId": legacy_path.stem},
+                "migration question",
+                "migration answer",
+            )
+
+            migrated = json.loads(legacy_path.read_text(encoding="utf-8"))
+            self.assertRegex(migrated["sessionEpoch"], r"^[a-f0-9]{32}$")
+            self.assertEqual(migrated["history"][-1]["content"], "migration answer")
+
+            missing = {
+                **legacy,
+                "conversationId": "CONV-MISSING-LEGACY",
+                "sessionId": "b" * 24,
+            }
+            missing_path = companion.SESSIONS_DIR / f"{missing['sessionId']}.json"
+            with self.assertRaises(companion.SessionMutationRejected) as rejected:
+                companion.append_history(missing, "late question", "late answer")
+            source_result = companion.source_workspace_action(
+                {**missing, "sourceIds": ["missing-source"], "sourceWorkspaceRevision": ""},
+                "source_workspace_update",
+            )
+            queue_result = companion.enqueue_command(
+                {**missing, "action": "chat", "_queue_raw": True, "prompt": "missing legacy queue"}
+            )
+
+            self.assertEqual(rejected.exception.blocked, "session_missing")
+            self.assertEqual(source_result.get("blocked"), "session_missing")
+            self.assertEqual(queue_result.get("blocked"), "session_missing")
+            self.assertFalse(missing_path.exists())
+
+            no_conversation_id = "c" * 24
+            no_conversation_path = companion.SESSIONS_DIR / f"{no_conversation_id}.json"
+            no_conversation_path.write_text(
+                json.dumps(
+                    {
+                        "topicid": "T-LEGACY",
+                        "bookmd5": "B-LEGACY",
+                        "source": "unittest",
+                        "history": [{"role": "user", "content": "legacy without conversation ID"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loaded = companion.load_conversation(
+                {
+                    "topicid": "T-LEGACY",
+                    "bookmd5": "B-LEGACY",
+                    "source": "unittest",
+                    "sessionId": no_conversation_id,
+                }
+            )
+
+            self.assertTrue(loaded["ok"], loaded)
+            self.assertTrue(loaded["conversation"]["conversationId"])
+            self.assertRegex(loaded["conversation"]["sessionEpoch"], r"^[a-f0-9]{32}$")
+
     def test_conversations_with_same_bookmd5_are_isolated_by_current_document_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -610,8 +962,8 @@ class CompanionControlsTests(unittest.TestCase):
 
             a = companion.handle_action({**first, "action": "conversation_new"})["conversation"]
             b = companion.handle_action({**second, "action": "conversation_new"})["conversation"]
-            companion.append_history({**first, "conversationId": a["conversationId"]}, "A question", "A answer")
-            companion.append_history({**second, "conversationId": b["conversationId"]}, "B question", "B answer")
+            companion.append_history(self.bound_conversation_payload(first, a), "A question", "A answer")
+            companion.append_history(self.bound_conversation_payload(second, b), "B question", "B answer")
 
             listed_a = companion.handle_action({**first, "action": "conversation_list"})
             listed_b = companion.handle_action({**second, "action": "conversation_list"})
@@ -650,18 +1002,16 @@ class CompanionControlsTests(unittest.TestCase):
 
             companion.append_history(
                 {
-                    **base,
+                    **self.bound_conversation_payload(base, first["conversation"]),
                     "mnObject": selection_object,
-                    "conversationId": first["conversation"]["conversationId"],
                 },
                 "解释这个选区",
                 "选区回答",
             )
             companion.append_history(
                 {
-                    **base,
+                    **self.bound_conversation_payload(base, second["conversation"]),
                     "mnObject": note_object,
-                    "conversationId": second["conversation"]["conversationId"],
                 },
                 "解释这张卡片",
                 "卡片回答",
@@ -772,7 +1122,7 @@ class CompanionControlsTests(unittest.TestCase):
 
             conversation = companion.handle_action({**base, "mnObject": mn_object, "action": "conversation_new"})["conversation"]
             companion.append_history(
-                {**base, "mnObject": mn_object, "conversationId": conversation["conversationId"]},
+                {**self.bound_conversation_payload(base, conversation), "mnObject": mn_object},
                 "对象问题",
                 "对象回答",
             )
@@ -780,7 +1130,7 @@ class CompanionControlsTests(unittest.TestCase):
                 {**base, "mnObject": other_object, "action": "conversation_new"}
             )["conversation"]
             companion.append_history(
-                {**base, "mnObject": other_object, "conversationId": other_conversation["conversationId"]},
+                {**self.bound_conversation_payload(base, other_conversation), "mnObject": other_object},
                 "其他问题",
                 "其他回答",
             )
@@ -4659,20 +5009,23 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertNotIn("排队引导", queue_result["reply"])
             self.assertFalse(queue_result["queue"]["stop"]["requested"])
 
+            history_payload = self.owned_session_payload(
+                companion, {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+            )
             companion.append_history(
-                {"topicid": "T1", "bookmd5": "B1", "source": "unittest"},
+                history_payload,
                 "用户问题",
                 "助手回答",
             )
             history_result = companion.handle_action(
-                {"action": "history_list", "topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+                {**history_payload, "action": "history_list"}
             )
             self.assertTrue(history_result["ok"])
             self.assertEqual(len(history_result["history"]), 2)
             self.assertEqual(history_result["history"][0]["role"], "user")
 
             clear_result = companion.handle_action(
-                {"action": "history_clear", "topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+                {**history_payload, "action": "history_clear"}
             )
             self.assertTrue(clear_result["ok"])
             self.assertEqual(clear_result["removed"], 1)
@@ -5231,14 +5584,17 @@ class CompanionControlsTests(unittest.TestCase):
     def test_mindmap_reorganize_workflow_queues_native_tree_read_before_generation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-MINDMAP-REORGANIZE"},
+            )
 
             started = companion.handle_action(
                 {
+                    **bound,
                     "action": "workflow_start",
                     "workflowId": "mindmap_reorganize",
                     "prompt": "重组当前脑图结构",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
                     "selectedNoteId": "N-root",
                     "selectedNoteTitle": "现有脑图根",
                 }
@@ -5338,6 +5694,10 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-NOTEBOOK-WORKSPACE"},
+            )
             companion.append_event(
                 {
                     "event": "mindmapTreeReadFinished",
@@ -5361,8 +5721,7 @@ class CompanionControlsTests(unittest.TestCase):
             companion.generate_reply = fake_generate_reply
             generated_cards = companion.generate_card(
                 {
-                    "topicid": "T1",
-                    "bookmd5": "B1",
+                    **bound,
                     "selectionText": "Claim: attention maps can guide VLA safety checks.",
                 }
             )
@@ -5558,6 +5917,7 @@ class CompanionControlsTests(unittest.TestCase):
                 {
                     "action": task_by_id["task_card_operation_plan"]["startAction"]["action"],
                     **task_by_id["task_card_operation_plan"]["startAction"]["payload"],
+                    **bound,
                 }
             )
             self.assertTrue(started_from_task["ok"], started_from_task)
@@ -6014,13 +6374,16 @@ class CompanionControlsTests(unittest.TestCase):
             companion.save_uploaded_files(uploads)
             candidates = companion.source_workspace_candidates({})["sources"]
             source_ids = [item["id"] for item in candidates]
-            payload = {
-                "action": "source_workspace_update",
+            base = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "contextDocumentKey": "T1|B1|/papers/current.pdf",
                 "source": "unittest",
                 "conversationId": "CONV-1",
+            })
+            payload = {
+                **base,
+                "action": "source_workspace_update",
                 "sourceIds": source_ids,
                 "followCurrentDocument": False,
             }
@@ -6064,6 +6427,7 @@ class CompanionControlsTests(unittest.TestCase):
                 "source": "unittest",
                 "conversationId": conversation["conversationId"],
                 "sessionId": conversation["sessionId"],
+                "sessionEpoch": conversation["sessionEpoch"],
                 "sourceIds": [source_id],
                 "followCurrentDocument": False,
                 "sourceWorkspaceRevision": "",
@@ -6114,6 +6478,7 @@ class CompanionControlsTests(unittest.TestCase):
                 "source": "unittest",
                 "conversationId": conversation["conversationId"],
                 "sessionId": conversation["sessionId"],
+                "sessionEpoch": conversation["sessionEpoch"],
                 "followCurrentDocument": False,
             }
             source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
@@ -6158,6 +6523,7 @@ class CompanionControlsTests(unittest.TestCase):
                 "source": "unittest",
                 "conversationId": conversation["conversationId"],
                 "sessionId": conversation["sessionId"],
+                "sessionEpoch": conversation["sessionEpoch"],
                 "followCurrentDocument": False,
             }
             source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
@@ -6201,6 +6567,7 @@ class CompanionControlsTests(unittest.TestCase):
                 "source": "unittest",
                 "conversationId": created["conversationId"],
                 "sessionId": created["sessionId"],
+                "sessionEpoch": created["sessionEpoch"],
                 "followCurrentDocument": False,
             }
             source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
@@ -6261,13 +6628,13 @@ class CompanionControlsTests(unittest.TestCase):
                 [{"id": "broken", "name": binary.name, "path": str(binary), "size": binary.stat().st_size}]
             )
             candidate_id = companion.source_workspace_candidates({})["sources"][0]["id"]
-            base = {
+            base = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "source": "unittest",
                 "conversationId": "CONV-BROKEN",
                 "followCurrentDocument": False,
-            }
+            })
 
             unknown = companion.handle_action(
                 {**base, "action": "source_workspace_update", "sourceIds": ["upload:unknown"]}
@@ -6293,13 +6660,13 @@ class CompanionControlsTests(unittest.TestCase):
                 [{"id": "notes", "name": source.name, "path": str(source), "size": source.stat().st_size}]
             )
             source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
-            base = {
+            base = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "source": "unittest",
                 "conversationId": "CONV-CLEAR",
                 "followCurrentDocument": False,
-            }
+            })
             updated = companion.handle_action(
                 {**base, "action": "source_workspace_update", "sourceIds": [source_id]}
             )
@@ -6333,13 +6700,13 @@ class CompanionControlsTests(unittest.TestCase):
                 [{"id": "notes", "name": source.name, "path": str(source), "size": source.stat().st_size}]
             )
             source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
-            base = {
+            base = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "contextDocumentKey": "T1|B1|/papers/a.pdf",
                 "source": "unittest",
                 "conversationId": "CONV-RESTORE",
-            }
+            })
             updated = companion.handle_action(
                 {
                     **base,
@@ -6377,13 +6744,13 @@ class CompanionControlsTests(unittest.TestCase):
                 [{"id": "notes", "name": source.name, "path": str(source), "size": source.stat().st_size}]
             )
             source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
-            owned = {
+            owned = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "SHARED",
                 "contextDocumentKey": "T1|SHARED|/papers/a.pdf",
                 "source": "unittest",
                 "conversationId": "CONV-DELETE",
-            }
+            })
             updated = companion.handle_action(
                 {
                     **owned,
@@ -6454,19 +6821,18 @@ class CompanionControlsTests(unittest.TestCase):
                 uploads.append({"id": str(index), "name": name, "path": str(path), "size": path.stat().st_size})
             companion.save_uploaded_files(uploads)
             source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
-            base = {
+            base = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "contextDocumentKey": "T1|B1|/papers/a.pdf",
                 "source": "unittest",
                 "conversationId": "CONV-QUEUE",
                 "followCurrentDocument": False,
-            }
+            })
             initial = companion.handle_action(
                 {**base, "action": "source_workspace_update", "sourceIds": source_ids[:1]}
             )
             revision = initial["workspace"]["revision"]
-            base["sessionId"] = companion.session_path(base).stem
             queued = companion.enqueue_command(
                 {
                     **base,
@@ -6489,14 +6855,21 @@ class CompanionControlsTests(unittest.TestCase):
                 }
             )
             self.assertNotEqual(changed["workspace"]["revision"], revision)
-            valid = companion.enqueue_command(
+            valid_base = self.owned_session_payload(
+                companion,
                 {
-                    "action": "chat",
-                    "_queue_raw": True,
-                    "prompt": "later valid work",
                     "topicid": "T1",
                     "bookmd5": "B1",
                     "source": "unittest",
+                    "conversationId": "CONV-QUEUE-VALID",
+                },
+            )
+            valid = companion.enqueue_command(
+                {
+                    **valid_base,
+                    "action": "chat",
+                    "_queue_raw": True,
+                    "prompt": "later valid work",
                 }
             )
             self.assertTrue(valid["ok"], valid)
@@ -6542,8 +6915,12 @@ class CompanionControlsTests(unittest.TestCase):
                 "followCurrentDocument": False,
                 "sourceWorkspaceRevision": workspace["revision"],
             }
-            companion.save_history(session_payload, [])
             session_id = companion.session_path(session_payload).stem
+            companion.SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+            (companion.SESSIONS_DIR / f"{session_id}.json").write_text(
+                json.dumps({**session_payload, "history": []}),
+                encoding="utf-8",
+            )
             queued = companion.enqueue_command(
                 {
                     "action": "chat",
@@ -6801,12 +7178,12 @@ class CompanionControlsTests(unittest.TestCase):
                 path.write_text(source_id, encoding="utf-8")
                 sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
             workspace = companion.source_workspace.build_workspace("CONV-USAGE", sources, False)
-            payload = {
+            payload = self.owned_session_payload(companion, {
                 "prompt": "compare",
                 "conversationId": "CONV-USAGE",
                 "sourceIds": ["src-a", "src-b"],
                 "sourceWorkspaceRevision": workspace["revision"],
-            }
+            })
             companion.generate_reply = lambda payload, task: (
                 "answer\n资料读取：src-a=read",
                 "codex-cli",
@@ -6893,12 +7270,12 @@ class CompanionControlsTests(unittest.TestCase):
                 path.write_text(source_id, encoding="utf-8")
                 sources.append({"id": source_id, "title": path.name, "kind": "text", "path": str(path)})
             workspace = companion.source_workspace.build_workspace("CONV-CARD", sources, False)
-            payload = {
+            payload = self.owned_session_payload(companion, {
                 "prompt": "make cards",
                 "conversationId": "CONV-CARD",
                 "sourceIds": ["src-a", "src-b"],
                 "sourceWorkspaceRevision": workspace["revision"],
-            }
+            })
             companion.generate_reply = lambda payload, task: (
                 "## comparison\nresult\n资料读取：src-a=read; src-b=unread",
                 "codex-cli",
@@ -7179,7 +7556,7 @@ class CompanionControlsTests(unittest.TestCase):
     def test_explicit_queue_command_inherits_authoritative_source_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            payload = {
+            payload = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "contextDocumentKey": "T1|B1|/papers/a.pdf",
@@ -7187,13 +7564,13 @@ class CompanionControlsTests(unittest.TestCase):
                 "sourceIds": ["src-a", "src-b"],
                 "followCurrentDocument": False,
                 "sourceWorkspaceRevision": "REV-OUTER",
-                "command": {
-                    "rawAction": "chat",
-                    "prompt": "explicit command",
-                    "sourceIds": ["inner-wrong"],
-                    "sourceWorkspaceRevision": "REV-INNER",
-                    "contextDocumentKey": "wrong-context",
-                },
+            })
+            payload["command"] = {
+                "rawAction": "chat",
+                "prompt": "explicit command",
+                "sourceIds": ["inner-wrong"],
+                "sourceWorkspaceRevision": "REV-INNER",
+                "contextDocumentKey": "wrong-context",
             }
 
             queued = companion.enqueue_command(payload)
@@ -7218,7 +7595,9 @@ class CompanionControlsTests(unittest.TestCase):
                 "action": "chat",
                 "_queue_raw": True,
                 "prompt": "queued for A",
+                "sessionEpoch": companion.new_session_epoch(),
             }
+            companion.save_history(payload, [], create=True)
 
             queued = companion.enqueue_command(payload)
 
@@ -7240,13 +7619,22 @@ class CompanionControlsTests(unittest.TestCase):
                     "topicid": "T1",
                     "bookmd5": "B1",
                     "conversationId": first["conversationId"],
-                    "sessionId": second["sessionId"],
+                    "sessionId": first["sessionId"],
+                    "sessionEpoch": first["sessionEpoch"],
                     "action": "chat",
                     "_queue_raw": True,
                     "prompt": "must stay with conversation A",
                 }
             )
             self.assertTrue(queued["ok"], queued)
+            path = companion.queue_path("T1", "B1")
+            records = companion.read_queue_lines(path)
+            records[0]["sessionId"] = second["sessionId"]
+            records[0]["command"]["sessionId"] = second["sessionId"]
+            companion.atomic_rewrite_queue(
+                path,
+                [json.dumps(record, ensure_ascii=False) for record in records],
+            )
 
             polled = companion.poll_commands("T1", "B1")
 
@@ -7257,7 +7645,11 @@ class CompanionControlsTests(unittest.TestCase):
     def test_ack_rewrite_does_not_lose_concurrent_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            base = {"topicid": "T1", "bookmd5": "B1", "action": "chat", "_queue_raw": True}
+            base = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-ACK"},
+            )
+            base.update({"action": "chat", "_queue_raw": True})
             first = companion.enqueue_command({**base, "prompt": "first"})["queued"]
             path = companion.queue_path("T1", "B1")
             read_reached = threading.Event()
@@ -7291,7 +7683,11 @@ class CompanionControlsTests(unittest.TestCase):
     def test_quarantine_rewrite_does_not_lose_concurrent_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            base = {"topicid": "T1", "bookmd5": "B1", "action": "chat", "_queue_raw": True}
+            base = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-QUARANTINE"},
+            )
+            base.update({"action": "chat", "_queue_raw": True})
             first = companion.enqueue_command({**base, "prompt": "stale"})["queued"]
             path = companion.queue_path("T1", "B1")
             read_reached = threading.Event()
@@ -7381,14 +7777,14 @@ class CompanionControlsTests(unittest.TestCase):
                 [{"id": "paper", "name": source_path.name, "path": str(source_path), "size": source_path.stat().st_size}]
             )
             source_id = companion.source_workspace_candidates({})["sources"][0]["id"]
-            payload = {
+            payload = self.owned_session_payload(companion, {
                 "topicid": "T1",
                 "bookmd5": "B1",
                 "conversationId": "CONV-PDF-FALLBACK",
                 "sourceIds": [source_id],
                 "followCurrentDocument": False,
                 "sourceWorkspaceRevision": "",
-            }
+            })
 
             with mock.patch.object(
                 companion,
@@ -7905,15 +8301,18 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.handle_action({"action": "settings_update", "settings": {"permission": "notes"}})
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-WORKFLOW-START"},
+            )
 
             started = companion.handle_action(
                 {
+                    **bound,
                     "action": "workflow_start",
                     "workflowId": "selection_to_cards",
                     "prompt": "把当前选区解释并做成短卡",
                     "selectionText": "selected text",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
                 }
             )
 
@@ -7976,15 +8375,18 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-WORKFLOW-READ-ONLY"},
+            )
 
             started = companion.handle_action(
                 {
+                    **bound,
                     "action": "workflow_start",
                     "workflowId": "selection_to_cards",
                     "prompt": "把当前选区做成短卡",
                     "selectionText": "selected text",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
                 }
             )
 
@@ -7999,14 +8401,17 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-WORKFLOW-RETRY"},
+            )
             started = companion.handle_action(
                 {
+                    **bound,
                     "action": "workflow_start",
                     "workflowId": "selection_to_cards",
                     "prompt": "把当前选区做成短卡",
                     "selectionText": "selected text",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
                 }
             )
             status = companion.handle_action({"action": "workflow_status", "workflowRunId": started["summary"]["id"]})
@@ -8063,8 +8468,9 @@ class CompanionControlsTests(unittest.TestCase):
                 "contextDocumentKey": "T1|B1|/papers/workflow.pdf",
             }
             session_payload = {"topicid": "T1", "bookmd5": "B1", **binding}
-            companion.save_history(session_payload, [])
-            binding["sessionId"] = companion.session_path(session_payload).stem
+            session_payload = self.owned_session_payload(companion, session_payload)
+            binding["sessionId"] = session_payload["sessionId"]
+            binding["sessionEpoch"] = session_payload["sessionEpoch"]
             companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
             started = companion.handle_action(
                 {
@@ -8100,17 +8506,20 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.handle_action({"action": "settings_update", "settings": {"permission": "read_only"}})
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "conversationId": "CONV-EXTERNAL-WORKFLOW"},
+            )
 
             started = companion.handle_action(
                 {
+                    **bound,
                     "action": "external_gateway_start_workflow",
                     "requestId": "REQ_EXT_1",
                     "caller": "shortcuts",
                     "workflowId": "selection_to_cards",
                     "prompt": "把当前选区解释并做成短卡",
                     "selectionText": "selected text",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
                     "callbackBaseUrl": "http://127.0.0.1:48761/external/callback",
                 }
             )
@@ -8599,7 +9008,6 @@ class CompanionControlsTests(unittest.TestCase):
     def test_object_graph_links_current_object_to_operations_and_activity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
-            base = {"topicid": "T1", "bookmd5": "B1", "source": "unittest"}
             mn_object = {
                 "schema": "codex.mn.mnObject.v1",
                 "objectId": "mnobj:selection:graph1",
@@ -8607,9 +9015,19 @@ class CompanionControlsTests(unittest.TestCase):
                 "title": "Graph 选区",
                 "sourceRef": {"page": 7, "quote": "graph source"},
             }
+            base = self.owned_session_payload(
+                companion,
+                {
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "source": "unittest",
+                    "conversationId": "CONV_GRAPH",
+                    "mnObject": mn_object,
+                },
+            )
 
             companion.append_history(
-                {**base, "mnObject": mn_object, "conversationId": "CONV_GRAPH"},
+                {**base, "mnObject": mn_object},
                 "解释这个对象",
                 "这是对象图谱测试回答。",
             )
@@ -9665,11 +10083,13 @@ class CompanionControlsTests(unittest.TestCase):
     def test_stop_current_clears_web_busy_and_acks_current_queue_item(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "test", "conversationId": "CONV-STOP"},
+            )
             queued = companion.enqueue_command(
                 {
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "test",
+                    **bound,
                     "command": {
                         "rawAction": "generate_mindmap",
                         "prompt": "生成脑图",
@@ -9912,18 +10332,20 @@ class CompanionControlsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.generate_reply = lambda payload, task: ("目标执行结果", "codex-cli")
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "unittest", "conversationId": "CONV-GOAL"},
+            )
 
             result = companion.handle_action(
                 {
+                    **bound,
                     "action": "goal_run",
                     "goal": {
                         "title": "完成 KNOWS 讲解",
                         "detail": "生成 defense 讲稿、脑图、卡片，并保持原文清洁。",
                     },
                     "selectionText": "Figure 2 shows the overview of KNOWS.",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "unittest",
                 }
             )
 
@@ -9935,7 +10357,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("已启动目标", result["message"])
             self.assertIn("完成 KNOWS 讲解", result["reply"])
             history = companion.handle_action(
-                {"action": "history_list", "topicid": "T1", "bookmd5": "B1", "source": "unittest"}
+                {**bound, "action": "history_list"}
             )["history"]
             self.assertGreaterEqual(len(history), 2)
             self.assertIn("目标：完成 KNOWS 讲解", history[0]["content"])
@@ -10016,15 +10438,17 @@ class CompanionControlsTests(unittest.TestCase):
     def test_raw_actions_can_be_queued_without_running_generation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "unittest", "conversationId": "CONV-RAW"},
+            )
 
             result = companion.enqueue_command(
                 {
+                    **bound,
                     "action": "chat",
                     "prompt": "排队解释 Figure 2",
                     "_queue_raw": True,
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "unittest",
                     "replyDerivedMindmap": True,
                     "sourceAnswerMarkdown": "Figure 2 的核心解释。",
                 }
@@ -10042,12 +10466,10 @@ class CompanionControlsTests(unittest.TestCase):
 
             goal_result = companion.enqueue_command(
                 {
+                    **bound,
                     "action": "goal_run",
                     "prompt": "目标：继续完成讲解\n生成讲稿和脑图",
                     "_queue_raw": True,
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "unittest",
                 }
             )
             self.assertTrue(goal_result["ok"])
@@ -11022,14 +11444,16 @@ class CompanionControlsTests(unittest.TestCase):
     def test_web_busy_lock_keeps_pending_commands_until_current_task_finishes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "unittest", "conversationId": "CONV-BUSY"},
+            )
             companion.enqueue_command(
                 {
+                    **bound,
                     "action": "chat",
                     "prompt": "排队解释 Figure 2",
                     "_queue_raw": True,
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "unittest",
                 }
             )
 
@@ -11049,20 +11473,21 @@ class CompanionControlsTests(unittest.TestCase):
     def test_web_busy_lock_allows_dependent_mindmap_read_without_releasing_queued_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "unittest", "conversationId": "CONV-BUSY-READ"},
+            )
             companion.enqueue_command(
                 {
+                    **bound,
                     "action": "chat",
                     "prompt": "等待当前脑图生成完成",
                     "_queue_raw": True,
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "unittest",
                 }
             )
             refresh = companion.request_mindmap_tree(
                 {
-                    "topicid": "T1",
-                    "bookmd5": "B1",
+                    **bound,
                     "source": "reply-derived-mindmap",
                     "wholeNotebook": True,
                 }
@@ -11093,6 +11518,10 @@ class CompanionControlsTests(unittest.TestCase):
     def test_web_panel_direct_generation_auto_queues_when_backend_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "marginnote4-web-panel", "conversationId": "CONV-WEB-GEN"},
+            )
             companion.handle_action({"action": "web_busy_update", "busy": True})
             calls: list[str] = []
 
@@ -11104,11 +11533,9 @@ class CompanionControlsTests(unittest.TestCase):
 
             result = companion.handle_action(
                 {
+                    **bound,
                     "action": "generate_mindmap",
                     "prompt": "生成脑图",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "marginnote4-web-panel",
                 }
             )
 
@@ -11127,6 +11554,10 @@ class CompanionControlsTests(unittest.TestCase):
     def test_web_panel_direct_chat_auto_queues_when_backend_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
+            bound = self.owned_session_payload(
+                companion,
+                {"topicid": "T1", "bookmd5": "B1", "source": "marginnote4-web-panel", "conversationId": "CONV-WEB-CHAT"},
+            )
             companion.handle_action({"action": "web_busy_update", "busy": True})
             calls: list[str] = []
 
@@ -11138,11 +11569,9 @@ class CompanionControlsTests(unittest.TestCase):
 
             result = companion.handle_action(
                 {
+                    **bound,
                     "action": "chat",
                     "prompt": "发送按钮问题",
-                    "topicid": "T1",
-                    "bookmd5": "B1",
-                    "source": "marginnote4-web-panel",
                 }
             )
 

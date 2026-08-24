@@ -69,6 +69,7 @@
     pluginVersion: '',
     conversationId: '',
     sessionId: '',
+    sessionEpoch: '',
     sourceWorkspace: {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''},
     sourceWorkspaceCandidates: [],
     sourceWorkspaceSelection: {},
@@ -2166,6 +2167,7 @@
     if (result.workspace) state.sourceWorkspace = result.workspace;
     state.sourceWorkspace = state.sourceWorkspace || {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''};
     if (result.sourceWorkspaceRevision !== undefined) state.sourceWorkspace.revision = String(result.sourceWorkspaceRevision || '');
+    if (result.sessionEpoch !== undefined) state.sessionEpoch = String(result.sessionEpoch || '');
     var current = currentDocumentSourceCandidate();
     state.sourceWorkspaceCurrentDocumentId = current ? String(current.id || '') : '';
     state.sourceWorkspaceCurrentDocumentIds = state.sourceWorkspaceCandidates.filter(isCurrentDocumentCandidate).map(function(candidate) {
@@ -2336,6 +2338,7 @@
     state.sourceWorkspaceRequestToken += 1;
     return {
       conversationId: String(state.conversationId || ''),
+      sessionEpoch: String(state.sessionEpoch || ''),
       contextDocumentKey: String(state.contextDocumentKey || ''),
       token: state.sourceWorkspaceRequestToken
     };
@@ -2345,6 +2348,7 @@
     identity = identity || {};
     return identity.token === state.sourceWorkspaceRequestToken &&
       identity.conversationId === String(state.conversationId || '') &&
+      identity.sessionEpoch === String(state.sessionEpoch || '') &&
       identity.contextDocumentKey === String(state.contextDocumentKey || '');
   }
 
@@ -2393,6 +2397,7 @@
     identity = identity || {};
     return identity.token === state.newConversationRequestToken &&
       identity.conversationId === String(state.conversationId || '') &&
+      identity.sessionEpoch === String(state.sessionEpoch || '') &&
       identity.contextDocumentKey === String(state.contextDocumentKey || '');
   }
 
@@ -2402,6 +2407,7 @@
     var requestIdentity = {
       token: state.newConversationRequestToken,
       conversationId: String(state.conversationId || ''),
+      sessionEpoch: String(state.sessionEpoch || ''),
       contextDocumentKey: String(state.contextDocumentKey || '')
     };
     var originalRequestPayload = null;
@@ -2449,7 +2455,7 @@
   }
 
   function ensureSourceWorkspaceConversation(done) {
-    if (state.conversationId) {
+    if (state.conversationId && state.sessionId && state.sessionEpoch) {
       done();
       return;
     }
@@ -2802,6 +2808,7 @@
     state.sourceWorkspaceConversationCreateCallbacks = [];
     state.conversationId = String(conversation.conversationId || '');
     state.sessionId = String(conversation.sessionId || '');
+    state.sessionEpoch = String(conversation.sessionEpoch || '');
     if (conversation.sourceIds !== undefined) {
       state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(conversation.sourceIds || []);
     }
@@ -2975,6 +2982,8 @@
     cancelSourceWorkspaceUpload('load-conversation');
     var payload = conversationHistoryPayload();
     payload.sessionId = item.sessionId;
+    payload.conversationId = item.conversationId || '';
+    payload.sessionEpoch = item.sessionEpoch || '';
     postCompanion('conversation_load', payload, function(result) {
       if (!result || !result.ok) {
         addFailureMessage('加载历史对话失败', result);
@@ -2994,6 +3003,8 @@
     if (window.confirm && !window.confirm('删除这条历史对话？')) return;
     var payload = conversationHistoryPayload();
     payload.sessionId = item.sessionId;
+    payload.conversationId = item.conversationId || '';
+    payload.sessionEpoch = item.sessionEpoch;
     postCompanion('conversation_delete', payload, function(result) {
       if (!result || !result.ok) {
         addFailureMessage('删除历史对话失败', result);
@@ -3003,6 +3014,7 @@
         initializeNewConversationState({
           conversationId: '',
           sessionId: '',
+          sessionEpoch: '',
           sourceIds: [],
           followCurrentDocument: true,
           sourceWorkspaceRevision: ''
@@ -3087,6 +3099,7 @@
     if (action === 'conversation_new') {
       delete payload.conversationId;
       delete payload.sessionId;
+      delete payload.sessionEpoch;
       delete payload.sourceWorkspaceRevision;
       if (payload.automaticDocumentSwitch === true) {
         payload.sourceIds = Array.isArray(payload.sourceIds) ? payload.sourceIds.slice() : [];
@@ -3100,11 +3113,19 @@
       if (
         hasExplicitConversation && !hasExplicitSession &&
         String(payload.conversationId || '') !== String(state.conversationId || '')
-      ) delete payload.sessionId;
+      ) {
+        delete payload.sessionId;
+        delete payload.sessionEpoch;
+      }
       if (
         !payload.sessionId && state.sessionId &&
         (!hasExplicitConversation || String(payload.conversationId || '') === String(state.conversationId || ''))
       ) payload.sessionId = state.sessionId;
+      if (
+        !Object.prototype.hasOwnProperty.call(payload, 'sessionEpoch') &&
+        String(payload.conversationId || '') === String(state.conversationId || '') &&
+        String(payload.sessionId || '') === String(state.sessionId || '')
+      ) payload.sessionEpoch = state.sessionEpoch;
       if (!Object.prototype.hasOwnProperty.call(payload, 'sourceIds')) payload.sourceIds = sourceWorkspaceSelectionIds();
       if (!Object.prototype.hasOwnProperty.call(payload, 'followCurrentDocument')) payload.followCurrentDocument = !!state.followCurrentDocument;
       if (!Object.prototype.hasOwnProperty.call(payload, 'sourceWorkspaceRevision')) {
@@ -3289,6 +3310,7 @@
       lifecycleHandle.meta.cleanupConversationId = conversationId;
     }
     var cleanupPayload = window.SourceWorkspaceLifecycle.staleConversationCleanupPayload(conversation, ownershipPayload || {});
+    cleanupPayload.sessionEpoch = String(conversation.sessionEpoch || '');
     postCompanionExactPayload(cleanupPayload, function(cleaned) {
       if (!cleaned || !cleaned.ok) {
         window.CodexPanel.setStatus({text: '过期文件对话清理失败：' + (cleaned && cleaned.message ? cleaned.message : conversationId)});
@@ -7915,8 +7937,16 @@
     var prompt = command.prompt || '';
     var sessionRouting = window.SourceWorkspaceLifecycle.queuedSessionRouting(command, {
       conversationId: state.conversationId,
-      sessionId: state.sessionId
+      sessionId: state.sessionId,
+      sessionEpoch: state.sessionEpoch
     });
+    if (
+      sessionRouting !== 'invalid' &&
+      (!command.sessionEpoch || (
+        sessionRouting === 'active' &&
+        String(command.sessionEpoch || '') !== String(state.sessionEpoch || '')
+      ))
+    ) sessionRouting = 'invalid';
     if (sessionRouting === 'invalid') {
       ackAndSkipQueuedCommand(command, '队列缺少完整的对话会话绑定');
       return;
@@ -7928,7 +7958,8 @@
       followCurrentDocument: Object.prototype.hasOwnProperty.call(command, 'followCurrentDocument') ? !!command.followCurrentDocument : true,
       sourceWorkspaceRevision: command.sourceWorkspaceRevision || '',
       conversationId: command.conversationId || '',
-      sessionId: command.sessionId || ''
+      sessionId: command.sessionId || '',
+      sessionEpoch: command.sessionEpoch || ''
     };
     if (command.contextScope) {
       setContextScope(command.contextScope);
@@ -10514,6 +10545,12 @@
       updateActionAvailability();
       return false;
     }
+    if (!state.conversationId || !state.sessionId || !state.sessionEpoch) {
+      ensureSourceWorkspaceConversation(function() {
+        executeAction(action, prompt, userText, extraPayload);
+      });
+      return true;
+    }
     if (isActiveRun()) {
       addMessage('user', '[已排队] ' + (userText || actionLabel(action)));
       window.CodexPanel.setStatus({text: '当前任务运行中，已把“' + actionLabel(action) + '”加入队列'});
@@ -11340,6 +11377,12 @@
       setGoalPanelVisible(true);
       return;
     }
+    if (!state.conversationId || !state.sessionId || !state.sessionEpoch) {
+      ensureSourceWorkspaceConversation(function() {
+        runGoalWithValue(goal);
+      });
+      return;
+    }
     var sourceWorkspaceReason = sourceWorkspaceGenerationUnavailableReason();
     if (sourceWorkspaceReason) {
       addMessage('assistant', sourceWorkspaceReason);
@@ -11452,7 +11495,12 @@
   }
 
   function clearHistory() {
-    postCompanion('history_clear', {}, function() {
+    postCompanion('history_clear', {}, function(result) {
+      if (!result || !result.ok) {
+        addFailureMessage('清空历史失败', result || {});
+        return;
+      }
+      state.sessionEpoch = String(result.sessionEpoch || '');
       renderHistoryItems([]);
     });
   }
@@ -11692,6 +11740,7 @@
     state.sourceWorkspaceConversationCreateCallbacks = [];
     state.conversationId = '';
     state.sessionId = '';
+    state.sessionEpoch = '';
     state.conversations = [];
     state.autoPdfCacheRequestedKey = '';
     state.pdfCache = {state: 'unknown'};
@@ -11712,6 +11761,7 @@
     return {
       conversationId: String(state.conversationId || ''),
       sessionId: String(state.sessionId || ''),
+      sessionEpoch: String(state.sessionEpoch || ''),
       sourceWorkspace: Object.assign({}, state.sourceWorkspace || {}, {
         sources: ((state.sourceWorkspace || {}).sources || []).slice(),
         errors: ((state.sourceWorkspace || {}).errors || []).slice()
@@ -11729,6 +11779,7 @@
     originalState = originalState || {};
     state.conversationId = String(originalState.conversationId || '');
     state.sessionId = String(originalState.sessionId || '');
+    state.sessionEpoch = String(originalState.sessionEpoch || '');
     state.sourceWorkspace = originalState.sourceWorkspace || {schema: 'codex.mn.sourceWorkspace.v1', sourceCount: 0, sources: [], revision: ''};
     state.sourceWorkspaceCandidates = (originalState.sourceWorkspaceCandidates || []).slice();
     state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(originalState.sourceIds || []);

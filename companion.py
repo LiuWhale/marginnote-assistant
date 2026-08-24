@@ -84,6 +84,7 @@ HOME = Path.home()
 ROOT = Path(os.environ.get("CODEX_MN_COMPANION_HOME", HOME / ".codex/marginnote-assistant")).expanduser()
 CONFIG_PATH = ROOT / ".env"
 SESSIONS_DIR = ROOT / "sessions"
+SESSION_TOMBSTONES_DIR = SESSIONS_DIR / ".tombstones"
 EVENTS_PATH = ROOT / "events.jsonl"
 DIAGNOSTIC_LOG_PATH = ROOT / "logs/diagnostics.jsonl"
 DIAGNOSTIC_LOG_MAX_LINES = diagnostic_log.DEFAULT_MAX_LINES
@@ -4552,6 +4553,41 @@ def normalize_conversation_id(payload: dict[str, Any]) -> str:
     return re.sub(r"[^A-Za-z0-9_.:-]+", "-", raw)[:80]
 
 
+def safe_session_epoch(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if re.fullmatch(r"[a-f0-9]{32}", raw) else ""
+
+
+def raw_session_epoch(data: dict[str, Any]) -> str:
+    return str(data.get("sessionEpoch") or data.get("session_epoch") or "").strip().lower()
+
+
+def session_epoch(data: dict[str, Any]) -> str:
+    return safe_session_epoch(raw_session_epoch(data))
+
+
+def new_session_epoch() -> str:
+    return secrets.token_hex(16)
+
+
+class SessionMutationRejected(RuntimeError):
+    def __init__(self, blocked: str, message: str, *, current_epoch: str = "") -> None:
+        super().__init__(message)
+        self.blocked = blocked
+        self.message = message
+        self.current_epoch = safe_session_epoch(current_epoch)
+
+    def result(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "ok": False,
+            "blocked": self.blocked,
+            "message": self.message,
+        }
+        if self.current_epoch:
+            result["sessionEpoch"] = self.current_epoch
+        return result
+
+
 def unique_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -4569,6 +4605,7 @@ def source_metadata(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "conversationId": normalize_conversation_id(data),
         "sessionId": safe_session_id(data.get("sessionId") or data.get("session_id")),
+        "sessionEpoch": session_epoch(data),
         "sourceIds": unique_string_list(data.get("sourceIds")),
         "followCurrentDocument": bool(data.get("followCurrentDocument", True)),
         "sourceWorkspaceRevision": str(data.get("sourceWorkspaceRevision") or ""),
@@ -4578,6 +4615,7 @@ def source_metadata(data: dict[str, Any]) -> dict[str, Any]:
 SOURCE_QUEUE_BINDING_FIELDS = (
     "conversationId",
     "sessionId",
+    "sessionEpoch",
     "sourceIds",
     "followCurrentDocument",
     "sourceWorkspaceRevision",
@@ -4745,9 +4783,25 @@ def enqueue_command(payload: dict[str, Any]) -> dict[str, Any]:
         **source_metadata(payload),
     }
     path = queue_path(topic_id, book_md5)
-    with queue_lock(path):
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def append_record(_state: dict[str, Any] | None = None) -> None:
+        with queue_lock(path):
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    raw_action = str(command.get("rawAction") or command.get("action") or "").strip()
+    has_session_binding = bool(
+        normalize_conversation_id(payload)
+        or safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+        or session_epoch(payload)
+    )
+    if raw_action in GENERATION_ACTIONS or has_session_binding:
+        try:
+            mutate_session(payload, append_record, persist=False)
+        except SessionMutationRejected as exc:
+            return exc.result()
+    else:
+        append_record()
     return {"ok": True, "message": "command queued", "queued": record}
 
 
@@ -7207,49 +7261,12 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
             if not is_valid_queue_command(command):
                 continue
             raw_action = str(command.get("rawAction") or command.get("action") or "").strip()
-            if raw_action in GENERATION_ACTIONS:
-                source_ids = unique_string_list(command.get("sourceIds") or record.get("sourceIds"))
-                expected_revision = str(
-                    command.get("sourceWorkspaceRevision") or record.get("sourceWorkspaceRevision") or ""
-                )
-                conversation_id = str(command.get("conversationId") or record.get("conversationId") or "")
-                session_id = safe_session_id(command.get("sessionId") or record.get("sessionId"))
-                if conversation_id:
-                    session_item = (
-                        read_conversation_file(SESSIONS_DIR / f"{session_id}.json") if session_id else None
-                    )
-                    queued_context_key = str(command.get("contextDocumentKey") or record.get("contextDocumentKey") or "")
-                    session_binding_matches = bool(
-                        session_item
-                        and str(session_item.get("conversationId") or "") == conversation_id
-                        and (
-                            not str(session_item.get("topicid") or "")
-                            or str(session_item.get("topicid") or "") == str(record.get("topicid") or "")
-                        )
-                        and (
-                            not str(session_item.get("bookmd5") or "")
-                            or str(session_item.get("bookmd5") or "") == str(record.get("bookmd5") or "")
-                        )
-                        and (
-                            not queued_context_key
-                            or not str(session_item.get("contextDocumentKey") or "")
-                            or str(session_item.get("contextDocumentKey") or "") == queued_context_key
-                        )
-                    )
-                    if not session_binding_matches:
-                        rejected_for_path.append(
-                            (
-                                record,
-                                {
-                                    "ok": False,
-                                    "blocked": "queue_session_binding_mismatch",
-                                    "errors": ["queued conversation and session binding do not match"],
-                                    "sourceCount": 0,
-                                },
-                            )
-                        )
-                        continue
-                elif session_id:
+            conversation_id = str(command.get("conversationId") or record.get("conversationId") or "")
+            session_id = safe_session_id(command.get("sessionId") or record.get("sessionId"))
+            queued_epoch = str(command.get("sessionEpoch") or record.get("sessionEpoch") or "")
+            has_session_binding = bool(conversation_id or session_id or queued_epoch)
+            if raw_action in GENERATION_ACTIONS or has_session_binding:
+                if not conversation_id or not session_id:
                     rejected_for_path.append(
                         (
                             record,
@@ -7262,6 +7279,31 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
                         )
                     )
                     continue
+                queued_binding = {
+                    "sessionId": session_id,
+                    "conversationId": conversation_id,
+                    "sessionEpoch": queued_epoch,
+                    "topicid": str(record.get("topicid") or ""),
+                    "bookmd5": str(record.get("bookmd5") or ""),
+                    "contextDocumentKey": str(
+                        command.get("contextDocumentKey") or record.get("contextDocumentKey") or ""
+                    ),
+                }
+                try:
+                    mutate_session(queued_binding, None, persist=False)
+                except SessionMutationRejected as exc:
+                    workspace = exc.result()
+                    if workspace.get("blocked") == "session_ownership_mismatch":
+                        workspace["blocked"] = "queue_session_binding_mismatch"
+                    workspace["errors"] = [workspace.get("message") or "queued session binding is invalid"]
+                    workspace["sourceCount"] = 0
+                    rejected_for_path.append((record, workspace))
+                    continue
+            if raw_action in GENERATION_ACTIONS:
+                source_ids = unique_string_list(command.get("sourceIds") or record.get("sourceIds"))
+                expected_revision = str(
+                    command.get("sourceWorkspaceRevision") or record.get("sourceWorkspaceRevision") or ""
+                )
                 if source_ids:
                     if not conversation_id or not session_id or not expected_revision:
                         workspace = {
@@ -7430,6 +7472,8 @@ def history_lock(payload: dict[str, Any]) -> threading.RLock:
 
 def load_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     path = session_path(payload)
+    if session_tombstone_path_for(path).exists():
+        return []
     if not path.exists():
         return []
     try:
@@ -7508,6 +7552,8 @@ def object_ref_from_mapping(data: dict[str, Any], fallback: dict[str, Any] | Non
 
 
 def object_ref_from_existing_session(path: Path) -> dict[str, Any]:
+    if session_tombstone_path_for(path).exists():
+        return {}
     if not path.exists():
         return {}
     try:
@@ -7517,7 +7563,13 @@ def object_ref_from_existing_session(path: Path) -> dict[str, Any]:
     return object_ref_from_mapping(data) if isinstance(data, dict) else {}
 
 
+def session_tombstone_path_for(path: Path) -> Path:
+    return SESSION_TOMBSTONES_DIR / f"{path.stem}.json"
+
+
 def read_conversation_file(path: Path) -> dict[str, Any] | None:
+    if session_tombstone_path_for(path).exists():
+        return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -7551,6 +7603,8 @@ def read_conversation_file(path: Path) -> dict[str, Any] | None:
     return {
         "sessionId": path.stem,
         "conversationId": conversation_id,
+        "sessionEpoch": session_epoch(data),
+        "_sessionEpochRaw": raw_session_epoch(data),
         "topicid": topic_id,
         "bookmd5": book_md5,
         "contextDocumentKey": context_document_key,
@@ -7595,6 +7649,7 @@ def conversation_summary(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "sessionId": item.get("sessionId") or "",
         "conversationId": item.get("conversationId") or "",
+        "sessionEpoch": session_epoch(item),
         "topicid": item.get("topicid") or "",
         "bookmd5": item.get("bookmd5") or "",
         "contextDocumentKey": item.get("contextDocumentKey") or "",
@@ -7620,6 +7675,7 @@ def conversation_payload_for_new(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "sessionId": session_key(derived),
         "conversationId": conversation_id,
+        "sessionEpoch": new_session_epoch(),
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
         "contextDocumentKey": normalize_document_context_key(payload),
@@ -7659,17 +7715,25 @@ def new_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     conversation = conversation_payload_for_new(payload)
     persisted_payload = {
         **payload,
+        "sessionId": conversation["sessionId"],
         "conversationId": conversation["conversationId"],
+        "sessionEpoch": conversation["sessionEpoch"],
         "sourceIds": conversation["sourceIds"],
         "followCurrentDocument": conversation["followCurrentDocument"],
         "sourceWorkspaceRevision": conversation["sourceWorkspaceRevision"],
     }
     session_path = SESSIONS_DIR / f"{conversation['sessionId']}.json"
     try:
-        save_history(persisted_payload, [])
+        save_history(persisted_payload, [], create=True)
         persisted = read_conversation_file(session_path)
         if not persisted:
             raise OSError("持久化会话无法读回")
+    except SessionMutationRejected as exc:
+        return {
+            **exc.result(),
+            "message": f"创建新对话失败：{exc.message}",
+            "history": [],
+        }
     except OSError as exc:
         return {
             "ok": False,
@@ -7694,6 +7758,15 @@ def load_conversation(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "message": "加载历史对话失败：会话不存在。"}
     if not conversation_matches_payload(item, payload):
         return {"ok": False, "message": "加载历史对话失败：该会话不属于当前文档或当前对象。"}
+    if not session_epoch(item):
+        try:
+            item = mutate_session(
+                {**payload, "sessionId": session_id},
+                lambda state: state,
+                require_epoch=False,
+            ) or item
+        except SessionMutationRejected as exc:
+            return exc.result()
     workspace = restore_conversation_source_workspace(item, payload)
     latest_item = read_conversation_file(path) or item
     return {
@@ -7709,31 +7782,44 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
     if not session_id:
         return {"ok": False, "message": "删除历史对话失败：缺少有效 sessionId。"}
-    path = SESSIONS_DIR / f"{session_id}.json"
-    item = read_conversation_file(path)
-    if not item:
-        return {"ok": False, "message": "删除历史对话失败：会话不存在。"}
-    if not conversation_matches_payload(item, payload):
-        return {"ok": False, "message": "删除历史对话失败：该会话不属于当前文档或当前对象。"}
-    conversation_id = str(item.get("conversationId") or "")
-    with source_mutation_lock(conversation_id):
-        latest = read_conversation_file(path)
-        if not latest or not conversation_matches_payload(latest, payload):
-            return {"ok": False, "message": "删除历史对话失败：会话已更改。"}
+    bound = {**payload, "sessionId": session_id}
+    try:
+        item = mutate_session(bound, None, persist=False)
+    except SessionMutationRejected as exc:
+        return exc.result()
+    conversation_id = str((item or {}).get("conversationId") or "")
+
+    class SourceCleanupRejected(RuntimeError):
+        def __init__(self, workspace: dict[str, Any]) -> None:
+            super().__init__("source workspace cleanup failed")
+            self.workspace = workspace
+
+    def cleanup_owned_workspace(state: dict[str, Any]) -> dict[str, Any]:
         if conversation_id:
             cleanup = source_workspace.clear_workspace(conversation_id)
             if not cleanup.get("ok"):
-                return {
-                    "ok": False,
-                    "message": "删除历史对话失败：来源工作区清理失败。",
-                    "workspace": cleanup,
-                }
-        try:
-            with history_lock({**payload, "sessionId": session_id}):
-                path.unlink()
-        except Exception as exc:
-            return {"ok": False, "message": f"删除历史对话失败：{exc}"}
-    return {"ok": True, "message": "历史对话已删除。", "deleted": session_id}
+                raise SourceCleanupRejected(cleanup)
+        return state
+
+    try:
+        with source_mutation_lock(conversation_id):
+            deleted = mutate_session(bound, cleanup_owned_workspace, delete=True)
+    except SessionMutationRejected as exc:
+        return exc.result()
+    except SourceCleanupRejected as exc:
+        return {
+            "ok": False,
+            "message": "删除历史对话失败：来源工作区清理失败。",
+            "workspace": exc.workspace,
+        }
+    except OSError as exc:
+        return {"ok": False, "message": f"删除历史对话失败：{exc}"}
+    return {
+        "ok": True,
+        "message": "历史对话已删除。",
+        "deleted": session_id,
+        "sessionEpoch": session_epoch(deleted or {}),
+    }
 
 
 def _new_session_state(payload: dict[str, Any], path: Path) -> dict[str, Any]:
@@ -7741,6 +7827,7 @@ def _new_session_state(payload: dict[str, Any], path: Path) -> dict[str, Any]:
     return {
         "sessionId": path.stem,
         "conversationId": normalize_conversation_id(payload),
+        "sessionEpoch": session_epoch(payload) or new_session_epoch(),
         "topicid": normalize_topic_id(payload),
         "bookmd5": normalize_book_md5(payload),
         "contextDocumentKey": normalize_document_context_key(payload),
@@ -7754,6 +7841,19 @@ def _new_session_state(payload: dict[str, Any], path: Path) -> dict[str, Any]:
     }
 
 
+def _atomic_write_session_json(path: Path, body: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _write_session_state(path: Path, state: dict[str, Any]) -> None:
     history = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
     object_ref = state.get("objectRef") if isinstance(state.get("objectRef"), dict) else {}
@@ -7764,6 +7864,7 @@ def _write_session_state(path: Path, state: dict[str, Any]) -> None:
         "documentTitle": str(state.get("documentTitle") or ""),
         "source": str(state.get("source") or ""),
         "conversationId": str(state.get("conversationId") or ""),
+        "sessionEpoch": session_epoch(state) or new_session_epoch(),
         "title": conversation_title_from_history(history),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "history": history,
@@ -7776,59 +7877,159 @@ def _write_session_state(path: Path, state: dict[str, Any]) -> None:
         body["mnObjectId"] = str(object_ref.get("objectId") or "")
         body["mnObjectKind"] = str(object_ref.get("kind") or "")
         body["mnObjectTitle"] = str(object_ref.get("title") or "")
-    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temporary_path.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary_path, path)
-    finally:
-        try:
-            temporary_path.unlink()
-        except FileNotFoundError:
-            pass
+    _atomic_write_session_json(path, body)
+
+
+def _session_mutation_ownership_matches(item: dict[str, Any], payload: dict[str, Any]) -> bool:
+    requested_conversation_id = normalize_conversation_id(payload)
+    stored_conversation_id = str(item.get("conversationId") or "")
+    if requested_conversation_id and requested_conversation_id != stored_conversation_id:
+        return False
+    topic_id = normalize_topic_id(payload)
+    if topic_id and str(item.get("topicid") or "") != topic_id:
+        return False
+    book_md5 = normalize_book_md5(payload)
+    if book_md5 and str(item.get("bookmd5") or "") != book_md5:
+        return False
+    context_document_key = normalize_document_context_key(payload)
+    if context_document_key and str(item.get("contextDocumentKey") or "") != context_document_key:
+        return False
+    return True
+
+
+def _session_tombstone(state: dict[str, Any], path: Path) -> dict[str, Any]:
+    object_ref = state.get("objectRef") if isinstance(state.get("objectRef"), dict) else {}
+    tombstone = {
+        "schema": "codex.mn.sessionTombstone.v1",
+        "sessionId": path.stem,
+        "sessionEpoch": session_epoch(state),
+        "conversationId": str(state.get("conversationId") or ""),
+        "topicid": str(state.get("topicid") or ""),
+        "bookmd5": str(state.get("bookmd5") or ""),
+        "contextDocumentKey": str(state.get("contextDocumentKey") or ""),
+        "deletedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    if object_ref_has_identity(object_ref):
+        tombstone["objectRef"] = object_ref
+    return tombstone
 
 
 def mutate_session(
     payload: dict[str, Any],
     mutation: Any,
     *,
-    create: bool = True,
+    create: bool = False,
+    delete: bool = False,
+    advance_epoch: bool = False,
+    persist: bool = True,
+    require_epoch: bool = True,
 ) -> dict[str, Any] | None:
     path = session_path(payload)
     with history_lock(payload):
-        existing = read_conversation_file(path) if path.exists() else None
-        if existing is None and not create:
-            return None
-        state = dict(existing) if existing is not None else _new_session_state(payload, path)
+        tombstone_path = session_tombstone_path_for(path)
+        if tombstone_path.exists():
+            raise SessionMutationRejected("session_deleted", "会话已删除，已拒绝过期写入。")
+        path_exists = path.exists()
+        existing = read_conversation_file(path) if path_exists else None
+        if create:
+            if path_exists:
+                raise SessionMutationRejected("session_exists", "会话已存在，不能重复创建。")
+            state = _new_session_state(payload, path)
+        else:
+            if not path_exists:
+                raise SessionMutationRejected("session_missing", "会话不存在，已拒绝创建式写入。")
+            if existing is None:
+                raise SessionMutationRejected("session_invalid", "会话文件无效，已拒绝覆盖。")
+            if not _session_mutation_ownership_matches(existing, payload):
+                raise SessionMutationRejected(
+                    "session_ownership_mismatch",
+                    "会话归属不匹配，已拒绝写入。",
+                    current_epoch=session_epoch(existing),
+                )
+            current_epoch = session_epoch(existing)
+            current_epoch_raw = str(existing.get("_sessionEpochRaw") or "")
+            requested_epoch = session_epoch(payload)
+            requested_epoch_raw = raw_session_epoch(payload)
+            if current_epoch_raw and not current_epoch:
+                raise SessionMutationRejected("session_invalid", "会话版本字段无效，已拒绝覆盖。")
+            if require_epoch and requested_epoch_raw and not requested_epoch:
+                raise SessionMutationRejected(
+                    "session_epoch_mismatch",
+                    "请求中的会话版本无效，已拒绝写入。",
+                    current_epoch=current_epoch,
+                )
+            if require_epoch and current_epoch and requested_epoch != current_epoch:
+                raise SessionMutationRejected(
+                    "session_epoch_mismatch",
+                    "会话版本已更新，已拒绝过期写入。",
+                    current_epoch=current_epoch,
+                )
+            if require_epoch and not current_epoch and requested_epoch:
+                raise SessionMutationRejected(
+                    "session_epoch_mismatch",
+                    "旧会话没有对应版本，已拒绝未知版本写入。",
+                )
+            state = dict(existing)
+        if not session_epoch(state) and persist:
+            state["sessionEpoch"] = new_session_epoch()
+            if not str(state.get("conversationId") or ""):
+                state["conversationId"] = str(uuid.uuid4()).upper()
+        if advance_epoch:
+            state["sessionEpoch"] = new_session_epoch()
         state["history"] = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
-        mutated = mutation(state)
-        if isinstance(mutated, dict):
-            state = mutated
+        if mutation is not None:
+            mutated = mutation(state)
+            if isinstance(mutated, dict):
+                state = mutated
+        if delete:
+            _atomic_write_session_json(tombstone_path, _session_tombstone(state, path))
+            path.unlink()
+            return state
+        if not persist:
+            return state
         _write_session_state(path, state)
         return read_conversation_file(path)
 
 
-def save_history(payload: dict[str, Any], history: list[dict[str, str]]) -> None:
+def save_history(
+    payload: dict[str, Any], history: list[dict[str, str]], *, create: bool = False
+) -> dict[str, Any] | None:
     def replace_history(state: dict[str, Any]) -> dict[str, Any]:
         state["history"] = [dict(item) for item in history if isinstance(item, dict)]
         return state
 
-    mutate_session(payload, replace_history)
+    return mutate_session(payload, replace_history, create=create)
 
 
 def conversation_record_for_source_action(
-    payload: dict[str, Any],
-) -> tuple[dict[str, Any] | None, str]:
+    payload: dict[str, Any], *, require_epoch: bool
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     conversation_id = normalize_conversation_id(payload)
     if not conversation_id:
-        return None, "来源工作区操作失败：缺少有效 conversationId。"
+        message = "来源工作区操作失败：缺少有效 conversationId。"
+        return None, {"ok": False, "blocked": "session_ownership_mismatch", "message": message, "errors": [message]}
     session_id = safe_session_id(payload.get("sessionId") or payload.get("session_id"))
     if session_id:
         item = read_conversation_file(SESSIONS_DIR / f"{session_id}.json")
         if not item:
-            return None, "来源工作区操作失败：会话不存在。"
+            try:
+                mutate_session(payload, None, persist=False, require_epoch=require_epoch)
+            except SessionMutationRejected as exc:
+                result = exc.result()
+                result["errors"] = [result["message"]]
+                return None, result
+            message = "来源工作区操作失败：会话不存在。"
+            return None, {"ok": False, "blocked": "session_missing", "message": message, "errors": [message]}
         if str(item.get("conversationId") or "") != conversation_id or not conversation_matches_payload(item, payload):
-            return None, "来源工作区操作失败：该会话不属于当前文档或当前对象。"
-        return item, ""
+            message = "来源工作区操作失败：该会话不属于当前文档或当前对象。"
+            return None, {"ok": False, "blocked": "session_ownership_mismatch", "message": message, "errors": [message]}
+        try:
+            current = mutate_session(payload, None, persist=False, require_epoch=require_epoch)
+        except SessionMutationRejected as exc:
+            result = exc.result()
+            result["errors"] = [result["message"]]
+            return None, result
+        return current or item, None
 
     matches: list[dict[str, Any]] = []
     if SESSIONS_DIR.exists():
@@ -7837,11 +8038,20 @@ def conversation_record_for_source_action(
             if item and str(item.get("conversationId") or "") == conversation_id:
                 matches.append(item)
     if not matches:
-        return None, ""
+        message = "来源工作区操作失败：会话不存在。"
+        return None, {"ok": False, "blocked": "session_missing", "message": message, "errors": [message]}
     owned = [item for item in matches if conversation_matches_payload(item, payload)]
     if len(matches) != 1 or len(owned) != 1:
-        return None, "来源工作区操作失败：该会话不属于当前文档或当前对象。"
-    return owned[0], ""
+        message = "来源工作区操作失败：该会话不属于当前文档或当前对象。"
+        return None, {"ok": False, "blocked": "session_ownership_mismatch", "message": message, "errors": [message]}
+    bound = {**payload, "sessionId": str(owned[0].get("sessionId") or "")}
+    try:
+        current = mutate_session(bound, None, persist=False, require_epoch=require_epoch)
+    except SessionMutationRejected as exc:
+        result = exc.result()
+        result["errors"] = [result["message"]]
+        return None, result
+    return current or owned[0], None
 
 
 def bound_conversation_payload(payload: dict[str, Any], item: dict[str, Any] | None) -> dict[str, Any]:
@@ -7852,6 +8062,7 @@ def bound_conversation_payload(payload: dict[str, Any], item: dict[str, Any] | N
         {
             "sessionId": str(item.get("sessionId") or ""),
             "conversationId": str(item.get("conversationId") or ""),
+            "sessionEpoch": session_epoch(item),
             "topicid": str(item.get("topicid") or ""),
             "bookmd5": str(item.get("bookmd5") or ""),
             "contextDocumentKey": str(item.get("contextDocumentKey") or ""),
@@ -7884,11 +8095,14 @@ def persist_conversation_source_metadata(
     follow_current_document: bool,
     revision: str,
     *,
-    create: bool = True,
     expected_revision: str | None = None,
 ) -> dict[str, Any]:
-    if item is None and not create:
-        return {"ok": True, "item": None}
+    if item is None:
+        return {
+            "ok": False,
+            "blocked": "session_missing",
+            "message": "来源工作区操作失败：会话不存在。",
+        }
     bound = bound_conversation_payload(payload, item)
 
     class SourceRevisionMismatch(Exception):
@@ -7904,7 +8118,7 @@ def persist_conversation_source_metadata(
         return state
 
     try:
-        persisted = mutate_session(bound, update_source_metadata, create=create)
+        persisted = mutate_session(bound, update_source_metadata)
     except SourceRevisionMismatch as exc:
         current_revision = str(exc.args[0] if exc.args else "")
         return {
@@ -7914,6 +8128,12 @@ def persist_conversation_source_metadata(
             "expectedRevision": str(expected_revision or ""),
             "currentRevision": current_revision,
         }
+    except SessionMutationRejected as exc:
+        result = exc.result()
+        conversation_id = normalize_conversation_id(bound)
+        if conversation_id and str(result.get("blocked") or "").startswith("session_"):
+            result["workspaceCleanup"] = source_workspace.clear_workspace(conversation_id)
+        return result
     return {"ok": True, "item": persisted}
 
 
@@ -8038,9 +8258,12 @@ def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[st
 
 
 def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dict[str, Any]:
-    item, ownership_error = conversation_record_for_source_action(payload)
+    item, ownership_error = conversation_record_for_source_action(
+        payload,
+        require_epoch=action in {"source_workspace_update", "source_workspace_clear"},
+    )
     if ownership_error:
-        return {"ok": False, "message": ownership_error, "errors": [ownership_error]}
+        return ownership_error
     bound = bound_conversation_payload(payload, item)
     conversation_id = normalize_conversation_id(bound)
     candidates = source_workspace_candidates(bound)
@@ -8096,6 +8319,7 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                     "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
                     "sourceWorkspaceRevision": str(persisted.get("currentRevision") or current_revision),
                 }
+            item = persisted.get("item") if isinstance(persisted.get("item"), dict) else item
         return {
             "ok": bool(workspace.get("ok")),
             "message": "来源工作区已更新。" if workspace.get("ok") else "来源工作区更新失败。",
@@ -8105,6 +8329,7 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
             "sourceIds": source_ids,
             "followCurrentDocument": follow_current_document,
             "sourceWorkspaceRevision": revision if workspace.get("ok") else "",
+            "sessionEpoch": session_epoch(item or stored),
         }
 
     if action == "source_workspace_clear":
@@ -8133,7 +8358,6 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                 source_ids,
                 follow_current_document,
                 revision,
-                create=False,
                 expected_revision=expected_revision,
             )
             if not persisted.get("ok"):
@@ -8146,6 +8370,7 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
                     "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
                     "sourceWorkspaceRevision": str(persisted.get("currentRevision") or current_revision),
                 }
+            item = persisted.get("item") if isinstance(persisted.get("item"), dict) else item
         workspace["active"] = False
         workspace["revision"] = ""
         workspace["sources"] = []
@@ -8158,6 +8383,7 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
             "sourceIds": source_ids,
             "followCurrentDocument": follow_current_document,
             "sourceWorkspaceRevision": revision,
+            "sessionEpoch": session_epoch(item or stored),
         }
 
     if not source_ids:
@@ -8177,6 +8403,7 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
         "sourceIds": source_ids,
         "followCurrentDocument": follow_current_document,
         "sourceWorkspaceRevision": str(workspace.get("revision") or revision),
+        "sessionEpoch": session_epoch(item or stored),
     }
 
 
@@ -8228,7 +8455,7 @@ def append_history(
     user_text: str,
     assistant_text: str,
     assistant_kind: str = "answer",
-) -> None:
+) -> dict[str, Any] | None:
     def append_messages(state: dict[str, Any]) -> dict[str, Any]:
         history = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
         if user_text:
@@ -8239,7 +8466,16 @@ def append_history(
         state["history"] = history
         return state
 
-    mutate_session(payload, append_messages)
+    try:
+        return mutate_session(payload, append_messages)
+    except SessionMutationRejected:
+        if not (
+            normalize_conversation_id(payload)
+            or safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+            or session_epoch(payload)
+        ):
+            return None
+        raise
 
 
 STALE_MISSING_PDF_HISTORY_RE = re.compile(
@@ -8268,13 +8504,17 @@ def history_for_model(payload: dict[str, Any], model_input: str) -> list[dict[st
 
 def history_payload(payload: dict[str, Any]) -> dict[str, Any]:
     history = load_history(payload)
-    object_ref = object_ref_from_mapping(payload, object_ref_from_existing_session(session_path(payload)))
+    path = session_path(payload)
+    item = read_conversation_file(path)
+    object_ref = object_ref_from_mapping(payload, object_ref_from_existing_session(path))
     return {
         "ok": True,
         "message": f"已读取历史对话：{len(history)} 条。",
         "history": history,
         "history_count": len(history),
         "session": session_key(payload),
+        "sessionId": str((item or {}).get("sessionId") or path.stem),
+        "sessionEpoch": session_epoch(item or {}),
         "objectRef": object_ref,
         "mnObjectId": str(object_ref.get("objectId") or ""),
     }
@@ -10918,16 +11158,24 @@ def object_browser(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def clear_history(payload: dict[str, Any]) -> dict[str, Any]:
-    path = session_path(payload)
-    removed = 0
+    def clear_messages(state: dict[str, Any]) -> dict[str, Any]:
+        state["history"] = []
+        return state
+
     try:
-        with history_lock(payload):
-            if path.exists():
-                path.unlink()
-                removed = 1
-    except Exception as exc:
-        return {"ok": False, "message": f"清空历史失败：{exc}", "removed": removed}
-    return {"ok": True, "message": "历史对话已清空。", "removed": removed, "history": []}
+        item = mutate_session(payload, clear_messages, advance_epoch=True)
+    except SessionMutationRejected as exc:
+        return {**exc.result(), "removed": 0, "history": []}
+    except OSError as exc:
+        return {"ok": False, "message": f"清空历史失败：{exc}", "removed": 0, "history": []}
+    return {
+        "ok": True,
+        "message": "历史对话已清空。",
+        "removed": 1,
+        "history": [],
+        "sessionEpoch": session_epoch(item or {}),
+        "conversation": conversation_summary(item or {}),
+    }
 
 
 def open_external_url(payload: dict[str, Any]) -> dict[str, Any]:
@@ -10991,6 +11239,16 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
     queue_id = str(payload.get("_queue_id") or payload.get("queue_id") or "")
     request_id = str(payload.get("_request_id") or payload.get("requestId") or "")
     label = generation_action_label(action)
+    session_bound = bool(
+        normalize_conversation_id(payload)
+        or safe_session_id(payload.get("sessionId") or payload.get("session_id"))
+        or session_epoch(payload)
+    )
+    if session_bound:
+        try:
+            mutate_session(payload, None, persist=False)
+        except SessionMutationRejected as exc:
+            return {**exc.result(), "reply": exc.message}
     update_run_state(
         True,
         action=action,
@@ -11004,6 +11262,19 @@ def handle_generation_action(action: str, payload: dict[str, Any]) -> dict[str, 
     )
     try:
         result = dispatch_generation_action(action, payload)
+    except SessionMutationRejected as exc:
+        run = update_run_state(
+            False,
+            action=action,
+            stage="失败",
+            detail=exc.message,
+            topicid=topic_id,
+            bookmd5=book_md5,
+            queue_id=queue_id,
+            request_id=request_id,
+            source=str(payload.get("source") or ""),
+        )
+        return {**exc.result(), "reply": exc.message, "run": run}
     except Exception as exc:
         update_run_state(
             False,

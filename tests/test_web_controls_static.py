@@ -2238,6 +2238,7 @@ class WebControlsStaticTests(unittest.TestCase):
             "payload.followCurrentDocument",
             "payload.sourceWorkspaceRevision",
             "payload.conversationId",
+            "payload.sessionEpoch",
         ]:
             self.assertIn(marker, payload_body)
         for marker in [
@@ -2245,6 +2246,7 @@ class WebControlsStaticTests(unittest.TestCase):
             "command.followCurrentDocument",
             "command.sourceWorkspaceRevision",
             "command.conversationId",
+            "command.sessionEpoch",
         ]:
             self.assertIn(marker, queued_body)
         for marker in [
@@ -2287,8 +2289,49 @@ class WebControlsStaticTests(unittest.TestCase):
             "conversation.sourceIds",
             "conversation.followCurrentDocument",
             "conversation.sourceWorkspaceRevision",
+            "conversation.sessionEpoch",
         ]:
             self.assertIn(marker, conversation_body)
+
+    def test_session_epoch_propagates_through_web_lifecycle_and_queue_binding(self) -> None:
+        payload_body = self.js.split("function companionPayload", 1)[1].split(
+            "\n  function parseCompanionResult", 1
+        )[0]
+        source_identity_body = self.js.split("function beginSourceWorkspaceRequest", 1)[1].split(
+            "\n  function postSourceWorkspace", 1
+        )[0]
+        queued_body = self.js.split("function runQueuedCommand", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        clear_body = self.js.split("function clearHistory", 1)[1].split(
+            "\n  function stopCurrent", 1
+        )[0]
+        delete_body = self.js.split("function deleteConversation", 1)[1].split(
+            "\n  function isBrowserPreview", 1
+        )[0]
+        execute_body = self.js.split("function executeAction", 1)[1].split(
+            "\n  function sendAction", 1
+        )[0]
+        goal_body = self.js.split("function runGoalWithValue", 1)[1].split(
+            "\n  function runGoal", 1
+        )[0]
+
+        self.assertIn("sessionEpoch: ''", self.js)
+        self.assertIn("state.sessionEpoch = String(conversation.sessionEpoch || '')", self.js)
+        self.assertIn("delete payload.sessionEpoch", payload_body)
+        self.assertIn("payload.sessionEpoch = state.sessionEpoch", payload_body)
+        self.assertIn("sessionEpoch: String(state.sessionEpoch || '')", source_identity_body)
+        self.assertIn("identity.sessionEpoch === String(state.sessionEpoch || '')", source_identity_body)
+        self.assertIn("sessionEpoch: command.sessionEpoch || ''", queued_body)
+        self.assertIn("command.sessionEpoch", queued_body)
+        self.assertIn("state.sessionEpoch", queued_body)
+        self.assertIn("payload.sessionEpoch = item.sessionEpoch", delete_body)
+        self.assertIn("state.sessionEpoch = String(result.sessionEpoch || '')", clear_body)
+        self.assertIn("state.sessionEpoch = ''", self.js)
+        self.assertIn("!state.sessionEpoch", execute_body)
+        self.assertIn("ensureSourceWorkspaceConversation", execute_body)
+        self.assertIn("!state.sessionEpoch", goal_body)
+        self.assertIn("ensureSourceWorkspaceConversation", goal_body)
 
     def test_new_conversation_payload_is_source_clean_and_failure_preserves_state(self) -> None:
         payload_body = self.js.split("function companionPayload", 1)[1].split(
