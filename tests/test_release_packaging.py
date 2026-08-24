@@ -28,6 +28,20 @@ class ReleasePackagingTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_release_package_includes_shared_companion_url_security_module(self) -> None:
+        package_release = self.load_module()
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_shared_url_security",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        release_smoke = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = release_smoke
+        spec.loader.exec_module(release_smoke)
+
+        self.assertIn("companion_url_security.py", package_release.ROOT_FILES)
+        self.assertIn("companion_url_security.py", release_smoke.REQUIRED_SUFFIXES)
+
     def test_pkg_builder_default_version_matches_extension_manifest(self) -> None:
         spec = importlib.util.spec_from_file_location("codex_mn_build_pkg_version", PKG_BUILDER_PATH)
         assert spec and spec.loader
@@ -166,6 +180,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "Prepare Release Handoff.command",
                 "release_smoke_test.py",
                 "release_acceptance.py",
+                "companion_url_security.py",
                 "single_document_acceptance.py",
                 "ui_functional_acceptance.py",
                 "build_pkg.py",
@@ -197,6 +212,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "Prepare Release Handoff.command",
                 "release_smoke_test.py",
                 "release_acceptance.py",
+                "companion_url_security.py",
                 "single_document_acceptance.py",
                 "ui_functional_acceptance.py",
                 "build_pkg.py",
@@ -813,6 +829,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexCompanion-test/Prepare Release Handoff.command": "#!/bin/zsh\nprepare_release_handoff.py\n",
                 "CodexCompanion-test/release_smoke_test.py": "print('smoke')\n",
                 "CodexCompanion-test/release_acceptance.py": "Run final release acceptance gates\n",
+                "CodexCompanion-test/companion_url_security.py": "ACTION_TOKEN_HEADER = 'X-Codex-Action-Token'\n",
                 "CodexCompanion-test/single_document_acceptance.py": "codex-companion-single-document-acceptance-v1\n",
                 "CodexCompanion-test/ui_functional_acceptance.py": "codex-companion-ui-functional-acceptance-v1\n",
                 "CodexCompanion-test/build_pkg.py": "PACKAGE_IDENTIFIER = \"com.codex.marginnote-companion\"\n",

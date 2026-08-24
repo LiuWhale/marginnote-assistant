@@ -37,6 +37,7 @@ ROOT_FILES = [
     "Prepare Release Handoff.command",
     "release_smoke_test.py",
     "release_acceptance.py",
+    "companion_url_security.py",
     "single_document_acceptance.py",
     "ui_functional_acceptance.py",
     "build_pkg.py",

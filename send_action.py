@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+from companion_url_security import (
+    ACTION_TOKEN_HEADER,
+    is_local_companion_url,
+    open_json_request,
+)
+
 
 DEFAULT_URL = "http://127.0.0.1:48761"
 DEFAULT_COMPANION_HOME = Path(os.environ.get("CODEX_MN_COMPANION_HOME", Path.home() / ".codex/marginnote-assistant")).expanduser()
@@ -48,19 +54,19 @@ def read_action_token(path: Path | str = DEFAULT_ACTION_TOKEN_PATH) -> str:
 
 def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    token = read_action_token()
     req = request.Request(
         url,
         data=data,
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-Codex-Action-Token": token,
         },
         method="POST",
     )
+    if is_local_companion_url(url):
+        req.add_unredirected_header(ACTION_TOKEN_HEADER, read_action_token())
     try:
-        with request.urlopen(req, timeout=120) as response:
+        with open_json_request(req, timeout=120) as response:
             raw = response.read().decode("utf-8")
     except error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")

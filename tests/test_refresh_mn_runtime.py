@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
+
+from companion_url_security import TokenStrippingRedirectHandler
 
 
 REFRESH_PATH = Path(__file__).resolve().parents[1] / "refresh_mn_runtime.py"
@@ -20,6 +24,72 @@ def load_refresh_module() -> Any:
 
 
 class RefreshRuntimeTests(unittest.TestCase):
+    def test_post_json_attaches_install_token_only_to_exact_loopback_companion_urls(self) -> None:
+        module = load_refresh_module()
+        token = "b" * 64
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"ok": true}'
+
+        cases = {
+            "http://127.0.0.1:48761": True,
+            "http://localhost:48761": True,
+            "http://[::1]:48761": True,
+            "https://127.0.0.1:48761": False,
+            "http://127.0.0.1:48762": False,
+            "http://localhost.evil.test:48761": False,
+            "http://user@localhost:48761": False,
+            "http://localhost:48761@evil.test": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            token_path = Path(tmp) / "web-action-token"
+            missing_token_path = Path(tmp) / "missing-token"
+            token_path.write_text(token, encoding="ascii")
+            for url, expects_token in cases.items():
+                with self.subTest(url=url):
+                    module.ACTION_TOKEN_PATH = token_path if expects_token else missing_token_path
+                    captured: dict[str, Any] = {}
+
+                    def fake_urlopen(req, timeout=0):
+                        captured["request"] = req
+                        return Response()
+
+                    with mock.patch.object(module, "open_json_request", side_effect=fake_urlopen):
+                        result = module.post_json(url, "/marginnote/action", {"action": "health"})
+
+                    self.assertTrue(result["ok"])
+                    headers = {key.lower(): value for key, value in captured["request"].header_items()}
+                    self.assertEqual("x-codex-action-token" in headers, expects_token)
+
+    def test_redirect_request_never_inherits_install_token(self) -> None:
+        module = load_refresh_module()
+        initial = module.request.Request(
+            "http://localhost:48761/marginnote/action",
+            data=b"{}",
+            headers={"X-Codex-Action-Token": "b" * 64},
+            method="POST",
+        )
+
+        redirected = TokenStrippingRedirectHandler().redirect_request(
+            initial,
+            None,
+            302,
+            "Found",
+            {},
+            "http://remote.example.test/marginnote/action",
+        )
+
+        self.assertIsNotNone(redirected)
+        headers = {key.lower(): value for key, value in redirected.header_items()}
+        self.assertNotIn("x-codex-action-token", headers)
+
     def test_addon_reload_urls_are_non_destructive(self) -> None:
         module = load_refresh_module()
 

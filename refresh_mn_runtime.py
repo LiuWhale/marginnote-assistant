@@ -14,6 +14,12 @@ from typing import Any
 from urllib import error, request
 from urllib.parse import quote
 
+from companion_url_security import (
+    ACTION_TOKEN_HEADER,
+    is_local_companion_url,
+    open_json_request,
+)
+
 
 DEFAULT_URL = "http://127.0.0.1:48761"
 ROOT = Path(__file__).resolve().parent
@@ -115,20 +121,21 @@ def get_json(base_url: str, path: str, timeout: int = 10) -> dict[str, Any]:
 
 def post_json(base_url: str, path: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
-    if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
-        raise RuntimeError("Companion Web action token is missing or invalid")
     req = request.Request(
         companion_url(base_url, path),
         data=data,
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-Codex-Action-Token": token,
         },
         method="POST",
     )
-    with request.urlopen(req, timeout=timeout) as response:
+    if is_local_companion_url(base_url):
+        token = ACTION_TOKEN_PATH.read_text(encoding="ascii").strip()
+        if not re.fullmatch(r"[A-Fa-f0-9]{64}", token):
+            raise RuntimeError("Companion Web action token is missing or invalid")
+        req.add_unredirected_header(ACTION_TOKEN_HEADER, token)
+    with open_json_request(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

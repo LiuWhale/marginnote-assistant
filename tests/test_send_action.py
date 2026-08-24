@@ -5,8 +5,11 @@ import json
 import sys
 import tempfile
 import unittest
+from urllib import request as urllib_request
 from pathlib import Path
 from unittest import mock
+
+from companion_url_security import TokenStrippingRedirectHandler
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,10 +24,9 @@ def load_send_action():
 
 
 class SendActionTests(unittest.TestCase):
-    def test_post_json_sends_install_token_only_in_request_header(self) -> None:
+    def test_post_json_attaches_install_token_only_to_exact_loopback_companion_urls(self) -> None:
         send_action = load_send_action()
         token = "a" * 64
-        captured: dict[str, object] = {}
 
         class Response:
             def __enter__(self):
@@ -36,23 +38,63 @@ class SendActionTests(unittest.TestCase):
             def read(self) -> bytes:
                 return b'{"ok": true}'
 
-        def fake_urlopen(req, timeout=0):
-            captured["request"] = req
-            captured["timeout"] = timeout
-            return Response()
-
         payload = {"action": "health", "source": "send_action.py"}
-        with (
-            mock.patch.object(send_action, "read_action_token", return_value=token),
-            mock.patch.object(send_action.request, "urlopen", side_effect=fake_urlopen),
-        ):
-            result = send_action.post_json("http://127.0.0.1:48761/marginnote/action", payload)
 
-        request = captured["request"]
-        headers = {key.lower(): value for key, value in request.header_items()}
-        self.assertTrue(result["ok"])
-        self.assertEqual(headers["x-codex-action-token"], token)
-        self.assertNotIn(token, request.data.decode("utf-8"))
+        cases = {
+            "http://127.0.0.1:48761/marginnote/action": True,
+            "http://localhost:48761/marginnote/action": True,
+            "http://[::1]:48761/marginnote/action": True,
+            "https://127.0.0.1:48761/marginnote/action": False,
+            "http://127.0.0.1:48762/marginnote/action": False,
+            "http://127.0.0.1.evil.test:48761/marginnote/action": False,
+            "http://user@127.0.0.1:48761/marginnote/action": False,
+            "http://127.0.0.1:48761@evil.test/marginnote/action": False,
+        }
+        for url, expects_token in cases.items():
+            with self.subTest(url=url):
+                captured: dict[str, object] = {}
+
+                def fake_urlopen(req, timeout=0):
+                    captured["request"] = req
+                    captured["timeout"] = timeout
+                    return Response()
+
+                with (
+                    mock.patch.object(send_action, "read_action_token", return_value=token) as read_token,
+                    mock.patch.object(send_action, "open_json_request", side_effect=fake_urlopen),
+                ):
+                    result = send_action.post_json(url, payload)
+
+                req = captured["request"]
+                self.assertTrue(result["ok"])
+                self.assertIsInstance(req, urllib_request.Request)
+                headers = {key.lower(): value for key, value in req.header_items()}
+                self.assertEqual("x-codex-action-token" in headers, expects_token)
+                self.assertEqual(read_token.called, expects_token)
+                self.assertNotIn(token, req.data.decode("utf-8"))
+
+    def test_redirect_request_never_inherits_install_token(self) -> None:
+        send_action = load_send_action()
+        token = "a" * 64
+        initial = urllib_request.Request(
+            "http://127.0.0.1:48761/marginnote/action",
+            data=b"{}",
+            headers={"X-Codex-Action-Token": token},
+            method="POST",
+        )
+
+        redirected = TokenStrippingRedirectHandler().redirect_request(
+            initial,
+            None,
+            302,
+            "Found",
+            {},
+            "https://remote.example.test/marginnote/action",
+        )
+
+        self.assertIsNotNone(redirected)
+        headers = {key.lower(): value for key, value in redirected.header_items()}
+        self.assertNotIn("x-codex-action-token", headers)
     def test_request_native_capability_probe_uses_direct_action_endpoint(self) -> None:
         send_action = load_send_action()
         captured: dict[str, object] = {}
