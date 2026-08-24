@@ -58,9 +58,15 @@ JSB.newAddon = function(mainPath) {
   }
 
   function companionRequestHeaders() {
-    var headers = {'Content-Type': 'application/json', 'Accept': 'application/json'};
-    var token = companionActionToken();
-    if (token) headers['X-Codex-Action-Token'] = token;
+    return {'Content-Type': 'application/json', 'Accept': 'application/json'};
+  }
+
+  function companionActionRequestHeaders(url) {
+    var headers = companionRequestHeaders();
+    if (url === CompanionURL) {
+      var token = companionActionToken();
+      if (token) headers['X-Codex-Action-Token'] = token;
+    }
     return headers;
   }
 
@@ -1118,11 +1124,13 @@ JSB.newAddon = function(mainPath) {
     return out;
   }
 
-  function postJSON(url, payload, timeout, callback) {
+  function postJSON(url, payload, timeout, callback, authenticated) {
     var request = NSMutableURLRequest.requestWithURL(NSURL.URLWithString(url));
     request.setHTTPMethod('POST');
     request.setTimeoutInterval(timeout || 5);
-    request.setAllHTTPHeaderFields(companionRequestHeaders());
+    request.setAllHTTPHeaderFields(
+      authenticated === true ? companionActionRequestHeaders(url) : companionRequestHeaders()
+    );
     request.setHTTPBody(NSJSONSerialization.dataWithJSONObjectOptions(payload, 1));
     NSURLConnection.sendAsynchronousRequestQueueCompletionHandler(request, NSOperationQueue.mainQueue(), function(response, data, error) {
       if (callback) callback(response, data, error);
@@ -2366,7 +2374,7 @@ JSB.newAddon = function(mainPath) {
     var request = NSMutableURLRequest.requestWithURL(NSURL.URLWithString(CompanionURL));
     request.setHTTPMethod('POST');
     request.setTimeoutInterval(CompanionActionTimeout);
-    request.setAllHTTPHeaderFields(companionRequestHeaders());
+    request.setAllHTTPHeaderFields(companionActionRequestHeaders(CompanionURL));
     request.setHTTPBody(NSJSONSerialization.dataWithJSONObjectOptions(payload, 1));
 
     var addon = this;
@@ -2534,7 +2542,7 @@ JSB.newAddon = function(mainPath) {
           size: length,
           message: message
         });
-      });
+      }, true);
     } catch (err) {
       var errText = 'PDF 缓存失败：' + safeString(err);
       if (this.panel) this.panel.setStatus(errText);

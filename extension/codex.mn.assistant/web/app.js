@@ -3171,8 +3171,14 @@
     };
   }
 
-  function authorizeCompanionRequest(xhr) {
-    if (webActionToken) xhr.setRequestHeader('X-Codex-Action-Token', webActionToken);
+  function isLiteralLoopbackCompanionUrl(url) {
+    return typeof url === 'string' && url.indexOf('http://127.0.0.1:48761/') === 0;
+  }
+
+  function authorizeCompanionRequest(xhr, url) {
+    if (webActionToken && isLiteralLoopbackCompanionUrl(url)) {
+      xhr.setRequestHeader('X-Codex-Action-Token', webActionToken);
+    }
   }
 
   function postCompanion(action, extra, done, options) {
@@ -3181,9 +3187,10 @@
     var requestPayload = companionPayload(action, extra);
     if (options.onRequestPayload) options.onRequestPayload(requestPayload);
     var requestDocumentKey = String(requestPayload.contextDocumentKey || state.contextDocumentKey || '');
-    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    var url = 'http://127.0.0.1:48761/marginnote/action';
+    xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-    authorizeCompanionRequest(xhr);
+    authorizeCompanionRequest(xhr, url);
     setProgressStage(
       '正在等待 Companion 返回',
       '请求已发送到本地 Companion；如果走 Codex CLI 或 OpenAI，这一步会等待模型生成文字。'
@@ -3219,9 +3226,10 @@
 
   function postCompanionPath(path, action, extra, done) {
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'http://127.0.0.1:48761' + path, true);
+    var url = 'http://127.0.0.1:48761' + path;
+    xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-    authorizeCompanionRequest(xhr);
+    authorizeCompanionRequest(xhr, url);
     if (path === '/marginnote/draft') {
       setProgressStage('正在保存草稿', '模型结果已生成，正在保存到本地草稿确认区。');
     } else if (path === '/marginnote/enqueue') {
@@ -3247,17 +3255,19 @@
 
   function postCompanionSilent(action, extra) {
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    var url = 'http://127.0.0.1:48761/marginnote/action';
+    xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-    authorizeCompanionRequest(xhr);
+    authorizeCompanionRequest(xhr, url);
     xhr.send(JSON.stringify(companionPayload(action, extra)));
   }
 
   function postCompanionExactPayload(payload, done) {
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    var url = 'http://127.0.0.1:48761/marginnote/action';
+    xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-    authorizeCompanionRequest(xhr);
+    authorizeCompanionRequest(xhr, url);
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
       if (done) done(parseCompanionResult(xhr));
@@ -7714,9 +7724,10 @@
 
   function postCompanionAgentPlan(extra, done) {
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    var url = 'http://127.0.0.1:48761/marginnote/action';
+    xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-    authorizeCompanionRequest(xhr);
+    authorizeCompanionRequest(xhr, url);
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
       var result = parseCompanionResult(xhr);
@@ -11397,9 +11408,10 @@
     var ctx = state.context || {};
     if (!(ctx.topicid || ctx.notebookid)) return;
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'http://127.0.0.1:48761/marginnote/action', true);
+    var url = 'http://127.0.0.1:48761/marginnote/action';
+    xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-    authorizeCompanionRequest(xhr);
+    authorizeCompanionRequest(xhr, url);
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
       var result = null;
