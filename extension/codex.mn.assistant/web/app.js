@@ -400,7 +400,12 @@
     'sourceWorkspaceNotebookList',
     'sourceWorkspaceUploadList',
     'sourceWorkspaceValidationStatus',
-    'sourceWorkspaceClearButton',
+    'sourceWorkspaceBulkRemoval',
+    'sourceWorkspaceManageRemovalButton',
+    'sourceWorkspaceBulkControls',
+    'sourceWorkspaceSelectAllRemovableButton',
+    'sourceWorkspaceCancelRemovalSelectionButton',
+    'sourceWorkspaceRemoveSelectedButton',
     'sourceWorkspaceValidateButton',
     'sourceWorkspaceDoneButton',
     'sourceWorkspaceDiagnostics',
@@ -2306,9 +2311,16 @@
     var checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = !!state.sourceWorkspaceSelection[sourceId];
-    checkbox.disabled = !!candidate.unavailable || sourceWorkspaceLifecycle.areSourceControlsLocked();
+    checkbox.disabled = !!candidate.unavailable || sourceWorkspaceControlsLocked() ||
+      (!!state.followCurrentDocument && isCurrentDocumentCandidate(candidate));
     checkbox.setAttribute('data-source-id', sourceId);
+    checkbox.setAttribute('aria-label', '选择资料 ' + String(candidate.title || sourceId));
     checkbox.addEventListener('change', function() {
+      if (state.followCurrentDocument && isCurrentDocumentCandidate(candidate)) {
+        checkbox.checked = true;
+        state.sourceWorkspaceSelection[sourceId] = true;
+        return;
+      }
       if (checkbox.checked) state.sourceWorkspaceSelection[sourceId] = true;
       else delete state.sourceWorkspaceSelection[sourceId];
       setSourceWorkspaceStatus('warning', '资料选择已更改，点击“完成”保存');

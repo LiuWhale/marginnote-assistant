@@ -2236,6 +2236,21 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("type = 'checkbox'", row_body)
         self.assertIn("document.createElement('div')", row_body)
         self.assertNotIn("document.createElement('label')", row_body)
+        self.assertIn("sourceWorkspaceControlsLocked()", row_body)
+        self.assertIn("isCurrentDocumentCandidate(candidate)", row_body)
+        self.assertIn("checkbox.setAttribute('aria-label'", row_body)
+
+        required_controls = self.js.split("var requiredControlIds = [", 1)[1].split("];", 1)[0]
+        self.assertNotIn("'sourceWorkspaceClearButton'", required_controls)
+        for control_id in [
+            "sourceWorkspaceBulkRemoval",
+            "sourceWorkspaceManageRemovalButton",
+            "sourceWorkspaceBulkControls",
+            "sourceWorkspaceSelectAllRemovableButton",
+            "sourceWorkspaceCancelRemovalSelectionButton",
+            "sourceWorkspaceRemoveSelectedButton",
+        ]:
+            self.assertIn("'" + control_id + "'", required_controls)
 
         save_body = self.js.split("function saveSourceWorkspaceSelection", 1)[1].split(
             "\n  function newConversationRequestIsCurrent", 1
