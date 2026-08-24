@@ -131,6 +131,84 @@ class ReleaseDocsTests(unittest.TestCase):
         ]:
             self.assertIn(marker, section)
 
+    def test_release_docs_cover_repair_cycle_safety_contract(self) -> None:
+        expectations = {
+            "README.md": [
+                "127.0.0.1:48761",
+                "localhost:48761",
+                "[::1]:48761",
+                "custom URL",
+                "session epoch",
+                "tombstone",
+                "retryable",
+                "confirmation",
+                "全选可移除",
+                "only current conversation membership",
+                "rollback fails",
+                "not been published",
+            ],
+            "README.zh-CN.md": [
+                "127.0.0.1:48761",
+                "localhost:48761",
+                "[::1]:48761",
+                "自定义 URL",
+                "session epoch",
+                "tombstone",
+                "可重试",
+                "确认",
+                "全选可移除",
+                "成员关系",
+                "回滚失败",
+                "尚未作为",
+            ],
+            "docs/USER_MANUAL.md": [
+                "127.0.0.1:48761",
+                "localhost:48761",
+                "[::1]:48761",
+                "自定义 URL",
+                "session epoch",
+                "tombstone",
+                "可重试",
+                "确认",
+                "全选可移除",
+                "成员关系",
+                "回滚失败",
+                "尚未作为",
+            ],
+            "docs/RELEASE_CHECKLIST.md": [
+                "127.0.0.1:48761",
+                "localhost:48761",
+                "[::1]:48761",
+                "自定义 URL",
+                "session epoch",
+                "tombstone",
+                "可重试",
+                "确认",
+                "全选可移除",
+                "成员关系",
+                "回滚失败",
+                "尚未作为",
+            ],
+        }
+        for name, markers in expectations.items():
+            with self.subTest(name=name):
+                text = self.read_doc(name)
+                for marker in markers:
+                    self.assertIn(marker, text)
+
+        changelog = self.read_doc("CHANGELOG.md")
+        section = changelog.partition("## 0.4.53")[2].split("\n## ", 1)[0]
+        for marker in [
+            "session epoch",
+            "tombstone",
+            "retryable",
+            "confirmation",
+            "全选可移除",
+            "rollback",
+            "not published",
+        ]:
+            self.assertIn(marker, section)
+
     def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
         text = self.read_doc("docs/RELEASE_STATUS_MATRIX.md")
 

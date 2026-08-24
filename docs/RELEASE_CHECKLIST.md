@@ -6,6 +6,7 @@
 - 当前发布候选：0.4.53
 - MN4 插件 manifest 版本：0.4.53
 - Companion 版本：0.4.53
+- 0.4.53 尚未作为 GitHub Release 发布；本清单、生成的本地制品和本地 smoke/dry-run 都不是发布或公开可用性证明。
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`
@@ -244,6 +245,10 @@ python3 "$HOME/.codex/marginnote-assistant/release_acceptance.py" \
 - 手动造成一个**断开的软链接**后，验证和发送都必须在**模型调用前阻止**，错误明确指出失败 source；本轮 Codex CLI 调用数仍为 0。恢复链接或移除失败资料后才能继续。
 - 脑图生成只做 dry-run/operation-plan 验证：计划必须只包含一个明确的当前 notebook 和一个已验证写入目标，不得向真实用户脑图执行写入。只有明确存在可丢弃测试 notebook 时才可补做原生写入验收。
 - 清空会话工作区后，三个原文件仍存在且 hash 不变；只允许 Companion 管理的 `SOURCES.md`、manifest 和软链接被删除。
+- 打开资料管理模式后，`全选可移除`、`取消全选`、`移除所选` 只改变当前会话的成员关系；原文件、缓存/提取文件和上传注册记录必须保留。`跟随当前文件` 开启时，当前跟随文件必须受保护；关闭后才允许把它加入移除选择。
+- 对子集移除、全部可移除成员和移除后空集分别验收：更新后必须验证新工作区；更新或验证失败时必须恢复旧成员关系并验证恢复。若回滚失败，界面必须显示明确警告，不能报告操作成功。
+- 新建/重新打开对话后验证持久化恢复。延迟结果的 `session epoch` 不匹配、删除后的 `tombstone` 回调都必须被拒绝，不能创建或覆盖会话。失败队列项必须保留为可重试工作；排队写入只能生成草稿，必须由用户确认，不能自动调用原生写入。
+- Web 面板只使用 `http://127.0.0.1:48761`；支持 token 的 Python 客户端只向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 三个精确 HTTP loopback 来源附加隐式 token，自定义 URL 不带 token；检查请求、重定向和日志均不泄露 token。
 
 10. 视觉 QA
 

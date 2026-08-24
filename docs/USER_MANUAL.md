@@ -5,7 +5,7 @@
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
 
-当前 0.4.x 是可通过 GitHub Releases 安装的公开预览版，不是最终 v1.0。基础问答、草稿制卡、草稿脑图、目标任务、队列、文件上传、PDF 缓存、标注 PDF 副本导出、运行态诊断和双语 README 已经具备；可靠的 MarginNote 原生可见高亮、签名安装包、公证安装包和跨机器验收仍在补证据。
+当前源码候选版本是 **0.4.53**，尚未作为 GitHub Release 发布，不是最终 v1.0。基础问答、草稿制卡、草稿脑图、目标任务、队列、文件上传、PDF 缓存、标注 PDF 副本导出、运行态诊断和双语 README 已经具备；可靠的 MarginNote 原生可见高亮、签名安装包、公证安装包和跨机器验收仍在补证据。
 
 更远的终极目标不是“聊天框加几个按钮”，而是 **MarginNote Knowledge Agent OS**。当前 0.4.x 的聊天页、回答按钮、设置、日志和第一阶段工具/专家工作台都只是过渡壳层；v1.x 才是对标 MarginNote 自带 AI 的 Study Copilot，v2.x 是能原地编辑真实 `noteId` 的 Native Knowledge Editor，v3.x 才是 Notebook Knowledge OS。当前版本默认打开干净的对话页；`工具` 只在需要精读资料、生成脑图、制卡或检查写入时打开；对象、workflow、证据、验证和回滚细节默认收进专家模式。终局需要 Live MN Object Kernel、Source Registry、Operation Compiler、Transactional Native Editor、Workflow Runtime、Skill Runtime 和 Verification Agent 七个系统内核，而不只是更多按钮。
 
@@ -359,7 +359,7 @@ AI 编辑操作面板里的 `加入复习队列` 会把本次草稿卡登记到�
 2. 查看每一项的文件类型、大小、可读状态和文本提取状态。点 `验证资料`；有红色失败项时不能发送。
 3. `跟随当前文件` 默认开启，MarginNote 当前打开的文件会自动保留在资料集中并随阅读器更新。要固定一个显式比较集，先关闭该开关；此后切换当前文件不会替换已选资料。
 4. 点 `完成` 回到对话。发送前会显示本次资料数量和验证状态；回答页脚显示已读取数量，并报告成功读取或未读取的 source ID。
-5. 要缩小范围，可返回资料页移除单项；`全部取消` 清空显式资料集。移除或清空只改变当前会话的读取清单。
+5. 要缩小范围，进入资料管理模式，使用 `全选可移除`、`取消全选` 或 `移除所选`。移除全部可移除项也只清空当前会话成员关系，不删除原文件、缓存/提取文件或上传注册记录。
 
 资料页的 `Add Files` 使用 macOS 原生多选文件框，一次选择操作最多上传 **20 个文件**，每个文件不超过 **20 MB**。支持 PDF、DOCX、PPTX 等二进制文档，Markdown/纯文本、JSON/CSV/TSV、Jupyter Notebook、LaTeX/BibTeX/RST、常见源码/配置/Web 文本，以及 PNG/JPEG/GIF/WebP/BMP/TIFF/HEIC/HEIF/AVIF/ICO 图片。选择后页面会显示逐文件上传进度，例如当前序号、总数和文件名；完成时显示成功/失败汇总。
 
@@ -367,9 +367,11 @@ AI 编辑操作面板里的 `加入复习队列` 会把本次草稿卡登记到�
 
 一次发送只产生 **一次 Codex CLI 调用**。Companion 为当前会话建立托管工作区，Codex 以该目录为工作目录，先读取有序清单 `SOURCES.md`，再检查 `files/` 和 `text/` 下的资料。这里保存的是指向原文件、稳定缓存或提取文本的托管`软链接`。重建、清理会话或移除资料只删除 Companion 管理的链接和清单，`不会删除原文件`，也不会移动、重命名或修改原文件。
 
-显式选择一个文件也会启用同一套工作区、Codex CLI、source ID 确认和回答写入门禁；只有请求中完全没有显式 `sourceIds/sourceWorkspaceRevision` 的旧对话继续使用原单文档流程。队列记录同时绑定 `conversationId` 和精确 `sessionId`，切换到另一对话后，旧队列结果只写回原会话历史，不显示到当前对话。
+显式选择一个文件也会启用同一套工作区、Codex CLI、source ID 确认和回答写入门禁；只有请求中完全没有显式 `sourceIds/sourceWorkspaceRevision` 的旧对话继续使用原单文档流程。队列记录同时绑定 `conversationId` 和精确 `sessionId`，切换到另一对话后，旧队列结果只写回原会话历史，不显示到当前对话。活动会话可从持久化状态恢复，每个会话包含 `session epoch`；epoch 不匹配的迟到结果、已删除会话的 `tombstone` 回调都会被拒绝，不能恢复或覆盖已失效会话。
 
-本地动作接口要求安装时生成的 token、精确的 loopback Host 和受限 Origin/CORS。token 文件是 `~/.codex/marginnote-assistant/control/web-action-token`；Web 面板和 `send_action.py` 只通过请求头发送，不写入 payload、历史或普通日志。资料授权不接受请求临时提供的 `pdfPath`、`documentPath` 或 `availableDocuments[*].path`，只使用服务端自有缓存/索引、托管上传或已知 MarginNote 路径。
+本地动作接口要求安装时生成的 token、精确的 `127.0.0.1:48761` Host 和受限 Origin/CORS。Web 面板始终使用 `http://127.0.0.1:48761`；支持 token 的 Python 客户端只会向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 这三个精确 HTTP loopback 来源附加隐式 token，自定义 URL 绝不会收到它。token 不写入 payload、历史或普通日志。资料授权不接受请求临时提供的 `pdfPath`、`documentPath` 或 `availableDocuments[*].path`，只使用服务端自有缓存/索引、托管上传或已知 MarginNote 路径。
+
+`跟随当前文件` 开启时，当前跟随文件受保护，不能通过资料管理移除；关闭后才允许选择它。资料移除先更新工作区再验证；任何更新或验证失败都会恢复旧成员关系并验证恢复结果。若回滚失败，会显示明确警告，当前资料集仍需人工检查，不得把这次操作视为成功。
 
 当 PDF 原文件可读但提取失败时，资料仍可验证通过，manifest 和技术诊断显示 `textReadable=false` 与提取错误；模型需要改读原 PDF。提取内容超过上限时会显示 `truncated=true`，不能声称全文完整。Companion 周期清理超过 7 天且无会话引用的所有权可证明工作区/文本产物，以及超过 24 小时的 staging/backup；活跃、符号链接或所有权不明确的目录不会删除。
 
@@ -406,6 +408,8 @@ AI 编辑操作面板里的 `加入复习队列` 会把本次草稿卡登记到�
 停止不是强制杀死已经发出的底层 HTTP 或 CLI 进程，而是在请求返回后阻止继续执行后续生成、写入卡片或写入脑图。长请求可能仍需要等当前模型调用返回。
 
 运行中继续点按钮时，插件会自动把新任务加入 pending 队列。pending 任务会在上一个任务完成后自动继续，不需要再点确认；需要抢占时再点消息里的 `停止当前并直接执行`。
+
+队列失败、会话已删除、`session epoch` 不匹配，或草稿持久化失败时，任务保持未确认并标记为可重试；自动泵不会立刻重复执行它。排队的写入结果只能保存为草稿，必须在原会话恢复且用户明确确认后才会调用原生写入桥，不能后台自动写入 MarginNote。
 
 进度不只显示时间。面板会显示当前动作、阶段、详情和耗时；任务运行期间，前端还会定时读取 `/status`，把后端 `run.action`、`run.stage`、`run.detail` 同步到对话进度消息和底部运行状态。
 

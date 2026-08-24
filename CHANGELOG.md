@@ -6,18 +6,23 @@ All notable changes to Codex Companion are documented here.
 
 ## 0.4.53 - 2026-08-23
 
+> Local release candidate only; not published as a GitHub Release.
+
 ### Added
 
 - Added a conversation-scoped multi-file source picker with follow-current behavior, per-source validation/read state, deterministic managed workspaces, ordered `SOURCES.md` contracts, and source acknowledgement in the response.
 - Added one-call Codex CLI execution for explicit multi-file sets, including workspace `cwd`, queue revision binding, source removal, and broken-link preflight blocking.
 - Added `Add Files` with a native multiple picker: one picker operation accepts up to 20 files at 20 MB each across supported binary, text, code/config, and image formats. The panel reports per-file progress and partial failures, preserves successful uploads, applies auto-selection to them, and supports repeated batches.
+- Added durable active-conversation restoration with a `session epoch` and deletion `tombstone` boundary; stale callbacks cannot recreate or mutate invalid sessions.
+- Added `全选可移除`, `取消全选`, and `移除所选` for conversation-membership-only source removal, with followed-current protection and update/validate rollback.
 
 ### Changed
 
 - Multi-file requests now require Codex CLI and never fall back to the OpenAI API, which cannot read local workspace links.
 - Read sources are independent of the single validated MarginNote write target; managed workspace cleanup removes only Companion metadata and links, never selected originals.
 - Explicit source metadata now activates the managed workspace even for one file. The unsupported local/search-results block was removed from the dedicated picker; local files enter through `Add Files`.
-- The local Web action endpoint now requires an install-scoped token, exact loopback Host, and restrictive Origin/CORS checks. Workspace candidates accept only server-owned cache/index records, managed uploads, or server-resolved MarginNote paths.
+- The local Web action endpoint now requires an install-scoped token, exact `127.0.0.1:48761` Host, and restrictive Origin/CORS checks. Token-aware Python clients attach the implicit token only to exact HTTP loopback Companion origins (`127.0.0.1`, `localhost`, or `::1` on port `48761`); custom URLs never receive it. Workspace candidates accept only server-owned cache/index records, managed uploads, or server-resolved MarginNote paths.
+- Queued failures remain retryable and unacknowledged. Queued writes persist a draft and require confirmation before native writes; they never write automatically in the background.
 - Ownership-proven orphan workspaces and unreferenced managed text artifacts are cleaned after 7 days; stale staging/backups are cleaned after 24 hours, without following links or touching active/ambiguous directories.
 
 ### Fixed
@@ -30,6 +35,7 @@ All notable changes to Codex Companion are documented here.
 - A readable PDF remains usable when text extraction fails; its source record reports `textReadable=false` and the extraction diagnostic. Truncated extracted artifacts remain explicitly marked.
 - Active uploads now lock conflicting source controls. Clearing cancels the upload epoch, preserves completed upload records, and prevents stale callbacks from reselecting sources.
 - Dist smoke and the release syntax checklist now require the import-critical `companion/source_workspace.py` module.
+- Source removal restores the prior membership after update or validation failure. A rollback failure is surfaced as an explicit warning instead of a successful result.
 
 ## 0.4.52 - 2026-08-01
 
