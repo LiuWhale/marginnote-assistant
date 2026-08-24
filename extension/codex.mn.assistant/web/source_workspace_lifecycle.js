@@ -30,6 +30,104 @@
     ) ? 'active' : 'background';
   }
 
+  function queuedResultFailureReason(command, result, routing) {
+    command = command || {};
+    result = result || {};
+    var blocked = String(result.blocked || '');
+    if (routing === 'invalid') return 'session_binding_mismatch';
+    if (
+      result.tombstoned === true ||
+      blocked.indexOf('tombstone') !== -1 ||
+      blocked === 'session_deleted'
+    ) return 'session_tombstoned';
+    if (
+      blocked.indexOf('session_epoch') !== -1 ||
+      blocked.indexOf('session_binding') !== -1 ||
+      blocked === 'session_ownership_mismatch'
+    ) return 'session_binding_mismatch';
+    if (
+      result.sessionEpoch && command.sessionEpoch &&
+      String(result.sessionEpoch) !== String(command.sessionEpoch)
+    ) return 'session_binding_mismatch';
+    if (result.ok !== true || result.queued_due_to_web_busy) return 'result_failed';
+    return '';
+  }
+
+  function handleQueuedResult(options) {
+    options = options || {};
+    var command = options.command || {};
+    var result = options.result || {};
+    var action = String(command.rawAction || command.action || options.action || '');
+    var routing = queuedSessionRouting(command, options.activeConversation || {});
+    var hasCompleteBinding = !!(
+      String(command.conversationId || '') &&
+      String(command.sessionId || '') &&
+      String(command.sessionEpoch || '')
+    );
+    if (!hasCompleteBinding) routing = 'invalid';
+    if (
+      routing === 'active' &&
+      String(command.sessionEpoch || '') !== String((options.activeConversation || {}).sessionEpoch || '')
+    ) routing = 'invalid';
+
+    function defer(reason, failedResult) {
+      var detail = {
+        status: 'deferred',
+        reason: reason || 'result_failed',
+        retryable: true,
+        routing: routing,
+        action: action,
+        queueId: String(command._queue_id || ''),
+        result: failedResult || result
+      };
+      if (options.onDeferred) options.onDeferred(detail);
+      return detail;
+    }
+
+    function acknowledge() {
+      if (options.onAck) options.onAck(result);
+      return {status: 'acked', routing: routing, action: action};
+    }
+
+    var failureReason = queuedResultFailureReason(command, result, routing);
+    if (failureReason) return defer(failureReason, result);
+
+    var writeAction = options.isWriteAction ? !!options.isWriteAction(action) : false;
+    if (writeAction && routing !== 'active') return defer('inactive_write', result);
+
+    if (writeAction) {
+      if (!options.onActiveWrite) return defer('write_confirmation_unavailable', result);
+      var settled = false;
+      var disposition = {status: 'routing_write', routing: routing, action: action};
+      try {
+        options.onActiveWrite(result, function(writeResult) {
+          if (settled) return;
+          settled = true;
+          if (!writeResult || writeResult.ok !== true) {
+            defer(queuedResultFailureReason(command, writeResult || {}, routing) || 'result_failed', writeResult || {});
+            return;
+          }
+          acknowledge();
+        });
+      } catch (err) {
+        settled = true;
+        return defer('result_failed', {ok: false, message: String(err && err.message || err)});
+      }
+      return disposition;
+    }
+
+    try {
+      if (routing === 'active') {
+        if (options.onActiveChat) options.onActiveChat(result);
+      } else if (options.onInactiveChat) {
+        options.onInactiveChat(result);
+      }
+    } catch (err) {
+      return defer('result_failed', {ok: false, message: String(err && err.message || err)});
+    }
+    return acknowledge();
+  }
+
   function createHandle(kind, epoch, meta) {
     return {
       kind: kind,
@@ -165,6 +263,7 @@
   return {
     createController: createController,
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
+    handleQueuedResult: handleQueuedResult,
     queuedSessionRouting: queuedSessionRouting,
     shouldAttachImplicitMnObject: shouldAttachImplicitMnObject,
     staleConversationCleanupPayload: staleConversationCleanupPayload

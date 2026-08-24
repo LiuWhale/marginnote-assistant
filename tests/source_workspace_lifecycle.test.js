@@ -51,6 +51,7 @@ function payloadState(overrides) {
     },
     conversationId: 'CONV-LEE',
     sessionId: 'SESSION-LEE',
+    sessionEpoch: '11111111111111111111111111111111',
     testSourceIds: ['upload:one', 'upload:two', 'upload:three'],
     followCurrentDocument: false,
     sourceWorkspace: {revision: 'REV-LEE'},
@@ -65,6 +66,8 @@ function payloadState(overrides) {
     testContextScope: 'document',
   }, overrides || {});
 }
+
+const appIsWriteAction = loadAppFunction('isWriteAction', 'isQueueableGoalAction', {});
 
 test('automatic switch readiness accepts stable identity without title or path metadata', () => {
   const context = {
@@ -322,8 +325,138 @@ test('queued A result stays background after the active session switches to B', 
   );
 });
 
+function queueResultHarness(overrides) {
+  const events = [];
+  let finishWrite = null;
+  const options = Object.assign({
+    command: {
+      _queue_id: 'QUEUE-A',
+      rawAction: 'chat',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    },
+    result: {ok: true, reply: 'saved'},
+    activeConversation: {
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    },
+    isWriteAction: appIsWriteAction,
+    onActiveChat: () => events.push('active-chat'),
+    onInactiveChat: () => events.push('inactive-chat'),
+    onActiveWrite: (_result, done) => {
+      events.push('active-write');
+      finishWrite = done;
+    },
+    onDeferred: (detail) => events.push(['deferred', detail]),
+    onAck: () => events.push('ack'),
+  }, overrides || {});
+  const disposition = lifecycle.handleQueuedResult(options);
+  return {events, disposition, finishWrite: () => finishWrite};
+}
+
+test('failed queued result remains deferred and retryable without acknowledgement', () => {
+  const run = queueResultHarness({result: {ok: false, message: 'model failed'}});
+
+  assert.equal(run.disposition.status, 'deferred');
+  assert.equal(run.disposition.retryable, true);
+  assert.deepEqual(run.events.map((item) => Array.isArray(item) ? item[0] : item), ['deferred']);
+  assert.equal(run.events[0][1].retryable, true);
+  assert.equal(run.events[0][1].reason, 'result_failed');
+});
+
+test('active-session chat renders through the active handler before acknowledgement', () => {
+  const run = queueResultHarness({});
+
+  assert.equal(run.disposition.status, 'acked');
+  assert.deepEqual(run.events, ['active-chat', 'ack']);
+});
+
+test('inactive-session chat persists without active rendering before acknowledgement', () => {
+  const run = queueResultHarness({
+    activeConversation: {
+      conversationId: 'CONV-B',
+      sessionId: 'SESSION-B',
+      sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    },
+  });
+
+  assert.equal(run.disposition.status, 'acked');
+  assert.deepEqual(run.events, ['inactive-chat', 'ack']);
+});
+
+test('inactive-session write remains deferred without execution or acknowledgement', () => {
+  for (const action of [
+    'generate_card',
+    'generate_mindmap',
+    'generate_full_reading',
+    'expand_node',
+    'reorganize_mindmap',
+  ]) {
+    const run = queueResultHarness({
+      command: {
+        _queue_id: `QUEUE-${action}`,
+        rawAction: action,
+        conversationId: 'CONV-A',
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      activeConversation: {
+        conversationId: 'CONV-B',
+        sessionId: 'SESSION-B',
+        sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      },
+    });
+
+    assert.equal(run.disposition.status, 'deferred', action);
+    assert.equal(run.disposition.reason, 'inactive_write', action);
+    assert.deepEqual(run.events.map((item) => Array.isArray(item) ? item[0] : item), ['deferred'], action);
+    assert.equal(run.finishWrite(), null, action);
+  }
+});
+
+test('active-session write acknowledges only after draft confirmation routing succeeds', () => {
+  const run = queueResultHarness({
+    command: {
+      _queue_id: 'QUEUE-WRITE',
+      rawAction: 'generate_card',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    },
+  });
+
+  assert.equal(run.disposition.status, 'routing_write');
+  assert.deepEqual(run.events, ['active-write']);
+  run.finishWrite()({ok: true});
+  assert.deepEqual(run.events, ['active-write', 'ack']);
+});
+
+test('session epoch mismatch and tombstone results defer without acknowledgement', () => {
+  const mismatched = queueResultHarness({
+    activeConversation: {
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    },
+  });
+  const tombstoned = queueResultHarness({
+    result: {ok: true, tombstoned: true, reply: 'must not render'},
+  });
+
+  assert.equal(mismatched.disposition.reason, 'session_binding_mismatch');
+  assert.equal(tombstoned.disposition.reason, 'session_tombstoned');
+  assert.deepEqual(mismatched.events.map((item) => Array.isArray(item) ? item[0] : item), ['deferred']);
+  assert.deepEqual(tombstoned.events.map((item) => Array.isArray(item) ? item[0] : item), ['deferred']);
+});
+
 test('runQueuedCommand persists A through exact background payload after switching to B', () => {
-  const state = payloadState({conversationId: 'CONV-B', sessionId: 'SESSION-B'});
+  const state = payloadState({
+    conversationId: 'CONV-B',
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  });
   const companionPayload = loadCompanionPayload(state);
   const exactPayloads = [];
   const acked = [];
@@ -342,6 +475,16 @@ test('runQueuedCommand persists A through exact background payload after switchi
       exactPayloads.push(payload);
       done({ok: true, reply: 'saved in A'});
     },
+    applyQueuedResultPolicy: (command, result, effects) => lifecycle.handleQueuedResult({
+      command,
+      result,
+      activeConversation: state,
+      isWriteAction: () => false,
+      onActiveChat: effects && effects.onActiveChat,
+      onInactiveChat: effects && effects.onInactiveChat,
+      onDeferred: () => assert.fail('successful background chat must not defer'),
+      onAck: () => acked.push(command._queue_id),
+    }),
     ackQueueAndContinue: (queueId) => acked.push(queueId),
     requestGoalAction: () => assert.fail('background result must bypass active rendering path'),
     requestDraftAction: () => assert.fail('background result must bypass active rendering path'),
@@ -354,6 +497,7 @@ test('runQueuedCommand persists A through exact background payload after switchi
     prompt: 'queued for A',
     conversationId: 'CONV-A',
     sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     sourceIds: ['upload:one'],
     sourceWorkspaceRevision: 'REV-A',
   });

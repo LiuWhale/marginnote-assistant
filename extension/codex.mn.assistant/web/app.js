@@ -64,6 +64,7 @@
     contextAutoRefreshTimer: null,
     nativeHighlightWizardTimer: null,
     deferredNativeQueueIds: {},
+    deferredQueueResults: {},
     update: {},
     updateAutoChecked: false,
     pluginVersion: '',
@@ -7913,8 +7914,108 @@
     }, 700);
   }
 
-  function runQueuedCommand(command) {
+  function deferQueuedResult(command, result, detail) {
     command = command || {};
+    result = result || {};
+    detail = detail || {};
+    var queueId = String(command._queue_id || detail.queueId || '');
+    var reason = String(detail.reason || result.blocked || 'result_failed');
+    if (queueId) {
+      state.deferredQueueResults[queueId] = {
+        reason: reason,
+        retryable: true,
+        conversationId: String(command.conversationId || ''),
+        sessionId: String(command.sessionId || ''),
+        sessionEpoch: String(command.sessionEpoch || '')
+      };
+    }
+    if (queueId && state.currentQueueId === queueId) state.currentQueueId = '';
+    setWebRunLock(false);
+    window.CodexPanel.setBusy({busy: false});
+    var inactiveWrite = reason === 'inactive_write';
+    var message = inactiveWrite
+      ? '写入队列项只会在其绑定对话处于当前活动状态时执行，现已保持等待。'
+      : (result.message || '队列任务失败，已保留并标记为可重试。');
+    finishProgressStage('等待重试', message);
+    window.CodexPanel.setStatus({text: message});
+    if (!inactiveWrite && detail.routing === 'active') addFailureMessage('队列任务执行失败', result);
+  }
+
+  function applyQueuedResultPolicy(command, result, effects) {
+    effects = effects || {};
+    return window.SourceWorkspaceLifecycle.handleQueuedResult({
+      command: command || {},
+      result: result || {},
+      activeConversation: {
+        conversationId: state.conversationId,
+        sessionId: state.sessionId,
+        sessionEpoch: state.sessionEpoch,
+        contextDocumentKey: state.contextDocumentKey
+      },
+      isWriteAction: isWriteAction,
+      onActiveChat: effects.onActiveChat,
+      onInactiveChat: effects.onInactiveChat,
+      onActiveWrite: effects.onActiveWrite,
+      onDeferred: function(detail) {
+        deferQueuedResult(command, result, detail);
+        if (effects.onDeferred) effects.onDeferred(detail);
+      },
+      onAck: function() {
+        var queueId = String((command || {})._queue_id || '');
+        if (queueId) delete state.deferredQueueResults[queueId];
+        if (effects.onAck) effects.onAck(result || {});
+        ackQueueAndContinue(queueId);
+      }
+    });
+  }
+
+  function saveQueuedWriteForConfirmation(command, result, done) {
+    command = command || {};
+    result = result || {};
+    renderControls(result);
+    if (result.sourceUsage && (result.sourceUsage.complete !== true || result.answerDerivedWritesEligible !== true)) {
+      reportActionResponse(command.rawAction || command.action || '', result);
+      addCompletedAssistantReply(result.reply || '', false, result.sourceUsage, false);
+      done({ok: false, message: '资料读取不完整，写入结果未进入确认。'});
+      return;
+    }
+    if (!result.cards && !result.mindmap) {
+      done({ok: false, message: result.message || '没有可确认的卡片或脑图草稿。'});
+      return;
+    }
+    postCompanionPath('/marginnote/draft', 'draft_save', {
+      originalAction: command.rawAction || command.action || '',
+      draft: result,
+      writeTarget: result.writeTarget || (result.mindmap && result.mindmap.writeTarget) || (state.mindmapTarget && state.mindmapTarget.target) || {}
+    }, function(saved) {
+      var routing = window.SourceWorkspaceLifecycle.queuedSessionRouting(command, {
+        conversationId: state.conversationId,
+        sessionId: state.sessionId,
+        sessionEpoch: state.sessionEpoch
+      });
+      if (
+        routing !== 'active' ||
+        String(command.sessionEpoch || '') !== String(state.sessionEpoch || '')
+      ) {
+        done({ok: false, blocked: 'session_binding_mismatch', message: '对话已切换，写入草稿保持等待。'});
+        return;
+      }
+      if (!saved || !saved.ok || !saved.draft) {
+        done(saved || {ok: false, message: '草稿保存失败。'});
+        return;
+      }
+      renderDraft(saved.draft);
+      renderAiEditOperation(saved.draft);
+      setWebRunLock(false);
+      window.CodexPanel.setBusy({busy: false});
+      finishProgressStage('等待确认', '草稿已保存，确认后才会写入 MarginNote。');
+      done({ok: true, draft: saved.draft});
+    });
+  }
+
+  function runQueuedCommand(command, options) {
+    command = command || {};
+    options = options || {};
     if (!command._queue_id && !command.rawAction && !command.action && !command.nativeAction) {
       ackAndSkipQueuedCommand(command, '队列缺少动作');
       return;
@@ -7929,7 +8030,11 @@
     }
     var queuedDocumentKey = String(command.contextDocumentKey || '');
     if (queuedDocumentKey && state.contextDocumentKey && queuedDocumentKey !== state.contextDocumentKey) {
-      ackAndSkipQueuedCommand(command, '任务属于另一个文件，已阻止在当前文件中执行');
+      applyQueuedResultPolicy(command, {
+        ok: false,
+        blocked: 'queued_document_mismatch',
+        message: '任务属于另一个文件，已保持等待。'
+      });
       return;
     }
     var rawAction = command.rawAction || command.action || '';
@@ -7948,7 +8053,11 @@
       ))
     ) sessionRouting = 'invalid';
     if (sessionRouting === 'invalid') {
-      ackAndSkipQueuedCommand(command, '队列缺少完整的对话会话绑定');
+      applyQueuedResultPolicy(command, {
+        ok: false,
+        blocked: 'session_binding_mismatch',
+        message: '队列缺少完整的对话会话绑定。'
+      });
       return;
     }
     var extraPayload = {
@@ -7959,7 +8068,8 @@
       sourceWorkspaceRevision: command.sourceWorkspaceRevision || '',
       conversationId: command.conversationId || '',
       sessionId: command.sessionId || '',
-      sessionEpoch: command.sessionEpoch || ''
+      sessionEpoch: command.sessionEpoch || '',
+      contextDocumentKey: command.contextDocumentKey || ''
     };
     if (command.contextScope) {
       setContextScope(command.contextScope);
@@ -7973,13 +8083,19 @@
       return;
     }
     if (sessionRouting === 'background') {
+      if (isWriteAction(rawAction)) {
+        applyQueuedResultPolicy(command, {ok: true});
+        return;
+      }
       var backgroundPayload = companionPayload(rawAction, Object.assign({}, extraPayload, {
         prompt: prompt,
         _web_run_owner: true,
         _request_id: newRequestId()
       }));
-      postCompanionExactPayload(backgroundPayload, function() {
-        ackQueueAndContinue(queueId);
+      postCompanionExactPayload(backgroundPayload, function(result) {
+        applyQueuedResultPolicy(command, result, {
+          onInactiveChat: function() {}
+        });
       });
       return;
     }
@@ -7994,7 +8110,8 @@
     requestTextAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId, extraPayload);
   }
 
-  function drainNextQueuedAction() {
+  function drainNextQueuedAction(options) {
+    options = options || {};
     if (isActiveRun() || state.drainingQueue) return;
     if (generationLifecycleUnavailableReason()) {
       deferQueuedGenerationForLifecycle();
@@ -8023,7 +8140,21 @@
         return;
       }
       if (!command || result.blocked) return;
-      runQueuedCommand(command);
+      var queueId = String(command._queue_id || '');
+      var deferred = queueId ? state.deferredQueueResults[queueId] : null;
+      if (deferred && !options.retryDeferred) {
+        var routing = window.SourceWorkspaceLifecycle.queuedSessionRouting(command, {
+          conversationId: state.conversationId,
+          sessionId: state.sessionId,
+          sessionEpoch: state.sessionEpoch
+        });
+        var activeInactiveWrite = deferred.reason === 'inactive_write' &&
+          routing === 'active' &&
+          String(command.sessionEpoch || '') === String(state.sessionEpoch || '');
+        if (!activeInactiveWrite) return;
+      }
+      if (queueId && (options.retryDeferred || deferred)) delete state.deferredQueueResults[queueId];
+      runQueuedCommand(command, options);
     };
     xhr.onerror = function() {
       state.drainingQueue = false;
@@ -8045,8 +8176,29 @@
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在执行：' + actionLabel(action)});
     var requestId = newRequestId();
+    var queuedCommand = queueId ? Object.assign({}, extraPayload, {
+      _queue_id: queueId,
+      rawAction: action
+    }) : null;
     startProgress(action, '正在询问 Codex', 'Web 面板正在直接调用本地 Companion，不再经过 MN4 原生请求层。', requestId);
     postCompanion(action, Object.assign({}, extraPayload, {prompt: prompt, _web_run_owner: true, _request_id: requestId}), function(result) {
+      if (queueId) {
+        setWebRunLock(false);
+        applyQueuedResultPolicy(queuedCommand, result, {
+          onActiveChat: function(activeResult) {
+            renderControls(activeResult || {});
+            displayCompanionResult(activeResult, true, action);
+            reportActionResponse(action, activeResult || {});
+            finishProgressStage('已完成', activeResult.message || activeResult.reply || '动作已完成。');
+            window.CodexPanel.setBusy({busy: false});
+          },
+          onInactiveChat: function() {
+            finishProgressStage('后台完成', '结果已保存到绑定的历史对话。');
+            window.CodexPanel.setBusy({busy: false});
+          }
+        });
+        return;
+      }
       setWebRunLock(false);
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
@@ -8068,6 +8220,17 @@
       reportActionResponse(action, result || {});
       finishProgressStage('已完成', result.message || result.reply || '动作已完成。');
       ackQueueAndContinue(queueId);
+    }, {
+      showReply: !queueId,
+      onStaleResponse: queueId ? function(staleResult) {
+        setWebRunLock(false);
+        applyQueuedResultPolicy(queuedCommand, staleResult, {
+          onInactiveChat: function() {
+            finishProgressStage('后台完成', '结果已保存到绑定的历史对话。');
+            window.CodexPanel.setBusy({busy: false});
+          }
+        });
+      } : null
     });
   }
 
@@ -10356,8 +10519,36 @@
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在执行目标：' + (goal.title || '未命名目标')});
     var requestId = newRequestId();
+    var queuedCommand = queueId ? Object.assign({}, extraPayload, {
+      _queue_id: queueId,
+      rawAction: 'goal_run'
+    }) : null;
     startProgress('goal_run', '正在执行队列目标', '队列中的目标正在作为一次性任务提交给 Companion。', requestId);
     postCompanion('goal_run', Object.assign({}, extraPayload, {goal: goal, prompt: goalText, _web_run_owner: true, _request_id: requestId}), function(result) {
+      if (queueId) {
+        setWebRunLock(false);
+        applyQueuedResultPolicy(queuedCommand, result, {
+          onActiveChat: function(activeResult) {
+            renderControls(activeResult || {});
+            displayCompanionResult(activeResult, true, 'goal_run');
+            reportActionResponse('goal_run', activeResult || {});
+            if (activeResult.sourceUsage && (activeResult.sourceUsage.complete !== true || activeResult.answerDerivedWritesEligible !== true)) {
+              finishProgressStage('资料读取不完整', '回答已保留，但未创建后续写入任务。');
+            } else {
+              finishProgressStage('已完成', activeResult.message || activeResult.reply || '目标已完成。');
+              if (!enqueueGoalQueue(activeResult.goalQueue, goalUserText(goal))) {
+                showFollowUpGuides('chat', goalUserText(goal));
+              }
+            }
+            window.CodexPanel.setBusy({busy: false});
+          },
+          onInactiveChat: function() {
+            finishProgressStage('后台完成', '目标结果已保存到绑定的历史对话。');
+            window.CodexPanel.setBusy({busy: false});
+          }
+        });
+        return;
+      }
       setWebRunLock(false);
       window.CodexPanel.setBusy({busy: false});
       renderControls(result || {});
@@ -10387,6 +10578,17 @@
         showFollowUpGuides('chat', goalUserText(goal));
       }
       ackQueueAndContinue(queueId);
+    }, {
+      showReply: !queueId,
+      onStaleResponse: queueId ? function(staleResult) {
+        setWebRunLock(false);
+        applyQueuedResultPolicy(queuedCommand, staleResult, {
+          onInactiveChat: function() {
+            finishProgressStage('后台完成', '目标结果已保存到绑定的历史对话。');
+            window.CodexPanel.setBusy({busy: false});
+          }
+        });
+      } : null
     });
   }
 
@@ -10399,7 +10601,16 @@
       return;
     }
     if (!ensureMindmapTargetReady(action)) {
-      ackQueueAndContinue(queueId);
+      if (queueId) {
+        applyQueuedResultPolicy(Object.assign({}, extraPayload, {
+          _queue_id: queueId,
+          rawAction: action
+        }), {
+          ok: false,
+          blocked: 'write_target_unavailable',
+          message: '写入目标尚未就绪。'
+        });
+      }
       return;
     }
     addMessage('user', userText || '[' + action + ']');
@@ -10409,6 +10620,10 @@
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在生成草稿：' + actionLabel(action)});
     var requestId = newRequestId();
+    var queuedCommand = queueId ? Object.assign({}, extraPayload, {
+      _queue_id: queueId,
+      rawAction: action
+    }) : null;
     startProgress(action, '正在生成草稿', '正在把当前上下文发送给 Companion，并等待卡片/脑图草稿。', requestId);
     var requestPayload = Object.assign({}, extraPayload, {
       prompt: prompt,
@@ -10416,6 +10631,14 @@
       _request_id: requestId
     });
     postCompanion(action, requestPayload, function(result) {
+      if (queueId) {
+        applyQueuedResultPolicy(queuedCommand, result, {
+          onActiveWrite: function(activeResult, done) {
+            saveQueuedWriteForConfirmation(queuedCommand, activeResult, done);
+          }
+        });
+        return;
+      }
       if (!result || !result.ok) {
         setWebRunLock(false);
         window.CodexPanel.setBusy({busy: false});
@@ -10473,7 +10696,16 @@
           ackQueueAndContinue(queueId);
         }
       });
-    }, {showReply: false});
+    }, {
+      showReply: false,
+      onStaleResponse: queueId ? function(staleResult) {
+        applyQueuedResultPolicy(queuedCommand, Object.assign({}, staleResult, {
+          ok: false,
+          blocked: 'queued_document_mismatch',
+          message: '当前文件已切换，写入队列项保持等待。'
+        }));
+      } : null
+    });
   }
 
   function stagePromptAction(action, prompt, label) {
@@ -11609,7 +11841,7 @@
     }
     var pending = state.queue && state.queue.pending !== undefined ? parseInt(state.queue.pending || 0, 10) : 0;
     if (pending > 0) {
-      drainNextQueuedAction();
+      drainNextQueuedAction({retryDeferred: true});
       return;
     }
     refreshQueue();

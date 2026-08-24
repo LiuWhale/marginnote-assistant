@@ -1531,7 +1531,7 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("state.autoPdfCacheRequestedKey = ''", self.js)
         self.assertIn("requestDocumentKey", post_body)
         self.assertIn("staleDocumentResponse", post_body)
-        queued_body = self.js.split("function runQueuedCommand(command)", 1)[1].split(
+        queued_body = self.js.split("function runQueuedCommand(command, options)", 1)[1].split(
             "\n  function drainNextQueuedAction", 1
         )[0]
         self.assertIn("queuedDocumentKey", queued_body)
@@ -1869,7 +1869,10 @@ class WebControlsStaticTests(unittest.TestCase):
             "transactionId",
         ]:
             self.assertIn(marker, self.js + main_js)
-        save_body = self.js.split("postCompanionPath('/marginnote/draft', 'draft_save'", 1)[1].split(
+        draft_body = self.js.split("function requestDraftAction", 1)[1].split(
+            "\n  function stagePromptAction", 1
+        )[0]
+        save_body = draft_body.split("postCompanionPath('/marginnote/draft', 'draft_save'", 1)[1].split(
             "\n        } else {", 1
         )[0]
         self.assertIn("writeDraftForAiEditOperation(saved.draft)", save_body)
@@ -2483,6 +2486,76 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("generationLifecycleUnavailableReason", queued_body)
         self.assertIn("deferQueuedGenerationForLifecycle", queued_body)
         self.assertIn("generationLifecycleUnavailableReason", drain_body)
+
+    def test_shared_queue_result_policy_defers_failures_and_stale_sessions_without_ack(self) -> None:
+        lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
+        policy_body = self.js.split("function applyQueuedResultPolicy", 1)[1].split(
+            "\n  function saveQueuedWriteForConfirmation", 1
+        )[0]
+        defer_body = self.js.split("function deferQueuedResult", 1)[1].split(
+            "\n  function applyQueuedResultPolicy", 1
+        )[0]
+
+        self.assertIn("function handleQueuedResult(options)", lifecycle_js)
+        self.assertIn("handleQueuedResult: handleQueuedResult", lifecycle_js)
+        self.assertIn("result_failed", lifecycle_js)
+        self.assertIn("session_tombstoned", lifecycle_js)
+        self.assertIn("session_binding_mismatch", lifecycle_js)
+        self.assertIn("retryable: true", lifecycle_js)
+        self.assertIn("window.SourceWorkspaceLifecycle.handleQueuedResult", policy_body)
+        self.assertIn("onDeferred", policy_body)
+        self.assertIn("deferQueuedResult", policy_body)
+        self.assertNotIn("ackQueueAndContinue", defer_body)
+        self.assertNotIn("drainNextQueuedAction", defer_body)
+
+    def test_queued_chat_renders_only_for_the_bound_active_session_then_acks(self) -> None:
+        queued_body = self.js.split("function runQueuedCommand", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        text_body = self.js.split("function requestTextAction", 1)[1].split(
+            "\n  function promptValue", 1
+        )[0]
+
+        self.assertIn("postCompanionExactPayload", queued_body)
+        self.assertIn("applyQueuedResultPolicy", queued_body)
+        self.assertIn("onInactiveChat", queued_body)
+        self.assertIn("showReply: !queueId", text_body)
+        self.assertIn("onActiveChat", text_body)
+        self.assertIn("displayCompanionResult", text_body)
+        self.assertIn("applyQueuedResultPolicy", text_body)
+
+    def test_inactive_queued_writes_defer_and_active_writes_render_confirmation_without_native_write(self) -> None:
+        queued_body = self.js.split("function runQueuedCommand", 1)[1].split(
+            "\n  function drainNextQueuedAction", 1
+        )[0]
+        save_body = self.js.split("function saveQueuedWriteForConfirmation", 1)[1].split(
+            "\n  function runQueuedCommand", 1
+        )[0]
+        draft_body = self.js.split("function requestDraftAction", 1)[1].split(
+            "\n  function stagePromptAction", 1
+        )[0]
+
+        self.assertIn("inactive_write", (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8"))
+        self.assertIn("applyQueuedResultPolicy", queued_body)
+        self.assertIn("isWriteAction(rawAction)", queued_body)
+        self.assertIn("saveQueuedWriteForConfirmation", draft_body)
+        for marker in ["renderControls", "renderDraft", "renderAiEditOperation"]:
+            self.assertIn(marker, save_body)
+        self.assertNotIn("writeDraftForAiEditOperation", save_body)
+        self.assertNotIn("bridge('write_draft'", save_body)
+
+    def test_deferred_queue_items_require_an_explicit_retry_instead_of_immediate_pumping(self) -> None:
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+        toggle_body = self.js.split("function runToggle", 1)[1].split(
+            "\n  function uploadFromInputs", 1
+        )[0]
+
+        self.assertIn("state.deferredQueueResults", self.js)
+        self.assertIn("retryDeferred", drain_body)
+        self.assertIn("deferredQueueResults", drain_body)
+        self.assertIn("drainNextQueuedAction({retryDeferred: true})", toggle_body)
 
     def test_automatic_switch_readiness_uses_exported_lifecycle_predicate(self) -> None:
         lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
