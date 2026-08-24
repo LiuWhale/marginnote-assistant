@@ -61,6 +61,38 @@ class CompanionControlsTests(unittest.TestCase):
             "sessionEpoch": conversation["sessionEpoch"],
         }
 
+    def source_workspace_session(
+        self,
+        companion: Any,
+        root: Path,
+        conversation_id: str,
+    ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
+        uploads = []
+        for index, name in enumerate(("source-a.md", "source-b.md"), start=1):
+            path = root / "uploads" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"source {index}", encoding="utf-8")
+            uploads.append({"id": name, "name": name, "path": str(path), "size": path.stat().st_size})
+        companion.save_uploaded_files(uploads)
+        source_ids = [item["id"] for item in companion.source_workspace_candidates({})["sources"]]
+        bound = self.owned_session_payload(
+            companion,
+            {
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "contextDocumentKey": f"T1|B1|{conversation_id}",
+                "source": "unittest",
+                "conversationId": conversation_id,
+                "followCurrentDocument": False,
+            },
+        )
+        initial = companion.source_workspace_action(
+            {**bound, "sourceIds": source_ids[:1], "sourceWorkspaceRevision": ""},
+            "source_workspace_update",
+        )
+        self.assertTrue(initial["ok"], initial)
+        return bound, source_ids, initial
+
     def multi_file_payload(
         self,
         companion: Any,
@@ -685,7 +717,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(tombstone["conversationId"], created["conversationId"])
             self.assertEqual(tombstone["sessionEpoch"], created["sessionEpoch"])
 
-    def test_source_save_finishing_after_history_clear_cannot_overwrite_new_epoch(self) -> None:
+    def test_source_workspace_build_and_metadata_commit_hold_session_epoch_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             companion = load_companion(root)
@@ -723,25 +755,218 @@ class CompanionControlsTests(unittest.TestCase):
                 return result
 
             with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=blocking_build):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                     saving = executor.submit(companion.source_workspace_action, bound, "source_workspace_update")
                     self.assertTrue(workspace_built.wait(5), "source build did not reach the race point")
-                    cleared = companion.clear_history(bound)
+                    clearing = executor.submit(companion.clear_history, bound)
+                    time.sleep(0.05)
+                    clear_finished_before_source_commit = clearing.done()
                     finish_source_save.set()
                     result = saving.result(timeout=5)
+                    cleared = clearing.result(timeout=5)
 
+            self.assertFalse(clear_finished_before_source_commit)
+            self.assertTrue(result["ok"], result)
             self.assertTrue(cleared["ok"], cleared)
             self.assertRegex(cleared["sessionEpoch"], r"^[a-f0-9]{32}$")
             self.assertNotEqual(cleared["sessionEpoch"], created["sessionEpoch"])
-            self.assertFalse(result["ok"], result)
-            self.assertEqual(result.get("blocked"), "session_epoch_mismatch")
             session_path = companion.SESSIONS_DIR / f"{created['sessionId']}.json"
             saved = json.loads(session_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["sessionEpoch"], cleared["sessionEpoch"])
             self.assertEqual(saved["history"], [])
+            self.assertEqual(saved["sourceIds"], [source_id])
+            self.assertEqual(saved["sourceWorkspaceRevision"], result["sourceWorkspaceRevision"])
+            validated = companion.source_workspace.validate_workspace(
+                created["conversationId"], result["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(validated["ok"], validated)
+
+    def test_stale_source_update_is_rejected_before_workspace_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-STALE-SOURCE-UPDATE"
+            )
+            stale_payload = {
+                **bound,
+                "sourceIds": source_ids[1:],
+                "sourceWorkspaceRevision": initial["sourceWorkspaceRevision"],
+            }
+            precheck_finished = threading.Event()
+            release_precheck = threading.Event()
+            build_calls: list[str] = []
+            original_record = companion.conversation_record_for_source_action
+            original_build = companion.source_workspace.build_workspace
+
+            def blocking_record(*args: Any, **kwargs: Any) -> Any:
+                result = original_record(*args, **kwargs)
+                precheck_finished.set()
+                self.assertTrue(release_precheck.wait(5), "test did not release source precheck")
+                return result
+
+            def counted_build(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                build_calls.append("build")
+                return original_build(*args, **kwargs)
+
+            with mock.patch.object(companion, "conversation_record_for_source_action", side_effect=blocking_record):
+                with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=counted_build):
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        updating = executor.submit(
+                            companion.source_workspace_action, stale_payload, "source_workspace_update"
+                        )
+                        self.assertTrue(precheck_finished.wait(5), "source update did not finish precheck")
+                        cleared = companion.clear_history(bound)
+                        release_precheck.set()
+                        result = updating.result(timeout=5)
+
+            self.assertTrue(cleared["ok"], cleared)
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "session_epoch_mismatch")
+            self.assertEqual(build_calls, [])
+            validated = companion.source_workspace.validate_workspace(
+                bound["conversationId"], initial["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(validated["ok"], validated)
+            saved = json.loads(companion.session_path(bound).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], source_ids[:1])
+            self.assertEqual(saved["sourceWorkspaceRevision"], initial["sourceWorkspaceRevision"])
+
+    def test_stale_source_clear_is_rejected_before_workspace_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-STALE-SOURCE-CLEAR"
+            )
+            stale_payload = {
+                **bound,
+                "sourceWorkspaceRevision": initial["sourceWorkspaceRevision"],
+            }
+            precheck_finished = threading.Event()
+            release_precheck = threading.Event()
+            clear_calls: list[str] = []
+            original_record = companion.conversation_record_for_source_action
+            original_clear = companion.source_workspace.clear_workspace
+
+            def blocking_record(*args: Any, **kwargs: Any) -> Any:
+                result = original_record(*args, **kwargs)
+                precheck_finished.set()
+                self.assertTrue(release_precheck.wait(5), "test did not release source precheck")
+                return result
+
+            def counted_clear(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                clear_calls.append("clear")
+                return original_clear(*args, **kwargs)
+
+            with mock.patch.object(companion, "conversation_record_for_source_action", side_effect=blocking_record):
+                with mock.patch.object(companion.source_workspace, "clear_workspace", side_effect=counted_clear):
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        clearing_source = executor.submit(
+                            companion.source_workspace_action, stale_payload, "source_workspace_clear"
+                        )
+                        self.assertTrue(precheck_finished.wait(5), "source clear did not finish precheck")
+                        cleared_history = companion.clear_history(bound)
+                        release_precheck.set()
+                        result = clearing_source.result(timeout=5)
+
+            self.assertTrue(cleared_history["ok"], cleared_history)
+            self.assertFalse(result["ok"], result)
+            self.assertEqual(result.get("blocked"), "session_epoch_mismatch")
+            self.assertEqual(clear_calls, [])
+            validated = companion.source_workspace.validate_workspace(
+                bound["conversationId"], initial["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(validated["ok"], validated)
+            saved = json.loads(companion.session_path(bound).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sourceIds"], source_ids[:1])
+            self.assertEqual(saved["sourceWorkspaceRevision"], initial["sourceWorkspaceRevision"])
+
+    def test_source_workspace_clear_and_metadata_commit_hold_session_epoch_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, _source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-SOURCE-CLEAR-LOCK"
+            )
+            source_clear_started = threading.Event()
+            release_source_clear = threading.Event()
+            original_clear = companion.source_workspace.clear_workspace
+
+            def blocking_clear(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                result = original_clear(*args, **kwargs)
+                source_clear_started.set()
+                self.assertTrue(release_source_clear.wait(5), "test did not release source clear")
+                return result
+
+            payload = {
+                **bound,
+                "sourceWorkspaceRevision": initial["sourceWorkspaceRevision"],
+            }
+            with mock.patch.object(companion.source_workspace, "clear_workspace", side_effect=blocking_clear):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    clearing_source = executor.submit(
+                        companion.source_workspace_action, payload, "source_workspace_clear"
+                    )
+                    self.assertTrue(source_clear_started.wait(5), "source clear did not reach race point")
+                    clearing_history = executor.submit(companion.clear_history, bound)
+                    time.sleep(0.05)
+                    history_finished_before_source_commit = clearing_history.done()
+                    release_source_clear.set()
+                    source_result = clearing_source.result(timeout=5)
+                    history_result = clearing_history.result(timeout=5)
+
+            self.assertFalse(history_finished_before_source_commit)
+            self.assertTrue(source_result["ok"], source_result)
+            self.assertTrue(history_result["ok"], history_result)
+            self.assertFalse(companion.source_workspace.workspace_path(bound["conversationId"]).exists())
+            saved = json.loads(companion.session_path(bound).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sessionEpoch"], history_result["sessionEpoch"])
             self.assertEqual(saved["sourceIds"], [])
             self.assertEqual(saved["sourceWorkspaceRevision"], "")
-            self.assertFalse(companion.source_workspace.workspace_path(created["conversationId"]).exists())
+
+    def test_conversation_restore_build_and_metadata_commit_hold_session_epoch_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, _source_ids, _initial = self.source_workspace_session(
+                companion, root, "CONV-RESTORE-LOCK"
+            )
+            removed = companion.source_workspace.clear_workspace(bound["conversationId"])
+            self.assertTrue(removed["ok"], removed)
+            rebuild_finished = threading.Event()
+            release_rebuild = threading.Event()
+            original_build = companion.source_workspace.build_workspace
+
+            def blocking_build(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                result = original_build(*args, **kwargs)
+                rebuild_finished.set()
+                self.assertTrue(release_rebuild.wait(5), "test did not release workspace restore")
+                return result
+
+            with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=blocking_build):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    loading = executor.submit(companion.load_conversation, bound)
+                    self.assertTrue(rebuild_finished.wait(5), "workspace restore did not reach race point")
+                    clearing_history = executor.submit(companion.clear_history, bound)
+                    time.sleep(0.05)
+                    history_finished_before_restore_commit = clearing_history.done()
+                    release_rebuild.set()
+                    loaded = loading.result(timeout=5)
+                    cleared = clearing_history.result(timeout=5)
+
+            self.assertFalse(history_finished_before_restore_commit)
+            self.assertTrue(loaded["ok"], loaded)
+            self.assertTrue(loaded["workspace"]["ok"], loaded["workspace"])
+            self.assertTrue(cleared["ok"], cleared)
+            restored_revision = loaded["workspace"]["revision"]
+            validated = companion.source_workspace.validate_workspace(
+                bound["conversationId"], restored_revision
+            )
+            self.assertTrue(validated["ok"], validated)
+            saved = json.loads(companion.session_path(bound).read_text(encoding="utf-8"))
+            self.assertEqual(saved["sessionEpoch"], cleared["sessionEpoch"])
+            self.assertEqual(saved["sourceWorkspaceRevision"], restored_revision)
 
     def test_stale_queued_epoch_is_quarantined_after_history_clear(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -855,6 +1080,79 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(rejected.exception.blocked, "session_deleted")
             self.assertFalse(session_path.exists())
 
+    def test_tombstone_write_failure_leaves_session_and_workspace_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, _source_ids, initial = self.source_workspace_session(
+                companion, root, "CONV-DELETE-TOMBSTONE-FAIL"
+            )
+            session_path = companion.session_path(bound)
+            tombstone_path = companion.session_tombstone_path_for(session_path)
+            clear_calls: list[str] = []
+            original_atomic_write = companion._atomic_write_session_json
+            original_clear = companion.source_workspace.clear_workspace
+
+            def fail_tombstone_write(path: Path, body: dict[str, Any]) -> None:
+                if path == tombstone_path:
+                    raise OSError("synthetic tombstone write failure")
+                original_atomic_write(path, body)
+
+            def counted_clear(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                clear_calls.append("clear")
+                return original_clear(*args, **kwargs)
+
+            with mock.patch.object(companion, "_atomic_write_session_json", side_effect=fail_tombstone_write):
+                with mock.patch.object(companion.source_workspace, "clear_workspace", side_effect=counted_clear):
+                    deleted = companion.delete_conversation(bound)
+
+            self.assertFalse(deleted["ok"], deleted)
+            self.assertEqual(clear_calls, [])
+            self.assertTrue(session_path.is_file())
+            self.assertFalse(tombstone_path.exists())
+            validated = companion.source_workspace.validate_workspace(
+                bound["conversationId"], initial["sourceWorkspaceRevision"]
+            )
+            self.assertTrue(validated["ok"], validated)
+            loaded = companion.load_conversation(bound)
+            self.assertTrue(loaded["ok"], loaded)
+
+    def test_delete_cleanup_failure_keeps_tombstone_and_retry_completes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            bound, _source_ids, _initial = self.source_workspace_session(
+                companion, root, "CONV-DELETE-CLEANUP-FAIL"
+            )
+            session_path = companion.session_path(bound)
+            tombstone_path = companion.session_tombstone_path_for(session_path)
+            workspace_path = companion.source_workspace.workspace_path(bound["conversationId"])
+            cleanup_failure = {
+                "ok": False,
+                "errors": ["synthetic cleanup failure"],
+                "sourceCount": 1,
+            }
+
+            with mock.patch.object(companion.source_workspace, "clear_workspace", return_value=cleanup_failure):
+                deleted = companion.delete_conversation(bound)
+
+            self.assertFalse(deleted["ok"], deleted)
+            self.assertEqual(deleted.get("blocked"), "session_delete_cleanup_failed")
+            self.assertTrue(deleted.get("tombstoned"))
+            self.assertTrue(deleted.get("retryable"))
+            self.assertTrue(tombstone_path.is_file())
+            self.assertTrue(session_path.is_file())
+            self.assertTrue(workspace_path.is_dir())
+            with self.assertRaises(companion.SessionMutationRejected) as rejected:
+                companion.append_history(bound, "late question", "late answer")
+            self.assertEqual(rejected.exception.blocked, "session_deleted")
+
+            retried = companion.delete_conversation(bound)
+
+            self.assertTrue(retried["ok"], retried)
+            self.assertFalse(session_path.exists())
+            self.assertFalse(workspace_path.exists())
+
     def test_committed_tombstone_blocks_reads_and_writes_when_unlink_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -880,6 +1178,11 @@ class CompanionControlsTests(unittest.TestCase):
             with self.assertRaises(companion.SessionMutationRejected) as rejected:
                 companion.append_history(bound, "late question", "late answer")
             self.assertEqual(rejected.exception.blocked, "session_deleted")
+
+            retried = companion.delete_conversation(bound)
+
+            self.assertTrue(retried["ok"], retried)
+            self.assertFalse(session_path.exists())
 
     def test_existing_legacy_session_migrates_but_missing_legacy_session_stays_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -6443,13 +6746,22 @@ class CompanionControlsTests(unittest.TestCase):
                 return result
 
             with mock.patch.object(companion.source_workspace, "build_workspace", side_effect=blocking_build):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                     updating = executor.submit(companion.source_workspace_action, payload, "source_workspace_update")
                     self.assertTrue(build_finished.wait(5), "workspace build did not reach the interleaving point")
-                    companion.append_history(payload, "question during build", "answer during build")
+                    appending = executor.submit(
+                        companion.append_history,
+                        payload,
+                        "question during build",
+                        "answer during build",
+                    )
+                    time.sleep(0.05)
+                    append_finished_before_source_commit = appending.done()
                     allow_source_save.set()
                     result = updating.result(timeout=5)
+                    appending.result(timeout=5)
 
+            self.assertFalse(append_finished_before_source_commit)
             self.assertTrue(result["ok"], result)
             saved = json.loads(companion.session_path(payload).read_text(encoding="utf-8"))
             self.assertEqual(

@@ -7783,11 +7783,8 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     if not session_id:
         return {"ok": False, "message": "删除历史对话失败：缺少有效 sessionId。"}
     bound = {**payload, "sessionId": session_id}
-    try:
-        item = mutate_session(bound, None, persist=False)
-    except SessionMutationRejected as exc:
-        return exc.result()
-    conversation_id = str((item or {}).get("conversationId") or "")
+    conversation_id = normalize_conversation_id(bound)
+    delete_state: dict[str, Any] = {}
 
     class SourceCleanupRejected(RuntimeError):
         def __init__(self, workspace: dict[str, Any]) -> None:
@@ -7795,8 +7792,10 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
             self.workspace = workspace
 
     def cleanup_owned_workspace(state: dict[str, Any]) -> dict[str, Any]:
-        if conversation_id:
-            cleanup = source_workspace.clear_workspace(conversation_id)
+        delete_state.update(state)
+        owned_conversation_id = str(state.get("conversationId") or "")
+        if owned_conversation_id:
+            cleanup = source_workspace.clear_workspace(owned_conversation_id)
             if not cleanup.get("ok"):
                 raise SourceCleanupRejected(cleanup)
         return state
@@ -7809,11 +7808,23 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
     except SourceCleanupRejected as exc:
         return {
             "ok": False,
+            "blocked": "session_delete_cleanup_failed",
             "message": "删除历史对话失败：来源工作区清理失败。",
             "workspace": exc.workspace,
+            "tombstoned": True,
+            "retryable": True,
+            "sessionEpoch": session_epoch(delete_state),
         }
     except OSError as exc:
-        return {"ok": False, "message": f"删除历史对话失败：{exc}"}
+        tombstoned = session_tombstone_path_for(SESSIONS_DIR / f"{session_id}.json").exists()
+        return {
+            "ok": False,
+            "blocked": "session_delete_unlink_failed" if tombstoned else "session_delete_tombstone_failed",
+            "message": f"删除历史对话失败：{exc}",
+            "tombstoned": tombstoned,
+            "retryable": tombstoned,
+            "sessionEpoch": session_epoch(delete_state),
+        }
     return {
         "ok": True,
         "message": "历史对话已删除。",
@@ -7914,6 +7925,26 @@ def _session_tombstone(state: dict[str, Any], path: Path) -> dict[str, Any]:
     return tombstone
 
 
+def read_session_tombstone(path: Path) -> dict[str, Any] | None:
+    tombstone_path = session_tombstone_path_for(path)
+    try:
+        data = json.loads(tombstone_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("schema") != "codex.mn.sessionTombstone.v1":
+        return None
+    if safe_session_id(data.get("sessionId")) != path.stem:
+        return None
+    return {
+        **data,
+        "sessionId": path.stem,
+        "sessionEpoch": session_epoch(data),
+        "_sessionEpochRaw": raw_session_epoch(data),
+    }
+
+
 def mutate_session(
     payload: dict[str, Any],
     mutation: Any,
@@ -7927,19 +7958,29 @@ def mutate_session(
     path = session_path(payload)
     with history_lock(payload):
         tombstone_path = session_tombstone_path_for(path)
-        if tombstone_path.exists():
-            raise SessionMutationRejected("session_deleted", "会话已删除，已拒绝过期写入。")
-        path_exists = path.exists()
-        existing = read_conversation_file(path) if path_exists else None
-        if create:
-            if path_exists:
-                raise SessionMutationRejected("session_exists", "会话已存在，不能重复创建。")
-            state = _new_session_state(payload, path)
-        else:
-            if not path_exists:
-                raise SessionMutationRejected("session_missing", "会话不存在，已拒绝创建式写入。")
+        tombstone_exists = tombstone_path.exists()
+        if tombstone_exists:
+            if not delete:
+                raise SessionMutationRejected("session_deleted", "会话已删除，已拒绝过期写入。")
+            existing = read_session_tombstone(path)
             if existing is None:
-                raise SessionMutationRejected("session_invalid", "会话文件无效，已拒绝覆盖。")
+                raise SessionMutationRejected("session_invalid", "会话删除标记无效，已拒绝覆盖。")
+            path_exists = path.exists()
+            state = dict(existing)
+        else:
+            path_exists = path.exists()
+            existing = read_conversation_file(path) if path_exists else None
+            if create:
+                if path_exists:
+                    raise SessionMutationRejected("session_exists", "会话已存在，不能重复创建。")
+                state = _new_session_state(payload, path)
+            else:
+                if not path_exists:
+                    raise SessionMutationRejected("session_missing", "会话不存在，已拒绝创建式写入。")
+                if existing is None:
+                    raise SessionMutationRejected("session_invalid", "会话文件无效，已拒绝覆盖。")
+                state = dict(existing)
+        if not create:
             if not _session_mutation_ownership_matches(existing, payload):
                 raise SessionMutationRejected(
                     "session_ownership_mismatch",
@@ -7969,7 +8010,6 @@ def mutate_session(
                     "session_epoch_mismatch",
                     "旧会话没有对应版本，已拒绝未知版本写入。",
                 )
-            state = dict(existing)
         if not session_epoch(state) and persist:
             state["sessionEpoch"] = new_session_epoch()
             if not str(state.get("conversationId") or ""):
@@ -7977,14 +8017,20 @@ def mutate_session(
         if advance_epoch:
             state["sessionEpoch"] = new_session_epoch()
         state["history"] = [dict(item) for item in state.get("history", []) if isinstance(item, dict)]
+        if delete:
+            if not tombstone_exists:
+                _atomic_write_session_json(tombstone_path, _session_tombstone(state, path))
+            if mutation is not None:
+                mutated = mutation(state)
+                if isinstance(mutated, dict):
+                    state = mutated
+            if path.exists():
+                path.unlink()
+            return state
         if mutation is not None:
             mutated = mutation(state)
             if isinstance(mutated, dict):
                 state = mutated
-        if delete:
-            _atomic_write_session_json(tombstone_path, _session_tombstone(state, path))
-            path.unlink()
-            return state
         if not persist:
             return state
         _write_session_state(path, state)
@@ -8088,55 +8134,6 @@ def empty_source_workspace_status(conversation_id: str) -> dict[str, Any]:
     }
 
 
-def persist_conversation_source_metadata(
-    payload: dict[str, Any],
-    item: dict[str, Any] | None,
-    source_ids: list[str],
-    follow_current_document: bool,
-    revision: str,
-    *,
-    expected_revision: str | None = None,
-) -> dict[str, Any]:
-    if item is None:
-        return {
-            "ok": False,
-            "blocked": "session_missing",
-            "message": "来源工作区操作失败：会话不存在。",
-        }
-    bound = bound_conversation_payload(payload, item)
-
-    class SourceRevisionMismatch(Exception):
-        pass
-
-    def update_source_metadata(state: dict[str, Any]) -> dict[str, Any]:
-        current_revision = str(state.get("sourceWorkspaceRevision") or "")
-        if expected_revision is not None and current_revision != str(expected_revision or ""):
-            raise SourceRevisionMismatch(current_revision)
-        state["sourceIds"] = list(source_ids)
-        state["followCurrentDocument"] = bool(follow_current_document)
-        state["sourceWorkspaceRevision"] = str(revision or "")
-        return state
-
-    try:
-        persisted = mutate_session(bound, update_source_metadata)
-    except SourceRevisionMismatch as exc:
-        current_revision = str(exc.args[0] if exc.args else "")
-        return {
-            "ok": False,
-            "blocked": "source_workspace_revision_mismatch",
-            "message": "来源工作区已被其他操作更新，请刷新后重试。",
-            "expectedRevision": str(expected_revision or ""),
-            "currentRevision": current_revision,
-        }
-    except SessionMutationRejected as exc:
-        result = exc.result()
-        conversation_id = normalize_conversation_id(bound)
-        if conversation_id and str(result.get("blocked") or "").startswith("session_"):
-            result["workspaceCleanup"] = source_workspace.clear_workspace(conversation_id)
-        return result
-    return {"ok": True, "item": persisted}
-
-
 def prepare_source_workspace(
     payload: dict[str, Any], source_ids: list[str], follow_current_document: bool
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -8202,51 +8199,54 @@ def _restore_conversation_source_workspace_locked(item: dict[str, Any], payload:
         return empty_source_workspace_status(conversation_id)
     revision = str(item.get("sourceWorkspaceRevision") or "")
     status = source_workspace.validate_workspace(conversation_id, revision)
-    if status.get("ok"):
+    if status.get("ok") and revision:
         status["active"] = True
-        if not revision:
-            persisted = persist_conversation_source_metadata(
-                payload,
-                item,
-                source_ids,
-                bool(item.get("followCurrentDocument", True)),
-                str(status.get("revision") or ""),
-                expected_revision=revision,
-            )
-            if not persisted.get("ok"):
-                return {
-                    "ok": False,
-                    "active": False,
-                    "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
-                    **persisted,
-                }
-            item["sourceWorkspaceRevision"] = str(status.get("revision") or "")
         return status
     bound = bound_conversation_payload(payload, item)
-    _, rebuilt = prepare_source_workspace(
-        bound,
-        source_ids,
-        bool(item.get("followCurrentDocument", True)),
-    )
-    if rebuilt.get("ok"):
-        rebuilt_revision = str(rebuilt.get("revision") or "")
-        persisted = persist_conversation_source_metadata(
-            bound,
-            item,
-            source_ids,
-            bool(item.get("followCurrentDocument", True)),
-            rebuilt_revision,
-            expected_revision=revision,
+    operation: dict[str, Any] = {}
+
+    class SourceWorkspaceRestoreFailed(Exception):
+        pass
+
+    def restore_workspace_and_metadata(state: dict[str, Any]) -> dict[str, Any]:
+        current_source_ids = unique_string_list(state.get("sourceIds"))
+        current_conversation_id = str(state.get("conversationId") or "")
+        if not current_source_ids:
+            operation["workspace"] = empty_source_workspace_status(current_conversation_id)
+            return state
+        current_revision = str(state.get("sourceWorkspaceRevision") or "")
+        current_status = source_workspace.validate_workspace(current_conversation_id, current_revision)
+        if current_status.get("ok"):
+            current_status["active"] = True
+            operation["workspace"] = current_status
+            if not current_revision:
+                state["sourceWorkspaceRevision"] = str(current_status.get("revision") or "")
+            return state
+        current_bound = bound_conversation_payload(payload, state)
+        _, rebuilt = prepare_source_workspace(
+            current_bound,
+            current_source_ids,
+            bool(state.get("followCurrentDocument", True)),
         )
-        if not persisted.get("ok"):
-            return {
-                "ok": False,
-                "active": False,
-                "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
-                **persisted,
-            }
-        item["sourceWorkspaceRevision"] = rebuilt_revision
-    return rebuilt
+        operation["workspace"] = rebuilt
+        if not rebuilt.get("ok"):
+            raise SourceWorkspaceRestoreFailed
+        state["sourceWorkspaceRevision"] = str(rebuilt.get("revision") or "")
+        return state
+
+    try:
+        mutate_session(bound, restore_workspace_and_metadata)
+    except SessionMutationRejected as exc:
+        return {
+            **exc.result(),
+            "active": False,
+            "errors": [exc.message],
+        }
+    except SourceWorkspaceRestoreFailed:
+        workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+        return workspace
+    workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+    return workspace
 
 
 def restore_conversation_source_workspace(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -8282,101 +8282,162 @@ def _source_workspace_action_locked(payload: dict[str, Any], action: str) -> dic
         else stored.get("sourceWorkspaceRevision") or ""
     )
 
+    class SourceWorkspaceRevisionMismatch(Exception):
+        pass
+
+    class SourceWorkspaceOperationFailed(Exception):
+        pass
+
     if action == "source_workspace_update":
         expected_revision = str(payload.get("sourceWorkspaceRevision") or "")
-        current_revision = str(stored.get("sourceWorkspaceRevision") or "")
-        if expected_revision != current_revision:
+        operation: dict[str, Any] = {}
+        current: dict[str, Any] = {}
+
+        def update_workspace_and_metadata(state: dict[str, Any]) -> dict[str, Any]:
+            current.update(
+                {
+                    "sourceIds": unique_string_list(state.get("sourceIds")),
+                    "followCurrentDocument": bool(state.get("followCurrentDocument", True)),
+                    "sourceWorkspaceRevision": str(state.get("sourceWorkspaceRevision") or ""),
+                }
+            )
+            if expected_revision != current["sourceWorkspaceRevision"]:
+                raise SourceWorkspaceRevisionMismatch
+            prepared_candidates, workspace = prepare_source_workspace(
+                bound, source_ids, follow_current_document
+            )
+            operation["candidates"] = prepared_candidates
+            operation["workspace"] = workspace
+            if not workspace.get("ok"):
+                raise SourceWorkspaceOperationFailed
+            operation["revision"] = str(workspace.get("revision") or "")
+            state["sourceIds"] = list(source_ids)
+            state["followCurrentDocument"] = bool(follow_current_document)
+            state["sourceWorkspaceRevision"] = operation["revision"]
+            return state
+
+        try:
+            item = mutate_session(bound, update_workspace_and_metadata)
+        except SessionMutationRejected as exc:
+            return {
+                **exc.result(),
+                "errors": [exc.message],
+                "candidates": candidates,
+                "sourceIds": unique_string_list(stored.get("sourceIds")),
+                "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(stored.get("sourceWorkspaceRevision") or ""),
+            }
+        except SourceWorkspaceRevisionMismatch:
             return {
                 "ok": False,
                 "blocked": "source_workspace_revision_mismatch",
                 "message": "来源工作区已被其他操作更新，请刷新后重试。",
                 "errors": ["source workspace revision does not match the current conversation revision"],
                 "candidates": candidates,
-                "sourceIds": unique_string_list(stored.get("sourceIds")),
-                "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
-                "sourceWorkspaceRevision": current_revision,
+                "sourceIds": unique_string_list(current.get("sourceIds")),
+                "followCurrentDocument": bool(current.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
                 "expectedRevision": expected_revision,
-                "currentRevision": current_revision,
+                "currentRevision": str(current.get("sourceWorkspaceRevision") or ""),
             }
-        candidates, workspace = prepare_source_workspace(bound, source_ids, follow_current_document)
-        if workspace.get("ok"):
-            revision = str(workspace.get("revision") or "")
-            persisted = persist_conversation_source_metadata(
-                bound,
-                item,
-                source_ids,
-                follow_current_document,
-                revision,
-                expected_revision=expected_revision,
-            )
-            if not persisted.get("ok"):
-                return {
-                    **persisted,
-                    "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
-                    "candidates": candidates,
-                    "workspace": workspace,
-                    "sourceIds": unique_string_list(stored.get("sourceIds")),
-                    "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
-                    "sourceWorkspaceRevision": str(persisted.get("currentRevision") or current_revision),
-                }
-            item = persisted.get("item") if isinstance(persisted.get("item"), dict) else item
+        except SourceWorkspaceOperationFailed:
+            workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+            return {
+                "ok": False,
+                "message": "来源工作区更新失败。",
+                "errors": list(workspace.get("errors") or []),
+                "candidates": operation.get("candidates") or candidates,
+                "workspace": workspace,
+                "sourceIds": source_ids,
+                "followCurrentDocument": follow_current_document,
+                "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
+                "sessionEpoch": session_epoch(item or stored),
+            }
+        candidates = operation.get("candidates") or candidates
+        workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+        revision = str(operation.get("revision") or "")
         return {
-            "ok": bool(workspace.get("ok")),
-            "message": "来源工作区已更新。" if workspace.get("ok") else "来源工作区更新失败。",
+            "ok": True,
+            "message": "来源工作区已更新。",
             "errors": list(workspace.get("errors") or []),
             "candidates": candidates,
             "workspace": workspace,
             "sourceIds": source_ids,
             "followCurrentDocument": follow_current_document,
-            "sourceWorkspaceRevision": revision if workspace.get("ok") else "",
+            "sourceWorkspaceRevision": revision,
             "sessionEpoch": session_epoch(item or stored),
         }
 
     if action == "source_workspace_clear":
         expected_revision = str(payload.get("sourceWorkspaceRevision") or "")
-        current_revision = str(stored.get("sourceWorkspaceRevision") or "")
-        if expected_revision != current_revision:
+        operation = {}
+        current = {}
+
+        def clear_workspace_and_metadata(state: dict[str, Any]) -> dict[str, Any]:
+            current.update(
+                {
+                    "sourceIds": unique_string_list(state.get("sourceIds")),
+                    "followCurrentDocument": bool(state.get("followCurrentDocument", True)),
+                    "sourceWorkspaceRevision": str(state.get("sourceWorkspaceRevision") or ""),
+                }
+            )
+            if expected_revision != current["sourceWorkspaceRevision"]:
+                raise SourceWorkspaceRevisionMismatch
+            workspace = source_workspace.clear_workspace(conversation_id)
+            operation["workspace"] = workspace
+            if not workspace.get("ok"):
+                raise SourceWorkspaceOperationFailed
+            state["sourceIds"] = []
+            state["followCurrentDocument"] = bool(follow_current_document)
+            state["sourceWorkspaceRevision"] = ""
+            return state
+
+        try:
+            item = mutate_session(bound, clear_workspace_and_metadata)
+        except SessionMutationRejected as exc:
+            return {
+                **exc.result(),
+                "errors": [exc.message],
+                "candidates": candidates,
+                "sourceIds": unique_string_list(stored.get("sourceIds")),
+                "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(stored.get("sourceWorkspaceRevision") or ""),
+            }
+        except SourceWorkspaceRevisionMismatch:
             return {
                 "ok": False,
                 "blocked": "source_workspace_revision_mismatch",
                 "message": "来源工作区已被其他操作更新，请刷新后重试。",
                 "errors": ["source workspace revision does not match the current conversation revision"],
                 "candidates": candidates,
-                "sourceIds": unique_string_list(stored.get("sourceIds")),
-                "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
-                "sourceWorkspaceRevision": current_revision,
+                "sourceIds": unique_string_list(current.get("sourceIds")),
+                "followCurrentDocument": bool(current.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
                 "expectedRevision": expected_revision,
-                "currentRevision": current_revision,
+                "currentRevision": str(current.get("sourceWorkspaceRevision") or ""),
             }
-        workspace = source_workspace.clear_workspace(conversation_id)
-        if workspace.get("ok"):
-            source_ids = []
-            revision = ""
-            persisted = persist_conversation_source_metadata(
-                bound,
-                item,
-                source_ids,
-                follow_current_document,
-                revision,
-                expected_revision=expected_revision,
-            )
-            if not persisted.get("ok"):
-                return {
-                    **persisted,
-                    "errors": [str(persisted.get("message") or "source workspace revision mismatch")],
-                    "candidates": candidates,
-                    "workspace": workspace,
-                    "sourceIds": unique_string_list(stored.get("sourceIds")),
-                    "followCurrentDocument": bool(stored.get("followCurrentDocument", True)),
-                    "sourceWorkspaceRevision": str(persisted.get("currentRevision") or current_revision),
-                }
-            item = persisted.get("item") if isinstance(persisted.get("item"), dict) else item
+        except SourceWorkspaceOperationFailed:
+            workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
+            return {
+                "ok": False,
+                "message": "来源工作区清除失败。",
+                "errors": list(workspace.get("errors") or []),
+                "candidates": candidates,
+                "workspace": workspace,
+                "sourceIds": unique_string_list(current.get("sourceIds")),
+                "followCurrentDocument": bool(current.get("followCurrentDocument", True)),
+                "sourceWorkspaceRevision": str(current.get("sourceWorkspaceRevision") or ""),
+                "sessionEpoch": session_epoch(item or stored),
+            }
+        source_ids = []
+        revision = ""
+        workspace = operation.get("workspace") if isinstance(operation.get("workspace"), dict) else {}
         workspace["active"] = False
         workspace["revision"] = ""
         workspace["sources"] = []
         return {
-            "ok": bool(workspace.get("ok")),
-            "message": "来源工作区已清除。" if workspace.get("ok") else "来源工作区清除失败。",
+            "ok": True,
+            "message": "来源工作区已清除。",
             "errors": list(workspace.get("errors") or []),
             "candidates": candidates,
             "workspace": workspace,
