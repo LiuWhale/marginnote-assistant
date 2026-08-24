@@ -227,6 +227,10 @@ python3 "$HOME/.codex/marginnote-assistant/release_acceptance.py" \
 
 验收条件：
 
+- `Add Files` 打开原生多选文件框；在一次原生选择操作中选择至少两个小型无害文件，确认同一操作最多允许 20 个文件、每个不超过 20 MB。支持范围至少覆盖 PDF/DOCX/PPTX、文本/表格/源码配置文件和常见图片格式。
+- 面板显示逐文件上传进度与最终成功/失败汇总。构造一个可恢复的部分失败时，已成功文件仍保留并自动选中，失败文件逐项显示原因；修复后可用重复批次继续添加，不得清空先前成功项。
+- 成功上传后自动保存并验证资料集，`资料 N` 的 source count 与勾选项一致；重新打开资料页仍能看到这些选择。
+- dist zip 必须包含 `extension/codex.mn.assistant/web/source_workspace_lifecycle.js`，mnaddon 必须包含 `web/source_workspace_lifecycle.js`；`index.html` 必须在 `app.js` 前加载该 helper，任一包缺失都必须被 smoke test 拒绝。
 - 当前会话的 `control/source-workspaces/<conversation-id>/SOURCES.md` 按顺序列出三个文件，`manifest.json` 有三个 source ID，`files/` 有三个可读链接；可提取格式还应在 `text/` 中有对应链接。
 - 进程/诊断证据显示仅启动一个 Codex CLI 进程，且该进程的 `cwd` 是上述资料工作区；回答逐一确认三个 source ID，并给出来源相关说明。
 - `跟随当前文件` 关闭时，切换 MarginNote 当前文档不会替换显式资料集。

@@ -270,7 +270,12 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertIn("prepare_release_handoff.py", module.REQUIRED_SUFFIXES)
         self.assertIn("mnaddon.json", module.MNADDON_REQUIRED_SUFFIXES)
         self.assertIn("main.js", module.MNADDON_REQUIRED_SUFFIXES)
+        self.assertIn("web/source_workspace_lifecycle.js", module.MNADDON_REQUIRED_SUFFIXES)
         self.assertIn("web/app.js", module.MNADDON_REQUIRED_SUFFIXES)
+        self.assertIn(
+            "extension/codex.mn.assistant/web/source_workspace_lifecycle.js",
+            module.REQUIRED_SUFFIXES,
+        )
         self.assertEqual(
             module.MARKERS["Collect Native Highlight Evidence.command"],
             "--collect-native-highlight-evidence",
@@ -328,6 +333,57 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertIn("sha256 manifest mismatch", "\n".join(result.problems))
 
+    def test_release_smoke_rejects_dist_without_source_workspace_lifecycle(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_dist_lifecycle",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        lifecycle = "extension/codex.mn.assistant/web/source_workspace_lifecycle.js"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "CodexCompanion-test-dist.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                for suffix in module.REQUIRED_SUFFIXES:
+                    if suffix == lifecycle:
+                        continue
+                    archive.writestr(
+                        f"CodexCompanion-test/{suffix}",
+                        module.MARKERS.get(suffix, "ok"),
+                    )
+
+            result = module.inspect_package(package)
+
+            self.assertFalse(result.ok, result)
+            self.assertIn(lifecycle, result.missing)
+
+    def test_release_smoke_rejects_mnaddon_without_source_workspace_lifecycle(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "codex_mn_release_smoke_mnaddon_lifecycle",
+            PACKAGE_ROOT / "release_smoke_test.py",
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        lifecycle = "web/source_workspace_lifecycle.js"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "CodexCompanion-test.mnaddon"
+            with zipfile.ZipFile(package, "w") as archive:
+                for suffix in module.MNADDON_REQUIRED_SUFFIXES:
+                    if suffix == lifecycle:
+                        continue
+                    archive.writestr(suffix, module.MNADDON_MARKERS.get(suffix, "ok"))
+
+            result = module.inspect_mnaddon(package)
+
+            self.assertFalse(result.ok, result)
+            self.assertIn(lifecycle, result.missing)
+
     def test_release_smoke_accepts_mnaddon_with_manifest_at_archive_root(self) -> None:
         spec = importlib.util.spec_from_file_location(
             "codex_mn_release_smoke_mnaddon",
@@ -346,6 +402,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexWebPanelController.js": "class UIWebView {}\n",
                 "CodexPanelController.js": "// ok\n",
                 "web/index.html": "<div id=\"aiChatShell\"></div>\n",
+                "web/source_workspace_lifecycle.js": "window.SourceWorkspaceLifecycle = {};\n",
                 "web/app.js": "const sendButton = true;\n",
                 "web/app.css": ".queue-available {}\n",
                 "codex.png": b"\x89PNG\r\n\x1a\n",
@@ -709,6 +766,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 "CodexCompanion-test/companion/install_extension.sh": "#!/bin/zsh\n",
                 "CodexCompanion-test/extension/codex.mn.assistant/main.js": "appendSelectionPopupMenuActions\n",
                 "CodexCompanion-test/extension/codex.mn.assistant/mnaddon.json": "{}\n",
+                "CodexCompanion-test/extension/codex.mn.assistant/web/source_workspace_lifecycle.js": "SourceWorkspaceLifecycle\n",
             }
             with zipfile.ZipFile(package, "w") as archive:
                 for name, content in entries.items():

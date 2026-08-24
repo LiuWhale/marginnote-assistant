@@ -10,6 +10,7 @@ All notable changes to Codex Companion are documented here.
 
 - Added a conversation-scoped multi-file source picker with follow-current behavior, per-source validation/read state, deterministic managed workspaces, ordered `SOURCES.md` contracts, and source acknowledgement in the response.
 - Added one-call Codex CLI execution for explicit multi-file sets, including workspace `cwd`, queue revision binding, source removal, and broken-link preflight blocking.
+- Added `Add Files` with a native multiple picker: one picker operation accepts up to 20 files at 20 MB each across supported binary, text, code/config, and image formats. The panel reports per-file progress and partial failures, preserves successful uploads, applies auto-selection to them, and supports repeated batches.
 
 ### Changed
 
@@ -19,6 +20,7 @@ All notable changes to Codex Companion are documented here.
 ### Fixed
 
 - `conversation_new` now atomically persists its zero-message session before returning, so opening the source workspace after starting a new conversation no longer fails with `会话不存在`; a persistence failure leaves the current UI conversation unchanged.
+- Packaged WebView startup now treats `web/source_workspace_lifecycle.js` as load-bearing: both dist and mnaddon smoke checks require it because `index.html` imports it before `app.js`.
 
 ## 0.4.52 - 2026-08-01
 

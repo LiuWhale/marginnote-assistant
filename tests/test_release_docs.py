@@ -38,6 +38,80 @@ class ReleaseDocsTests(unittest.TestCase):
         ]:
             self.assertIn(marker, text)
 
+    def test_release_docs_cover_one_operation_multi_file_upload(self) -> None:
+        expectations = {
+            "README.md": [
+                "Add Files",
+                "one picker operation",
+                "20 files",
+                "20 MB",
+                "PDF",
+                "DOCX",
+                "PPTX",
+                "progress",
+                "partial failures",
+                "automatically selected",
+                "repeated batches",
+            ],
+            "README.zh-CN.md": [
+                "Add Files",
+                "一次选择操作",
+                "20 个文件",
+                "20 MB",
+                "PDF",
+                "DOCX",
+                "PPTX",
+                "上传进度",
+                "部分失败",
+                "自动选中",
+                "重复批次",
+            ],
+            "docs/USER_MANUAL.md": [
+                "Add Files",
+                "一次选择操作",
+                "20 个文件",
+                "20 MB",
+                "PDF",
+                "DOCX",
+                "PPTX",
+                "上传进度",
+                "部分失败",
+                "自动选中",
+                "重复批次",
+            ],
+            "docs/RELEASE_CHECKLIST.md": [
+                "Add Files",
+                "一次原生选择操作",
+                "至少两个",
+                "20 个文件",
+                "20 MB",
+                "上传进度",
+                "部分失败",
+                "自动选中",
+                "重复批次",
+                "source_workspace_lifecycle.js",
+            ],
+        }
+        for name, markers in expectations.items():
+            with self.subTest(name=name):
+                text = self.read_doc(name)
+                for marker in markers:
+                    self.assertIn(marker, text)
+
+        changelog = self.read_doc("CHANGELOG.md")
+        section = changelog.partition("## 0.4.53")[2].split("\n## ", 1)[0]
+        for marker in [
+            "Add Files",
+            "one picker operation",
+            "20 files",
+            "20 MB",
+            "progress",
+            "partial failures",
+            "auto-selection",
+            "source_workspace_lifecycle.js",
+        ]:
+            self.assertIn(marker, section)
+
     def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
         text = self.read_doc("docs/RELEASE_STATUS_MATRIX.md")
 

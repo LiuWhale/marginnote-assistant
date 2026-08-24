@@ -62,6 +62,7 @@ REQUIRED_SUFFIXES = [
     "companion/install_extension.sh",
     "extension/codex.mn.assistant/main.js",
     "extension/codex.mn.assistant/mnaddon.json",
+    "extension/codex.mn.assistant/web/source_workspace_lifecycle.js",
 ]
 
 PRIVATE_NAMES = {
@@ -111,6 +112,7 @@ MARKERS = {
     "companion/runtime_config.py": "DEFAULT_RUNTIME_SETTINGS",
     "companion/doctor.py": "installable clean zip",
     "extension/codex.mn.assistant/main.js": "appendSelectionPopupMenuActions",
+    "extension/codex.mn.assistant/web/source_workspace_lifecycle.js": "SourceWorkspaceLifecycle",
 }
 
 MNADDON_REQUIRED_SUFFIXES = [
@@ -119,6 +121,7 @@ MNADDON_REQUIRED_SUFFIXES = [
     "CodexWebPanelController.js",
     "CodexPanelController.js",
     "web/index.html",
+    "web/source_workspace_lifecycle.js",
     "web/app.js",
     "web/app.css",
     "codex.png",
@@ -129,6 +132,7 @@ MNADDON_MARKERS = {
     "mnaddon.json": "\"addonid\"",
     "CodexWebPanelController.js": "UIWebView",
     "web/index.html": "aiChatShell",
+    "web/source_workspace_lifecycle.js": "SourceWorkspaceLifecycle",
     "web/app.js": "sendButton",
     "web/app.css": "queue-available",
 }
