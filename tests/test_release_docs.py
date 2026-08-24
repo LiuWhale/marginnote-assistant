@@ -149,27 +149,52 @@ class ReleaseDocsTests(unittest.TestCase):
             self.assertIn(marker, section)
 
     def test_release_docs_cover_repair_cycle_safety_contract(self) -> None:
-        marker_soup = "token\n\n127.0.0.1:48761\n\ncustom URL"
+        marker_soup = (
+            "token 127.0.0.1:48761 localhost:48761 [::1]:48761 custom URL "
+            "session epoch tombstone retryable confirmation rollback not published"
+        )
         self.assertIsNone(
-            self.contract_unit(marker_soup, "token", ["127.0.0.1:48761", "custom URL"]),
-            "markers split across unrelated paragraphs must not satisfy a contract",
+            self.contract_unit(
+                marker_soup,
+                "token",
+                ["only to the exact HTTP loopback Companion origins", "custom URLs never receive it"],
+            ),
+            "same-line marker soup must not satisfy a condition-to-outcome contract",
         )
 
         readme = self.read_doc("README.md")
         self.assert_contract_unit(
             readme,
             "Token-aware Python clients",
-            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "custom URLs never receive it"],
+            [
+                "only to the exact HTTP loopback Companion origins",
+                "http://127.0.0.1:48761",
+                "http://localhost:48761",
+                "http://[::1]:48761",
+                "custom URLs never receive it",
+            ],
         )
         self.assert_contract_unit(
             readme,
             "active conversation is durably restored",
-            ["session epoch", "rejected", "tombstone", "retryable", "draft", "explicit confirmation", "native write"],
+            [
+                "epoch no longer matches are rejected",
+                "tombstone` that rejects late callbacks instead of recreating the conversation",
+                "remains visible as retryable work rather than being acknowledged or discarded",
+                "saved as a draft and always requires explicit confirmation before the native write bridge",
+            ],
         )
         self.assert_contract_unit(
             readme,
             "source-management mode",
-            ["全选可移除", "取消全选", "移除所选", "only current conversation membership", "never delete originals", "protected", "disable follow-current", "restores the previous membership", "rollback fails", "explicit warning"],
+            [
+                "select and remove only current conversation membership",
+                "never delete originals, extracted/cached files, or upload-registry records",
+                "followed current document is protected from removal",
+                "disable follow-current before selecting it",
+                "If either stage fails, Companion restores the previous membership",
+                "If rollback fails, the panel shows an explicit warning and does not report the removal as complete",
+            ],
         )
         self.assert_contract_unit(readme, "current source candidate", ["0.4.53", "not been published as a GitHub Release"])
 
@@ -177,17 +202,32 @@ class ReleaseDocsTests(unittest.TestCase):
         self.assert_contract_unit(
             readme_zh,
             "支持 token 的 Python 客户端",
-            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "自定义 URL 绝不会收到"],
+            [
+                "只会向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 这三个精确 HTTP loopback 来源附加隐式 token",
+                "自定义 URL 绝不会收到它",
+            ],
         )
         self.assert_contract_unit(
             readme_zh,
             "活动对话在面板重新加载后",
-            ["session epoch", "拒绝", "tombstone", "可重试", "草稿", "明确确认", "原生写入"],
+            [
+                "epoch 不匹配的变更会被拒绝",
+                "tombstone`，迟到回调不能重新创建它",
+                "失败的队列项会保留为可重试工作，而不是被确认或丢弃",
+                "先保存为草稿，必须经过明确确认后才能调用原生写入桥",
+            ],
         )
         self.assert_contract_unit(
             readme_zh,
             "需要缩小当前会话",
-            ["全选可移除", "取消全选", "移除所选", "成员关系", "不会删除原文件", "受保护", "关闭跟随", "恢复旧成员关系", "回滚失败", "明确警告"],
+            [
+                "只处理当前会话的成员关系",
+                "不会删除原文件、缓存/提取文件，也不会删除上传注册记录",
+                "当前跟随文件受保护，不能移除",
+                "先关闭跟随才可以选择它",
+                "任一步失败都会恢复旧成员关系并验证恢复结果",
+                "若回滚失败，面板会给出明确警告，不能把本次移除显示为完成",
+            ],
         )
         self.assert_contract_unit(readme_zh, "当前源码候选版本", ["0.4.53", "尚未作为 GitHub Release 发布"])
 
@@ -195,32 +235,67 @@ class ReleaseDocsTests(unittest.TestCase):
         self.assert_contract_unit(
             manual,
             "支持 token 的 Python 客户端",
-            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "自定义 URL 绝不会收到"],
+            [
+                "只会向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 这三个精确 HTTP loopback 来源附加隐式 token",
+                "自定义 URL 绝不会收到它",
+            ],
         )
-        self.assert_contract_unit(manual, "活动会话可从持久化", ["session epoch", "tombstone", "拒绝", "不能恢复或覆盖"])
-        self.assert_contract_unit(manual, "队列失败", ["可重试", "未确认", "草稿", "明确确认", "原生写入", "不能后台自动写入"])
-        self.assert_contract_unit(manual, "要缩小范围", ["全选可移除", "取消全选", "移除所选", "成员关系", "不删除原文件", "上传注册记录"])
-        self.assert_contract_unit(manual, "跟随当前文件` 开启时", ["受保护", "关闭后", "恢复旧成员关系", "回滚失败", "明确警告", "不得把这次操作视为成功"])
+        self.assert_contract_unit(
+            manual,
+            "活动会话可从持久化",
+            ["epoch 不匹配的迟到结果", "tombstone` 回调都会被拒绝", "不能恢复或覆盖已失效会话"],
+        )
+        self.assert_contract_unit(
+            manual,
+            "队列失败",
+            ["保持未确认并标记为可重试", "只能保存为草稿", "用户明确确认后才会调用原生写入桥", "不能后台自动写入 MarginNote"],
+        )
+        self.assert_contract_unit(
+            manual,
+            "要缩小范围",
+            ["全选可移除", "取消全选", "移除所选", "只清空当前会话成员关系", "不删除原文件", "上传注册记录"],
+        )
+        self.assert_contract_unit(
+            manual,
+            "跟随当前文件` 开启时",
+            ["当前跟随文件受保护", "关闭后才允许选择它", "恢复旧成员关系并验证恢复结果", "若回滚失败，会显示明确警告", "不得把这次操作视为成功"],
+        )
         self.assert_contract_unit(manual, "当前源码候选版本", ["0.4.53", "尚未作为 GitHub Release 发布"])
 
         checklist = self.read_doc("docs/RELEASE_CHECKLIST.md")
         self.assert_contract_unit(
             checklist,
             "支持 token 的 Python 客户端",
-            ["127.0.0.1:48761", "localhost:48761", "[::1]:48761", "自定义 URL 不带 token", "重定向", "不泄露"],
+            [
+                "只向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 三个精确 HTTP loopback 来源附加隐式 token",
+                "自定义 URL 不带 token",
+                "重定向和日志均不泄露 token",
+            ],
         )
-        self.assert_contract_unit(checklist, "新建/重新打开对话", ["session epoch", "tombstone", "拒绝", "可重试", "草稿", "确认", "不能自动调用原生写入"])
-        self.assert_contract_unit(checklist, "打开资料管理模式", ["全选可移除", "取消全选", "移除所选", "成员关系", "原文件", "上传注册记录", "受保护", "关闭后"])
-        self.assert_contract_unit(checklist, "对子集移除", ["空集", "验证", "恢复旧成员关系", "回滚失败", "明确警告", "不能报告操作成功"])
+        self.assert_contract_unit(
+            checklist,
+            "新建/重新打开对话",
+            ["session epoch` 不匹配", "tombstone` 回调都必须被拒绝", "失败队列项必须保留为可重试工作", "排队写入只能生成草稿", "必须由用户确认", "不能自动调用原生写入"],
+        )
+        self.assert_contract_unit(
+            checklist,
+            "打开资料管理模式",
+            ["只改变当前会话的成员关系", "原文件、缓存/提取文件和上传注册记录必须保留", "当前跟随文件必须受保护", "关闭后才允许把它加入移除选择"],
+        )
+        self.assert_contract_unit(
+            checklist,
+            "对子集移除",
+            ["移除后空集", "更新后必须验证新工作区", "更新或验证失败时必须恢复旧成员关系并验证恢复", "若回滚失败，界面必须显示明确警告", "不能报告操作成功"],
+        )
         self.assert_contract_unit(checklist, "当前发布候选", ["0.4.53"])
         self.assert_contract_unit(checklist, "尚未作为 GitHub Release 发布", ["0.4.53", "不是发布或公开可用性证明"])
 
         changelog = self.read_doc("CHANGELOG.md").partition("## 0.4.53")[2].split("\n## ", 1)[0]
-        self.assert_contract_unit(changelog, "active-conversation restoration", ["session epoch", "tombstone", "stale callbacks cannot"])
-        self.assert_contract_unit(changelog, "全选可移除", ["conversation-membership-only", "followed-current protection", "rollback"])
-        self.assert_contract_unit(changelog, "Token-aware Python clients", ["127.0.0.1", "localhost", "::1", "custom URLs never receive"])
-        self.assert_contract_unit(changelog, "Queued failures", ["retryable", "unacknowledged", "draft", "confirmation", "never write automatically"])
-        self.assert_contract_unit(changelog, "Source removal restores", ["update or validation failure", "rollback failure", "explicit warning"])
+        self.assert_contract_unit(changelog, "active-conversation restoration", ["session epoch", "deletion `tombstone` boundary", "stale callbacks cannot recreate or mutate invalid sessions"])
+        self.assert_contract_unit(changelog, "全选可移除", ["conversation-membership-only source removal", "followed-current protection", "update/validate rollback"])
+        self.assert_contract_unit(changelog, "Token-aware Python clients", ["exact HTTP loopback Companion origins", "custom URLs never receive it"])
+        self.assert_contract_unit(changelog, "Queued failures", ["remain retryable and unacknowledged", "persist a draft and require confirmation before native writes", "never write automatically in the background"])
+        self.assert_contract_unit(changelog, "Source removal restores", ["after update or validation failure", "rollback failure is surfaced as an explicit warning instead of a successful result"])
         self.assert_contract_unit(changelog, "Local release candidate only", ["not published as a GitHub Release"])
 
     def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
