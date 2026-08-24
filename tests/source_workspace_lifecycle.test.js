@@ -332,6 +332,7 @@ test('completed queue records are ack-only even while a write confirmation block
     sessionId: 'SESSION-A',
     sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     contextDocumentKey: 'DOC-A',
+    queueSessionRestoreComplete: true,
   };
   assert.equal(
     lifecycle.queuedExecutionDisposition(
@@ -408,18 +409,24 @@ test('completed queue records are ack-only even while a write confirmation block
   );
 });
 
-test('queue runtime readiness requires exact conversation session epoch and context', () => {
+test('queue runtime readiness requires restore completion and either an exact session or explicit none', () => {
   assert.equal(lifecycle.queueRuntimeCanStart({}), false);
   assert.equal(lifecycle.queueRuntimeCanStart({
     conversationId: 'CONV-A',
     sessionId: 'SESSION-A',
     sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
   }), false);
   assert.equal(lifecycle.queueRuntimeCanStart({
     conversationId: 'CONV-A',
     sessionId: 'SESSION-A',
     sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     contextDocumentKey: 'DOC-A',
+    queueSessionRestoreComplete: true,
+  }), true);
+  assert.equal(lifecycle.queueRuntimeCanStart({
+    contextDocumentKey: 'DOC-A',
+    queueSessionRestoreComplete: true,
   }), true);
 });
 
@@ -553,6 +560,43 @@ test('active-session write acknowledges only after draft confirmation routing su
   assert.deepEqual(run.events, ['active-write', 'ack']);
 });
 
+test('queued write policy reclassifies a session switch while draft persistence is in flight', () => {
+  const command = {
+    _queue_id: 'QUEUE-A',
+    rawAction: 'generate_card',
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  };
+  const activeConversation = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  };
+  const events = [];
+  let finishDraft = null;
+
+  lifecycle.handleQueuedResult({
+    command,
+    result: {ok: true, cards: [{title: 'A'}]},
+    activeConversation,
+    isWriteAction: () => true,
+    onActiveWrite: (_result, done) => {
+      events.push('draft');
+      finishDraft = done;
+    },
+    onDeferred: (detail) => events.push(['defer', detail.routing, detail.reason]),
+    onAck: () => events.push('ack'),
+  });
+
+  activeConversation.conversationId = 'CONV-B';
+  activeConversation.sessionId = 'SESSION-B';
+  activeConversation.sessionEpoch = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  finishDraft({ok: true});
+
+  assert.deepEqual(events, ['draft', ['defer', 'background', 'inactive_write']]);
+});
+
 test('session epoch mismatch and tombstone results defer without acknowledgement', () => {
   const mismatched = queueResultHarness({
     activeConversation: {
@@ -617,10 +661,13 @@ test('empty queued goal is failed through shared policy without acknowledgement'
   const requestGoalAction = loadAppFunction('requestGoalAction', 'requestDraftAction', {
     state,
     generationLifecycleUnavailableReason: () => '',
-    deferQueuedGenerationForLifecycle: () => assert.fail('lifecycle is available'),
-    addMessage: () => {},
-    goalTextToPayload: () => ({title: '', detail: ''}),
-    applyQueuedResultPolicy: (command, result) => policyCalls.push({command, result}),
+      deferQueuedGenerationForLifecycle: () => assert.fail('lifecycle is available'),
+      addMessage: () => {},
+      goalTextToPayload: () => ({title: '', detail: ''}),
+      captureQueuedCommandDispatch: (command) => Object.freeze(Object.assign({}, command, {
+        queueId: command._queue_id,
+      })),
+      applyQueuedResultPolicy: (command, result) => policyCalls.push({command, result}),
     ackQueueAndContinue: () => assert.fail('empty goal must not be acknowledged'),
   });
 
@@ -765,12 +812,13 @@ test('web reload restores exact durable guard before queue pump callback', () =>
 
 test('queue runtime starts only after exact durable guard restore succeeds', () => {
   const events = [];
-  const state = {queueRuntimeReady: false};
+  const state = {queueRuntimeReady: false, queueSessionRestoreComplete: true};
   const identity = {
     conversationId: 'CONV-A',
     sessionId: 'SESSION-A',
     sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     contextDocumentKey: 'DOC-A',
+    queueSessionRestoreComplete: true,
   };
   const prepareQueueRuntimeForActiveSession = loadAppFunction(
     'prepareQueueRuntimeForActiveSession',
@@ -797,12 +845,13 @@ test('queue runtime starts only after exact durable guard restore succeeds', () 
 
 test('queue runtime remains disabled when durable guard restore fails', () => {
   const events = [];
-  const state = {queueRuntimeReady: false};
+  const state = {queueRuntimeReady: false, queueSessionRestoreComplete: true};
   const identity = {
     conversationId: 'CONV-A',
     sessionId: 'SESSION-A',
     sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     contextDocumentKey: 'DOC-A',
+    queueSessionRestoreComplete: true,
   };
   const prepareQueueRuntimeForActiveSession = loadAppFunction(
     'prepareQueueRuntimeForActiveSession',
@@ -860,14 +909,14 @@ test('stale queued draft controls cannot accept or reject after session switch',
   const blocked = () => false;
   const acceptDraft = loadAppFunction('acceptDraft', 'rejectDraft', {
     state,
-    queuedDraftBindingMatchesActiveSession: blocked,
+    captureQueuedDraftOperationBinding: () => ({draftId: 'DRAFT-A', queueId: 'QUEUE-A'}),
+    queuedDraftOperationBindingMatchesActiveSession: blocked,
     addMessage: () => assert.fail('stale accept must be a no-op'),
-    currentAiEditTransactionId: () => assert.fail('stale accept must not inspect transaction'),
   });
   const rejectDraft = loadAppFunction('rejectDraft', 'runToggle', {
     state,
-    queuedDraftBindingMatchesActiveSession: blocked,
-    currentAiEditTransactionId: () => assert.fail('stale reject must not inspect transaction'),
+    captureQueuedDraftOperationBinding: () => ({draftId: 'DRAFT-A', queueId: 'QUEUE-A'}),
+    queuedDraftOperationBindingMatchesActiveSession: blocked,
   });
 
   acceptDraft({});
@@ -890,9 +939,13 @@ test('runQueuedCommand persists A through exact background payload after switchi
     ackAndSkipQueuedCommand: () => assert.fail('valid bound command must not be skipped'),
     deferNativeQueuedCommand: () => assert.fail('generation command is not native'),
     setContextScope: () => {},
-    isQueueableGoalAction: () => true,
-    isWriteAction: () => false,
-    companionPayload,
+      isQueueableGoalAction: () => true,
+      isWriteAction: () => false,
+      actionLabel: (action) => action,
+      captureQueuedCommandDispatch: (command) => Object.freeze(Object.assign({}, command, {
+        queueId: command._queue_id,
+      })),
+      companionPayload,
     newRequestId: () => 'REQUEST-A',
     postCompanionExactPayload: (payload, done) => {
       exactPayloads.push(payload);
@@ -1072,4 +1125,615 @@ test('stable automatic switch persists three sources and rebuilds in the new doc
   assert.equal(persistedConversation.followCurrentDocument, false);
   assert.equal(persistedConversation.contextDocumentKey, state.context.contextDocumentKey);
   assert.equal(controller.isMigrationActive(), false);
+});
+
+test('cold reload restores the durable active session before queue runtime preparation', () => {
+  const events = [];
+  const state = {
+    context: {
+      topicid: 'TOPIC-COLD',
+      bookmd5: 'BOOK-COLD',
+      contextDocumentKey: 'DOC-COLD',
+    },
+    contextDocumentKey: 'DOC-COLD',
+    queueSessionRestoreToken: 0,
+    queueSessionRestoreInFlight: false,
+    queueSessionRestoreContextKey: '',
+    queueSessionRestoredContextKey: '',
+    queueSessionRestoreComplete: false,
+  };
+  let restoreCallback = null;
+  const restoreQueueRuntimeSessionForContext = loadAppFunction(
+    'restoreQueueRuntimeSessionForContext',
+    'queuedSessionIdentity',
+    {
+      state,
+      documentContextReadyForAutomaticSwitch: () => true,
+      postCompanion: (action, payload, done) => {
+        events.push(['request', action, payload.contextDocumentKey]);
+        restoreCallback = done;
+      },
+      setCurrentConversation: (conversation) => {
+        events.push(['session', conversation.sessionId || '']);
+        state.conversationId = String(conversation.conversationId || '');
+        state.sessionId = String(conversation.sessionId || '');
+        state.sessionEpoch = String(conversation.sessionEpoch || '');
+        state.queueSessionRestoreComplete = true;
+        state.queueSessionRestoredContextKey = state.contextDocumentKey;
+      },
+      renderHistoryItems: (history) => events.push(['history', history.length]),
+      refreshSourceWorkspace: () => events.push('workspace'),
+      stopQueuePump: () => {},
+      prepareQueueRuntimeForActiveSession: () => events.push('prepare'),
+    },
+  );
+
+  restoreQueueRuntimeSessionForContext();
+
+  assert.deepEqual(events, [['request', 'conversation_active_restore', 'DOC-COLD']]);
+  assert.equal(state.queueSessionRestoreComplete, false);
+  assert.ok(restoreCallback, 'cold restore request must remain in flight');
+
+  restoreCallback({
+    ok: true,
+    restoreComplete: true,
+    active: true,
+    conversation: {
+      conversationId: 'CONV-COLD',
+      sessionId: 'SESSION-COLD',
+      sessionEpoch: 'cccccccccccccccccccccccccccccccc',
+    },
+    history: [{role: 'user', content: 'durable'}],
+    workspace: {revision: 'REV-COLD'},
+  });
+
+  assert.equal(state.sessionId, 'SESSION-COLD');
+  assert.equal(state.sessionEpoch, 'cccccccccccccccccccccccccccccccc');
+  assert.equal(state.queueSessionRestoreComplete, true);
+  assert.deepEqual(events.slice(1), [
+    ['session', 'SESSION-COLD'],
+    ['history', 1],
+    'workspace',
+    'prepare',
+  ]);
+});
+
+test('cold reload restore failure clears the in-flight gate and schedules a bounded retry', () => {
+  const requests = [];
+  const timers = [];
+  const state = {
+    context: {
+      topicid: 'TOPIC-COLD',
+      bookmd5: 'BOOK-COLD',
+      contextDocumentKey: 'DOC-COLD',
+    },
+    contextDocumentKey: 'DOC-COLD',
+    queueSessionRestoreToken: 0,
+    queueSessionRestoreInFlight: false,
+    queueSessionRestoreContextKey: '',
+    queueSessionRestoredContextKey: '',
+    queueSessionRestoreComplete: false,
+    queueSessionRestoreRetryTimer: null,
+  };
+  const restoreQueueRuntimeSessionForContext = loadAppFunction(
+    'restoreQueueRuntimeSessionForContext',
+    'queuedSessionIdentity',
+    {
+      state,
+      documentContextReadyForAutomaticSwitch: () => true,
+      postCompanion: (action, payload, done, options) => {
+        requests.push({action, payload, done, options});
+      },
+      setCurrentConversation: () => assert.fail('failed restore must not install a session'),
+      renderHistoryItems: () => {},
+      refreshSourceWorkspace: () => {},
+      stopQueuePump: () => {},
+      prepareQueueRuntimeForActiveSession: () => assert.fail('failed restore must not start the queue'),
+      window: {
+        clearTimeout: () => {},
+        setTimeout: (callback, delay) => {
+          timers.push({callback, delay});
+          return timers.length;
+        },
+      },
+    },
+  );
+
+  restoreQueueRuntimeSessionForContext();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options.timeoutMs, 8000);
+  requests[0].done({ok: false, restoreComplete: false, message: 'temporary failure'});
+
+  assert.equal(state.queueSessionRestoreInFlight, false);
+  assert.equal(state.queueSessionRestoreComplete, false);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 1000);
+
+  timers[0].callback();
+  assert.equal(requests.length, 2);
+});
+
+test('postCompanion routes a same-document stale session response without rendering it', () => {
+  let xhr = null;
+  let staleResult = null;
+  let displayed = false;
+  let completed = false;
+  const requestPayload = {
+    action: 'chat',
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'a'.repeat(32),
+    contextDocumentKey: 'DOC-SHARED',
+  };
+  const state = {
+    conversationId: 'CONV-B',
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'b'.repeat(32),
+    contextDocumentKey: 'DOC-SHARED',
+  };
+  function FakeXhr() {
+    xhr = this;
+    this.readyState = 0;
+    this.responseText = JSON.stringify({ok: true, reply: 'old result'});
+  }
+  FakeXhr.prototype.open = function() {};
+  FakeXhr.prototype.setRequestHeader = function() {};
+  FakeXhr.prototype.send = function() {};
+  const postCompanion = loadAppFunction('postCompanion', 'postCompanionPath', {
+    XMLHttpRequest: FakeXhr,
+    companionPayload: () => requestPayload,
+    authorizeCompanionRequest: () => {},
+    parseCompanionResult: () => ({ok: true, reply: 'old result'}),
+    displayCompanionResult: () => {
+      displayed = true;
+      return {ok: true};
+    },
+    companionConnectionFailureResult: () => ({ok: false}),
+    setProgressStage: () => {},
+    finishProgressStage: () => {},
+    setWebRunLock: () => {},
+    state,
+    window: {
+      SourceWorkspaceLifecycle: lifecycle,
+      CodexPanel: {setBusy: () => {}, setStatus: () => {}},
+    },
+  });
+
+  postCompanion('chat', {}, () => { completed = true; }, {
+    requireActiveBinding: true,
+    onStaleResponse: (result) => { staleResult = result; },
+  });
+  xhr.readyState = 4;
+  xhr.onreadystatechange();
+
+  assert.equal(displayed, false);
+  assert.equal(completed, false);
+  assert.deepEqual(staleResult, {ok: true, reply: 'old result'});
+});
+
+test('postCompanion routes a stale session network failure without mutating active status', () => {
+  let xhr = null;
+  let staleResult = null;
+  let completed = false;
+  let statusMutations = 0;
+  const requestPayload = {
+    action: 'chat',
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'a'.repeat(32),
+    contextDocumentKey: 'DOC-SHARED',
+  };
+  const state = {
+    conversationId: 'CONV-B',
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'b'.repeat(32),
+    contextDocumentKey: 'DOC-SHARED',
+  };
+  function FakeXhr() { xhr = this; }
+  FakeXhr.prototype.open = function() {};
+  FakeXhr.prototype.setRequestHeader = function() {};
+  FakeXhr.prototype.send = function() {};
+  const postCompanion = loadAppFunction('postCompanion', 'postCompanionPath', {
+    XMLHttpRequest: FakeXhr,
+    companionPayload: () => requestPayload,
+    authorizeCompanionRequest: () => {},
+    parseCompanionResult: () => ({ok: true}),
+    displayCompanionResult: () => assert.fail('network failure must not render'),
+    companionConnectionFailureResult: () => ({ok: false, message: 'offline'}),
+    setProgressStage: () => { statusMutations += 1; },
+    finishProgressStage: () => { statusMutations += 1; },
+    setWebRunLock: () => {},
+    state,
+    window: {
+      SourceWorkspaceLifecycle: lifecycle,
+      CodexPanel: {
+        setBusy: () => {},
+        setStatus: () => { statusMutations += 1; },
+      },
+    },
+  });
+
+  postCompanion('chat', {}, () => { completed = true; }, {
+    requireActiveBinding: true,
+    onStaleResponse: (result) => { staleResult = result; },
+  });
+  statusMutations = 0;
+  xhr.onerror();
+
+  assert.equal(completed, false);
+  assert.equal(statusMutations, 0);
+  assert.deepEqual(staleResult, {ok: false, message: 'offline'});
+});
+
+test('queued accept persistence callback cannot cross a session switch', () => {
+  const bindingA = {
+    queueId: 'QUEUE-A',
+    draftId: 'DRAFT-A',
+    transactionId: '',
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+    draft: {id: 'DRAFT-A', queueId: 'QUEUE-A'},
+  };
+  const confirmationB = {
+    queueId: 'QUEUE-B',
+    draftId: 'DRAFT-B',
+    conversationId: 'CONV-B',
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    contextDocumentKey: 'DOC-B',
+  };
+  const state = {
+    conversationId: bindingA.conversationId,
+    sessionId: bindingA.sessionId,
+    sessionEpoch: bindingA.sessionEpoch,
+    contextDocumentKey: bindingA.contextDocumentKey,
+    draft: bindingA.draft,
+    pendingQueuedWriteConfirmation: Object.assign({}, bindingA),
+    pendingAiEditDrafts: {},
+  };
+  const bridgeCalls = [];
+  let persistedCallback = null;
+  const writeAcceptedDraft = loadAppFunction(
+    'writeAcceptedDraft',
+    'currentAiEditTransactionId',
+    {
+      state,
+      queuedDraftBindingMatchesActiveSession: () => true,
+      queuedDraftOperationBindingMatchesActiveSession: (binding) => (
+        binding.sessionId === state.sessionId &&
+        binding.sessionEpoch === state.sessionEpoch &&
+        binding.contextDocumentKey === state.contextDocumentKey
+      ),
+      persistQueuedWriteConfirmationState: (identity, status, done) => {
+        assert.equal(identity.queueId, 'QUEUE-A');
+        assert.equal(identity.draftId, 'DRAFT-A');
+        assert.equal(status, 'native_write');
+        persistedCallback = done;
+      },
+      bridge: (action, payload) => bridgeCalls.push({action, payload}),
+      renderDraft: () => assert.fail('stale callback must not clear target draft'),
+      setAiEditOperationBusy: () => {},
+      setAiEditOperationStatus: () => {},
+      setMindmapDiffStatus: () => {},
+      setMindmapDiffBusy: () => {},
+      setOperationPlanStatus: () => {},
+      setOperationPlanBusy: () => {},
+      addFailureMessage: () => {},
+      addMessage: () => {},
+    },
+  );
+
+  writeAcceptedDraft(bindingA, {});
+  assert.ok(persistedCallback, 'queued confirmation persistence must be in flight');
+
+  state.conversationId = 'CONV-B';
+  state.sessionId = 'SESSION-B';
+  state.sessionEpoch = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  state.contextDocumentKey = 'DOC-B';
+  state.draft = {id: 'DRAFT-B', queueId: 'QUEUE-B'};
+  state.pendingQueuedWriteConfirmation = confirmationB;
+  persistedCallback({ok: true, confirmation: Object.assign({}, bindingA)});
+
+  assert.deepEqual(bridgeCalls, []);
+  assert.equal(state.draft.id, 'DRAFT-B');
+  assert.equal(state.pendingQueuedWriteConfirmation.queueId, 'QUEUE-B');
+});
+
+test('mindmap draft-update callback cannot restore an old draft after a session switch', () => {
+  const state = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+    draft: {id: 'DRAFT-A'},
+  };
+  let updateCallback = null;
+  let continued = false;
+  const applyMindmapDiffDraftEdits = loadAppFunction(
+    'applyMindmapDiffDraftEdits',
+    'applyMindmapDiffExclusions',
+    {
+      state,
+      selectedMindmapDiffExclusions: () => ['root/old'],
+      mindmapDiffNodeEdits: () => [],
+      setMindmapDiffBusy: () => {},
+      setMindmapDiffStatus: () => {},
+      captureQueuedDraftOperationBinding: () => ({
+        draftId: 'DRAFT-A',
+        conversationId: 'CONV-A',
+        sessionId: 'SESSION-A',
+        sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        contextDocumentKey: 'DOC-A',
+      }),
+      queuedDraftOperationBindingMatchesActiveSession: (binding) => (
+        binding.sessionId === state.sessionId &&
+        binding.sessionEpoch === state.sessionEpoch &&
+        binding.contextDocumentKey === state.contextDocumentKey
+      ),
+      postCompanion: (_action, _payload, done) => { updateCallback = done; },
+      addFailureMessage: () => {},
+    },
+  );
+
+  applyMindmapDiffDraftEdits('DRAFT-A', {}, () => { continued = true; });
+  state.conversationId = 'CONV-B';
+  state.sessionId = 'SESSION-B';
+  state.sessionEpoch = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  state.contextDocumentKey = 'DOC-B';
+  state.draft = {id: 'DRAFT-B'};
+  updateCallback({ok: true, draft: {id: 'DRAFT-A'}});
+
+  assert.equal(state.draft.id, 'DRAFT-B');
+  assert.equal(continued, false);
+});
+
+test('queued command dispatch captures an immutable exact session binding', () => {
+  const state = payloadState({
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  });
+  let capturedBinding = null;
+  const runQueuedCommand = loadAppFunction('runQueuedCommand', 'drainNextQueuedAction', {
+    state,
+    window: {SourceWorkspaceLifecycle: lifecycle},
+    generationLifecycleUnavailableReason: () => '',
+    ackAndSkipQueuedCommand: () => assert.fail('valid command must not be skipped'),
+    deferNativeQueuedCommand: () => assert.fail('chat is not native'),
+      setContextScope: () => {},
+      isQueueableGoalAction: () => true,
+      isWriteAction: () => false,
+      actionLabel: (action) => action,
+      captureQueuedCommandDispatch: (command) => Object.freeze(Object.assign(
+      JSON.parse(JSON.stringify(command)),
+      {queueId: command._queue_id},
+    )),
+    companionPayload: () => ({}),
+    newRequestId: () => 'REQUEST-A',
+    postCompanionExactPayload: () => assert.fail('active chat uses requestTextAction'),
+    applyQueuedResultPolicy: () => {},
+    requestGoalAction: () => assert.fail('chat is not a goal'),
+    requestDraftAction: () => assert.fail('chat is not a write'),
+    requestTextAction: (_action, _prompt, _label, _queueId, _extra, binding) => {
+      capturedBinding = binding;
+    },
+  });
+  const command = {
+    _queue_id: 'QUEUE-A',
+    rawAction: 'chat',
+    prompt: 'bound',
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+  };
+
+  runQueuedCommand(command);
+  command.sessionId = 'SESSION-B';
+  command.sessionEpoch = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+  assert.ok(capturedBinding);
+  assert.equal(capturedBinding.queueId, 'QUEUE-A');
+  assert.equal(capturedBinding.sessionId, 'SESSION-A');
+  assert.equal(capturedBinding.sessionEpoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(capturedBinding.contextDocumentKey, 'DOC-A');
+  assert.equal(Object.isFrozen(capturedBinding), true);
+});
+
+test('automatic document switch clears queue controls before migration or debounce', () => {
+  const events = [];
+  const state = {
+    pendingDocumentSwitch: null,
+    stableContextDocumentKey: 'DOC-A',
+    contextDocumentKey: 'DOC-A',
+    followCurrentDocument: true,
+    sourceWorkspaceCurrentDocumentIds: [],
+    documentSwitchDebounceTimer: null,
+    documentSwitchToken: 0,
+    context: {topicid: 'TOPIC-B', bookmd5: 'BOOK-B'},
+  };
+  const migrationHandle = {meta: {contextDocumentKey: 'DOC-B'}};
+  const scheduleAutomaticDocumentSwitch = loadAppFunction(
+    'scheduleAutomaticDocumentSwitch',
+    'completeAutomaticDocumentSwitch',
+    {
+      state,
+      cancelSourceWorkspaceUpload: () => events.push('cancel-upload'),
+      closeSourceWorkspacePage: () => events.push('close-source-page'),
+      resetQueueRuntimeForConversationSwitch: () => events.push('reset-queue-controls'),
+      sourceWorkspaceLifecycle: {
+        isMigrationInFlight: () => false,
+        beginMigration: () => {
+          events.push('begin-migration');
+          return {handle: migrationHandle, superseded: null};
+        },
+        updateMigration: () => assert.fail('new switch must begin a migration'),
+      },
+      captureAutomaticDocumentSwitchState: () => ({sessionId: 'SESSION-A'}),
+      sourceWorkspaceSelectionIds: () => [],
+      cleanupStaleConversation: () => {},
+      syncSourceWorkspaceLifecycleFlags: () => {},
+      invalidateSourceWorkspaceRequests: () => {},
+      setSourceWorkspaceStatus: () => {},
+      updateActionAvailability: () => {},
+      documentContextReadyForAutomaticSwitch: () => false,
+      window: {clearTimeout: () => {}},
+    },
+  );
+
+  scheduleAutomaticDocumentSwitch('DOC-B');
+
+  assert.ok(events.indexOf('reset-queue-controls') >= 0);
+  assert.ok(events.indexOf('reset-queue-controls') < events.indexOf('begin-migration'));
+  assert.equal(state.documentSwitchDebounceTimer, null);
+});
+
+test('automatic document switch rollback clears stale controls before restoring ownership', () => {
+  const events = [];
+  const originalState = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'a'.repeat(32),
+  };
+  const state = {
+    documentSwitchDebounceTimer: null,
+    documentSwitchToken: 1,
+    pendingDocumentSwitch: {contextDocumentKey: 'DOC-B'},
+    stableContextDocumentKey: 'DOC-A',
+    contextDocumentKey: 'DOC-B',
+  };
+  const cancelAutomaticDocumentSwitch = loadAppFunction(
+    'cancelAutomaticDocumentSwitch',
+    'scheduleAutomaticDocumentSwitch',
+    {
+      state,
+      window: {clearTimeout: () => {}},
+      sourceWorkspaceLifecycle: {
+        cancelMigration: () => ({meta: {originalState}}),
+      },
+      cleanupStaleConversation: () => {},
+      resetQueueRuntimeForConversationSwitch: () => events.push('clear-controls'),
+      restoreAutomaticDocumentSwitchState: () => events.push('restore-ownership'),
+      syncSourceWorkspaceLifecycleFlags: () => {},
+      prepareQueueRuntimeForActiveSession: () => events.push('prepare-queue'),
+      updateActionAvailability: () => {},
+    },
+  );
+
+  cancelAutomaticDocumentSwitch();
+
+  assert.deepEqual(events, ['clear-controls', 'restore-ownership', 'prepare-queue']);
+});
+
+test('mixed queue skips a blocked owner and preserves that owner ordering', () => {
+  const runtime = {
+    conversationId: 'CONV-A',
+    sessionId: 'SESSION-A',
+    sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    contextDocumentKey: 'DOC-A',
+    pendingQueuedWriteConfirmation: {
+      queueId: 'CONFIRM-A',
+      draftId: 'DRAFT-A',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      contextDocumentKey: 'DOC-A',
+    },
+    deferredQueueResults: {},
+  };
+  const commands = [
+    {
+      _queue_id: 'A-WRITE-1',
+      rawAction: 'generate_card',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      contextDocumentKey: 'DOC-A',
+    },
+    {
+      _queue_id: 'A-CHAT-2',
+      rawAction: 'chat',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      contextDocumentKey: 'DOC-A',
+    },
+    {
+      _queue_id: 'B-CHAT-1',
+      rawAction: 'chat',
+      conversationId: 'CONV-B',
+      sessionId: 'SESSION-B',
+      sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      contextDocumentKey: 'DOC-A',
+    },
+  ];
+
+  const selected = lifecycle.firstRunnableQueuedCommand(commands, runtime, {});
+
+  assert.equal(selected && selected._queue_id, 'B-CHAT-1');
+
+  const inactiveRuntime = {
+    conversationId: 'CONV-B',
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    contextDocumentKey: 'DOC-A',
+    pendingQueuedWriteConfirmation: null,
+    deferredQueueResults: {
+      'A-WRITE-1': {reason: 'inactive_write'},
+    },
+  };
+  const selectedAfterInactiveWrite = lifecycle.firstRunnableQueuedCommand(
+    commands,
+    inactiveRuntime,
+    {},
+  );
+
+  assert.equal(selectedAfterInactiveWrite && selectedAfterInactiveWrite._queue_id, 'B-CHAT-1');
+  assert.equal(inactiveRuntime.deferredQueueResults['A-WRITE-1'].reason, 'inactive_write');
+});
+
+test('mixed queue skips a newly encountered inactive write without starving another session', () => {
+  const runtime = {
+    conversationId: 'CONV-B',
+    sessionId: 'SESSION-B',
+    sessionEpoch: 'b'.repeat(32),
+    contextDocumentKey: 'DOC-A',
+    pendingQueuedWriteConfirmation: null,
+    deferredQueueResults: {},
+  };
+  const commands = [
+    {
+      _queue_id: 'A-WRITE-1',
+      rawAction: 'generate_mindmap',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'a'.repeat(32),
+      contextDocumentKey: 'DOC-A',
+    },
+    {
+      _queue_id: 'A-CHAT-2',
+      rawAction: 'chat',
+      conversationId: 'CONV-A',
+      sessionId: 'SESSION-A',
+      sessionEpoch: 'a'.repeat(32),
+      contextDocumentKey: 'DOC-A',
+    },
+    {
+      _queue_id: 'B-CHAT-1',
+      rawAction: 'chat',
+      conversationId: 'CONV-B',
+      sessionId: 'SESSION-B',
+      sessionEpoch: 'b'.repeat(32),
+      contextDocumentKey: 'DOC-A',
+    },
+  ];
+
+  const selected = lifecycle.firstRunnableQueuedCommand(commands, runtime, {
+    isWriteAction: appIsWriteAction,
+  });
+
+  assert.equal(selected && selected._queue_id, 'B-CHAT-1');
 });

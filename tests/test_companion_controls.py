@@ -968,6 +968,100 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(saved["sessionEpoch"], cleared["sessionEpoch"])
             self.assertEqual(saved["sourceWorkspaceRevision"], restored_revision)
 
+    def test_cold_restore_recovers_exact_durable_active_session_or_explicit_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            companion = load_companion(root)
+            first_document = {
+                "topicid": "T-COLD-A",
+                "bookmd5": "B-COLD-A",
+                "contextDocumentKey": "DOC-COLD-A",
+                "source": "unittest",
+            }
+            created = companion.new_conversation(first_document)["conversation"]
+            companion.new_conversation(first_document)
+            loaded = companion.load_conversation(
+                {
+                    **first_document,
+                    "conversationId": created["conversationId"],
+                    "sessionId": created["sessionId"],
+                    "sessionEpoch": created["sessionEpoch"],
+                }
+            )
+
+            reloaded = load_companion(root)
+            restored = reloaded.restore_active_conversation(first_document)
+            deleted = reloaded.delete_conversation(
+                {
+                    **first_document,
+                    "conversationId": created["conversationId"],
+                    "sessionId": created["sessionId"],
+                    "sessionEpoch": created["sessionEpoch"],
+                }
+            )
+            after_delete = load_companion(root).restore_active_conversation(first_document)
+            empty = reloaded.restore_active_conversation(
+                {
+                    "topicid": "T-COLD-B",
+                    "bookmd5": "B-COLD-B",
+                    "contextDocumentKey": "DOC-COLD-B",
+                    "source": "unittest",
+                }
+            )
+
+            self.assertTrue(loaded["ok"], loaded)
+            self.assertTrue(restored["ok"], restored)
+            self.assertTrue(restored["restoreComplete"])
+            self.assertTrue(restored["active"])
+            self.assertEqual(restored["conversation"]["conversationId"], created["conversationId"])
+            self.assertEqual(restored["conversation"]["sessionId"], created["sessionId"])
+            self.assertEqual(restored["conversation"]["sessionEpoch"], created["sessionEpoch"])
+            self.assertTrue(deleted["ok"], deleted)
+            self.assertTrue(after_delete["restoreComplete"])
+            self.assertFalse(after_delete["active"])
+            self.assertIsNone(after_delete["conversation"])
+            self.assertTrue(empty["ok"], empty)
+            self.assertTrue(empty["restoreComplete"])
+            self.assertFalse(empty["active"])
+            self.assertIsNone(empty["conversation"])
+
+    def test_queue_poll_batch_includes_the_earliest_command_for_every_session_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            commands = [
+                {
+                    "_queue_id": f"A-{index}",
+                    "conversationId": "CONV-A",
+                    "sessionId": "SESSION-A",
+                    "sessionEpoch": "a" * 32,
+                    "contextDocumentKey": "DOC-A",
+                }
+                for index in range(12)
+            ]
+            commands.extend(
+                [
+                    {
+                        "_queue_id": "B-0",
+                        "conversationId": "CONV-B",
+                        "sessionId": "SESSION-B",
+                        "sessionEpoch": "b" * 32,
+                        "contextDocumentKey": "DOC-A",
+                    },
+                    {
+                        "_queue_id": "C-0",
+                        "conversationId": "CONV-C",
+                        "sessionId": "SESSION-C",
+                        "sessionEpoch": "c" * 32,
+                        "contextDocumentKey": "DOC-A",
+                    },
+                ]
+            )
+
+            batch = companion.queue_poll_batch(commands, limit=8)
+
+            self.assertEqual([item["_queue_id"] for item in batch[:8]], [f"A-{index}" for index in range(8)])
+            self.assertEqual([item["_queue_id"] for item in batch[8:]], ["B-0", "C-0"])
+
     def test_stale_queued_epoch_is_quarantined_after_history_clear(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

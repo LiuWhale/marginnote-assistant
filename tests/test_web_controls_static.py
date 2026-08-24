@@ -1530,7 +1530,9 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("state.sessionId = ''", self.js)
         self.assertIn("state.autoPdfCacheRequestedKey = ''", self.js)
         self.assertIn("requestDocumentKey", post_body)
-        self.assertIn("staleDocumentResponse", post_body)
+        self.assertIn("staleDocument", post_body)
+        self.assertIn("staleBinding", post_body)
+        self.assertIn("requestBindingMatchesActiveSession", post_body)
         queued_body = self.js.split("function runQueuedCommand(command, options)", 1)[1].split(
             "\n  function drainNextQueuedAction", 1
         )[0]
@@ -2668,6 +2670,39 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn("if (!state.queueRuntimeReady) return;", drain_body)
         self.assertIn("queuePumpStartTimer", state_body)
 
+    def test_cold_restore_callback_switch_and_mixed_queue_wiring_are_exactly_scoped(self) -> None:
+        lifecycle_js = (ROOT / "web/source_workspace_lifecycle.js").read_text(encoding="utf-8")
+        restore_body = self.js.split("function restoreQueueRuntimeSessionForContext", 1)[1].split(
+            "\n  function queuedSessionIdentity", 1
+        )[0]
+        persist_body = self.js.split("function persistQueuedWriteConfirmationState", 1)[1].split(
+            "\n  function applyQueuedResultPolicy", 1
+        )[0]
+        schedule_body = self.js.split("function scheduleAutomaticDocumentSwitch", 1)[1].split(
+            "\n  function completeAutomaticDocumentSwitch", 1
+        )[0]
+        drain_body = self.js.split("function drainNextQueuedAction", 1)[1].split(
+            "\n  function requestTextAction", 1
+        )[0]
+
+        self.assertIn("conversation_active_restore", restore_body)
+        self.assertIn("queueSessionRestoreComplete", restore_body)
+        self.assertLess(
+            restore_body.index("setCurrentConversation"),
+            restore_body.index("prepareQueueRuntimeForActiveSession"),
+        )
+        self.assertNotIn("state.sessionId", persist_body)
+        self.assertNotIn("state.sessionEpoch", persist_body)
+        self.assertNotIn("state.contextDocumentKey", persist_body)
+        self.assertLess(
+            schedule_body.index("resetQueueRuntimeForConversationSwitch"),
+            schedule_body.index("beginMigration"),
+        )
+        self.assertIn("firstRunnableQueuedCommand", drain_body)
+        self.assertIn("Object.assign({}, options, {isWriteAction: isWriteAction})", drain_body)
+        self.assertIn("function firstRunnableQueuedCommand", lifecycle_js)
+        self.assertIn("blockedOwners", lifecycle_js)
+
     def test_conversation_switch_removes_old_confirmation_controls_before_restore(self) -> None:
         switch_body = self.js.split("function setCurrentConversation", 1)[1].split(
             "\n  function currentMnObjectRef", 1
@@ -2684,6 +2719,9 @@ class WebControlsStaticTests(unittest.TestCase):
         ready_body = self.js.split("setAiEditOperationReady: function(payload)", 1)[1].split(
             "\n    setAiEditOperationResult:", 1
         )[0]
+        result_body = self.js.split("setAiEditOperationResult: function(payload)", 1)[1].split(
+            "\n    setAiEditTransactionStatus:", 1
+        )[0]
 
         self.assertLess(
             switch_body.index("resetQueueRuntimeForConversationSwitch"),
@@ -2692,17 +2730,25 @@ class WebControlsStaticTests(unittest.TestCase):
         for marker in [
             "renderDraft(null)",
             "pendingAiEditDrafts",
-            "querySelectorAll('.ai-edit-operation')",
+            ".ai-edit-operation",
+            ".mindmap-diff-operation",
+            ".operation-plan-panel",
             "aiEditTransactionStatus",
             "renderAiEditTransactionCenter",
         ]:
             self.assertIn(marker, clear_body)
-        self.assertIn("queuedDraftBindingMatchesActiveSession", accept_body)
-        self.assertIn("queuedDraftBindingMatchesActiveSession", reject_body)
+        self.assertIn("captureQueuedDraftOperationBinding", accept_body)
+        self.assertIn("queuedDraftOperationBindingMatchesActiveSession", accept_body)
+        self.assertIn("captureQueuedDraftOperationBinding", reject_body)
+        self.assertIn("queuedDraftOperationBindingMatchesActiveSession", reject_body)
         self.assertIn("queuedConfirmationMatchesActiveSession", ready_body)
         self.assertLess(
             ready_body.index("queuedConfirmationMatchesActiveSession"),
             ready_body.index("renderAiEditOperation"),
+        )
+        self.assertLess(
+            result_body.index("queuedConfirmationMatchesActiveSession"),
+            result_body.index("querySelectorAll('.ai-edit-operation')"),
         )
 
     def test_guard_blocks_only_same_session_owned_write_commands(self) -> None:

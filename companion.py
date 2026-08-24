@@ -102,6 +102,7 @@ PDF_CACHE_INDEX_PATH = PDF_CACHE_DIR / "index.json"
 PDF_TEXT_CACHE_DIR = PDF_CACHE_DIR / "text"
 CONTROL_DIR = ROOT / "control"
 ACTION_TOKEN_PATH = CONTROL_DIR / "web-action-token"
+ACTIVE_CONVERSATIONS_PATH = CONTROL_DIR / "active-conversations.json"
 ACTION_TOKEN_HEADER = "X-Codex-Action-Token"
 ACTION_TOKEN = ""
 ALLOWED_WEB_ORIGINS = {"null", "file://"}
@@ -154,6 +155,7 @@ HISTORY_LOCKS = tuple(threading.RLock() for _ in range(64))
 QUEUE_LOCKS = tuple(threading.RLock() for _ in range(64))
 SOURCE_MUTATION_LOCKS = tuple(threading.RLock() for _ in range(64))
 SOURCE_CLEANUP_LOCK = threading.RLock()
+ACTIVE_CONVERSATIONS_LOCK = threading.RLock()
 SOURCE_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
 LAST_SOURCE_CLEANUP_AT = 0.0
 DRAFT_SCOPE_BINDING_FEATURE = "draft-write-scope-binding-v1"
@@ -308,6 +310,7 @@ READ_ONLY_ACTIONS = {
     "conversation_new",
     "conversation_list",
     "conversation_load",
+    "conversation_active_restore",
     "conversation_delete",
     "source_workspace_get",
     "source_workspace_update",
@@ -7411,6 +7414,29 @@ def web_busy_queue_response_if_needed(payload: dict[str, Any], action: str) -> d
     return None
 
 
+def queue_command_owner_key(command: dict[str, Any]) -> str:
+    conversation_id = str(command.get("conversationId") or "")
+    session_id = safe_session_id(command.get("sessionId") or command.get("session_id"))
+    queued_epoch = str(command.get("sessionEpoch") or command.get("session_epoch") or "")
+    context_document_key = str(command.get("contextDocumentKey") or "")
+    if conversation_id or session_id or queued_epoch:
+        return "|".join((conversation_id, session_id, queued_epoch, context_document_key))
+    return "unbound"
+
+
+def queue_poll_batch(commands: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    safe_limit = max(1, int(limit or 8))
+    batch = list(commands[:safe_limit])
+    seen_owners = {queue_command_owner_key(command) for command in batch}
+    for command in commands[safe_limit:]:
+        owner_key = queue_command_owner_key(command)
+        if owner_key in seen_owners:
+            continue
+        seen_owners.add(owner_key)
+        batch.append(command)
+    return batch
+
+
 def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
     paths = queue_paths_for_topic(topic_id, book_md5)
     if not paths:
@@ -7546,7 +7572,7 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
                 "pending": len(commands),
                 "hasCommand": True,
                 "command": passthrough_commands[0],
-                "commands": passthrough_commands[:8],
+                "commands": queue_poll_batch(passthrough_commands),
                 "webBusy": True,
                 "deferredByWebBusy": len(commands) - len(passthrough_commands),
                 **rejection_fields,
@@ -7565,7 +7591,7 @@ def poll_commands(topic_id: str, book_md5: str) -> dict[str, Any]:
         "pending": len(commands),
         "hasCommand": bool(commands),
         "command": commands[0] if commands else None,
-        "commands": commands[:8],
+        "commands": queue_poll_batch(commands),
         **rejection_fields,
     }
 
@@ -7971,6 +7997,7 @@ def new_conversation(payload: dict[str, Any]) -> dict[str, Any]:
         persisted = read_conversation_file(session_path)
         if not persisted:
             raise OSError("持久化会话无法读回")
+        remember_active_conversation(persisted)
     except SessionMutationRejected as exc:
         return {
             **exc.result(),
@@ -8012,6 +8039,10 @@ def load_conversation(payload: dict[str, Any]) -> dict[str, Any]:
             return exc.result()
     workspace = restore_conversation_source_workspace(item, payload)
     latest_item = read_conversation_file(path) or item
+    try:
+        remember_active_conversation(latest_item)
+    except OSError as exc:
+        return {"ok": False, "message": f"加载历史对话失败：活动会话状态保存失败：{exc}"}
     return {
         "ok": True,
         "message": "已加载历史对话。",
@@ -8068,6 +8099,16 @@ def delete_conversation(payload: dict[str, Any]) -> dict[str, Any]:
             "retryable": tombstoned,
             "sessionEpoch": session_epoch(delete_state),
         }
+    try:
+        forget_active_conversation(delete_state)
+    except OSError as exc:
+        return {
+            "ok": False,
+            "blocked": "active_conversation_cleanup_failed",
+            "message": f"历史对话已删除，但活动会话状态清理失败：{exc}",
+            "deleted": session_id,
+            "sessionEpoch": session_epoch(deleted or {}),
+        }
     return {
         "ok": True,
         "message": "历史对话已删除。",
@@ -8106,6 +8147,163 @@ def _atomic_write_session_json(path: Path, body: dict[str, Any]) -> None:
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+
+
+ACTIVE_CONVERSATIONS_SCHEMA = "codex.mn.activeConversations.v1"
+
+
+def _active_conversations_state() -> dict[str, Any]:
+    data = read_json_file(ACTIVE_CONVERSATIONS_PATH, {})
+    if not isinstance(data, dict) or data.get("schema") != ACTIVE_CONVERSATIONS_SCHEMA:
+        return {"schema": ACTIVE_CONVERSATIONS_SCHEMA, "bindings": {}}
+    bindings = data.get("bindings")
+    if not isinstance(bindings, dict):
+        bindings = {}
+    return {"schema": ACTIVE_CONVERSATIONS_SCHEMA, "bindings": dict(bindings)}
+
+
+def _write_active_conversations_state(state: dict[str, Any]) -> None:
+    _atomic_write_session_json(
+        ACTIVE_CONVERSATIONS_PATH,
+        {
+            "schema": ACTIVE_CONVERSATIONS_SCHEMA,
+            "bindings": state.get("bindings") if isinstance(state.get("bindings"), dict) else {},
+        },
+    )
+
+
+def remember_active_conversation(item: dict[str, Any]) -> bool:
+    context_document_key = str(item.get("contextDocumentKey") or "").strip()
+    session_id = safe_session_id(item.get("sessionId") or item.get("session_id"))
+    conversation_id = str(item.get("conversationId") or "").strip()
+    epoch = session_epoch(item)
+    if not context_document_key or not session_id or not conversation_id or not epoch:
+        return False
+    binding = {
+        "active": True,
+        "contextDocumentKey": context_document_key,
+        "conversationId": conversation_id,
+        "sessionId": session_id,
+        "sessionEpoch": epoch,
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    with ACTIVE_CONVERSATIONS_LOCK:
+        state = _active_conversations_state()
+        state["bindings"][context_document_key] = binding
+        _write_active_conversations_state(state)
+    return True
+
+
+def forget_active_conversation(item: dict[str, Any]) -> int:
+    context_document_key = str(item.get("contextDocumentKey") or "").strip()
+    session_id = safe_session_id(item.get("sessionId") or item.get("session_id"))
+    removed = 0
+    with ACTIVE_CONVERSATIONS_LOCK:
+        state = _active_conversations_state()
+        bindings = state["bindings"]
+        for key in list(bindings):
+            binding = bindings.get(key) if isinstance(bindings.get(key), dict) else {}
+            if context_document_key and key != context_document_key:
+                continue
+            if session_id and safe_session_id(binding.get("sessionId")) != session_id:
+                continue
+            bindings[key] = {
+                "active": False,
+                "contextDocumentKey": key,
+                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            }
+            removed += 1
+        if removed:
+            _write_active_conversations_state(state)
+    return removed
+
+
+def _no_active_conversation_result() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "restoreComplete": True,
+        "active": False,
+        "conversation": None,
+        "history": [],
+        "workspace": None,
+        "message": "当前文档没有可恢复的活动对话。",
+    }
+
+
+def restore_active_conversation(payload: dict[str, Any]) -> dict[str, Any]:
+    context_document_key = normalize_document_context_key(payload)
+    if not context_document_key:
+        return {
+            "ok": False,
+            "restoreComplete": False,
+            "active": False,
+            "conversation": None,
+            "message": "恢复活动对话失败：缺少文档上下文。",
+        }
+    with ACTIVE_CONVERSATIONS_LOCK:
+        state = _active_conversations_state()
+        raw_binding = state["bindings"].get(context_document_key)
+        binding = dict(raw_binding) if isinstance(raw_binding, dict) else None
+
+    if binding and binding.get("active") is False:
+        return _no_active_conversation_result()
+
+    if not binding:
+        conversations = list_conversations(payload).get("conversations") or []
+        if not conversations:
+            return _no_active_conversation_result()
+        binding = dict(conversations[0])
+        try:
+            remember_active_conversation(binding)
+        except OSError as exc:
+            return {
+                "ok": False,
+                "restoreComplete": False,
+                "active": False,
+                "conversation": None,
+                "message": f"恢复活动对话失败：无法迁移活动会话状态：{exc}",
+            }
+
+    session_id = safe_session_id(binding.get("sessionId"))
+    item = read_conversation_file(SESSIONS_DIR / f"{session_id}.json") if session_id else None
+    if (
+        not item
+        or not conversation_matches_payload(item, payload)
+        or str(item.get("conversationId") or "") != str(binding.get("conversationId") or "")
+    ):
+        try:
+            forget_active_conversation(binding)
+        except OSError as exc:
+            return {
+                "ok": False,
+                "restoreComplete": False,
+                "active": False,
+                "conversation": None,
+                "message": f"恢复活动对话失败：过期活动会话清理失败：{exc}",
+            }
+        return _no_active_conversation_result()
+
+    workspace = restore_conversation_source_workspace(item, payload)
+    latest_item = read_conversation_file(SESSIONS_DIR / f"{session_id}.json") or item
+    try:
+        remember_active_conversation(latest_item)
+    except OSError as exc:
+        return {
+            "ok": False,
+            "restoreComplete": False,
+            "active": False,
+            "conversation": None,
+            "message": f"恢复活动对话失败：活动会话状态刷新失败：{exc}",
+        }
+    return {
+        "ok": True,
+        "restoreComplete": True,
+        "active": True,
+        "conversation": conversation_summary(latest_item),
+        "history": latest_item.get("history") or [],
+        "workspace": workspace,
+        "message": "已恢复当前文档的活动对话。",
+    }
 
 
 def _write_session_state(path: Path, state: dict[str, Any]) -> None:
@@ -16150,6 +16348,8 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return list_conversations(payload)
     if action == "conversation_load":
         return load_conversation(payload)
+    if action == "conversation_active_restore":
+        return restore_active_conversation(payload)
     if action == "conversation_delete":
         return delete_conversation(payload)
     if action == "mindmap_target_status":

@@ -72,6 +72,12 @@
     queueGuardRestoreIdentityKey: '',
     queueGuardRestoredIdentityKey: '',
     queueRuntimeReady: false,
+    queueSessionRestoreToken: 0,
+    queueSessionRestoreInFlight: false,
+    queueSessionRestoreContextKey: '',
+    queueSessionRestoredContextKey: '',
+    queueSessionRestoreComplete: false,
+    queueSessionRestoreRetryTimer: null,
     queuePumpStartTimer: null,
     update: {},
     updateAutoChecked: false,
@@ -1200,14 +1206,23 @@
       done();
       return;
     }
+    if (!state.draft || String(state.draft.id || '') !== String(draftId || '')) return;
+    var operationBinding = captureQueuedDraftOperationBinding(state.draft, panel);
+    if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
     setMindmapDiffBusy(panel, true);
     setMindmapDiffStatus(panel, '正在保存逐节点编辑...', 'pending');
     postCompanion('draft_update', {
-      id: draftId,
-      excludedMindmapPaths: exclusions,
-      mindmapNodeEdits: nodeEdits
-    }, function(result) {
-      if (!result || !result.ok) {
+        id: draftId,
+        excludedMindmapPaths: exclusions,
+        mindmapNodeEdits: nodeEdits,
+        queueId: operationBinding.queueId,
+        conversationId: operationBinding.conversationId,
+        sessionId: operationBinding.sessionId,
+        sessionEpoch: operationBinding.sessionEpoch,
+        contextDocumentKey: operationBinding.contextDocumentKey
+      }, function(result) {
+        if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
+        if (!result || !result.ok) {
         setMindmapDiffBusy(panel, false);
         setMindmapDiffStatus(panel, result && result.message ? result.message : '保存逐节点编辑失败。', 'error');
         addFailureMessage('保存脑图 Diff 编辑失败', result);
@@ -1579,9 +1594,20 @@
       addMessage('assistant', '没有可丢弃的脑图草稿。');
       return;
     }
+    if (!state.draft || String(state.draft.id || '') !== String(draftId || '')) return;
+    var operationBinding = captureQueuedDraftOperationBinding(state.draft, panel);
+    if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
     setMindmapDiffBusy(panel, true);
     setMindmapDiffStatus(panel, '正在丢弃脑图草稿...', 'rejected');
-    postCompanion('draft_delete', {id: draftId}, function(result) {
+    postCompanion('draft_delete', {
+      id: draftId,
+      queueId: operationBinding.queueId,
+      conversationId: operationBinding.conversationId,
+      sessionId: operationBinding.sessionId,
+      sessionEpoch: operationBinding.sessionEpoch,
+      contextDocumentKey: operationBinding.contextDocumentKey
+    }, function(result) {
+      if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
       if (!result || result.ok === false) {
         setMindmapDiffBusy(panel, false);
         setMindmapDiffStatus(panel, result && result.message ? result.message : '丢弃草稿失败。', 'error');
@@ -1590,6 +1616,7 @@
       }
       if (state.draft && state.draft.id === draftId) renderDraft(null);
       setMindmapDiffStatus(panel, '已拒绝并丢弃脑图草稿。', 'rejected');
+      if (operationBinding.queueId) resolveQueuedWriteConfirmation(operationBinding);
     }, {showReply: false});
   }
 
@@ -1745,9 +1772,20 @@
       addMessage('assistant', '没有可丢弃的草稿。');
       return;
     }
+    if (!state.draft || String(state.draft.id || '') !== String(draftId || '')) return;
+    var operationBinding = captureQueuedDraftOperationBinding(state.draft, panel);
+    if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
     setOperationPlanBusy(panel, true);
     setOperationPlanStatus(panel, '正在丢弃写入草稿...', 'rejected');
-    postCompanion('draft_delete', {id: draftId}, function(result) {
+    postCompanion('draft_delete', {
+      id: draftId,
+      queueId: operationBinding.queueId,
+      conversationId: operationBinding.conversationId,
+      sessionId: operationBinding.sessionId,
+      sessionEpoch: operationBinding.sessionEpoch,
+      contextDocumentKey: operationBinding.contextDocumentKey
+    }, function(result) {
+      if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
       if (!result || result.ok === false) {
         setOperationPlanBusy(panel, false);
         setOperationPlanStatus(panel, result && result.message ? result.message : '丢弃草稿失败。', 'error');
@@ -1756,6 +1794,7 @@
       }
       if (state.draft && state.draft.id === draftId) renderDraft(null);
       setOperationPlanStatus(panel, '已拒绝并丢弃写入草稿。', 'rejected');
+      if (operationBinding.queueId) resolveQueuedWriteConfirmation(operationBinding);
     }, {showReply: false});
   }
 
@@ -2816,7 +2855,9 @@
     state.aiEditTransactionStatus = {schema: 'codex.mn.aiEditTransactionStatus.v1', available: false};
     renderDraft(null);
     renderAiEditTransactionCenter(state.aiEditTransactionStatus);
-    var panels = document.querySelectorAll('.ai-edit-operation');
+    var panels = document.querySelectorAll(
+      '.ai-edit-operation, .mindmap-diff-operation, .operation-plan-panel'
+    );
     for (var i = 0; i < panels.length; i++) {
       if (panels[i] && panels[i].parentNode) panels[i].parentNode.removeChild(panels[i]);
     }
@@ -2824,6 +2865,13 @@
 
   function resetQueueRuntimeForConversationSwitch() {
     state.queueRuntimeReady = false;
+    if (state.queueSessionRestoreRetryTimer) window.clearTimeout(state.queueSessionRestoreRetryTimer);
+    state.queueSessionRestoreRetryTimer = null;
+    state.queueSessionRestoreToken += 1;
+    state.queueSessionRestoreInFlight = false;
+    state.queueSessionRestoreContextKey = '';
+    state.queueSessionRestoredContextKey = '';
+    state.queueSessionRestoreComplete = false;
     state.queueGuardRestoreToken += 1;
     state.queueGuardRestoreInFlight = false;
     state.queueGuardRestoreIdentityKey = '';
@@ -2832,8 +2880,9 @@
     clearQueuedWriteConfirmationUi();
   }
 
-  function setCurrentConversation(conversation) {
+  function setCurrentConversation(conversation, options) {
     conversation = conversation || {};
+    options = options || {};
     resetQueueRuntimeForConversationSwitch();
     invalidateSourceWorkspaceRequests();
     state.newConversationRequestToken += 1;
@@ -2842,6 +2891,8 @@
     state.conversationId = String(conversation.conversationId || '');
     state.sessionId = String(conversation.sessionId || '');
     state.sessionEpoch = String(conversation.sessionEpoch || '');
+    state.queueSessionRestoreComplete = true;
+    state.queueSessionRestoredContextKey = String(state.contextDocumentKey || '');
     if (conversation.sourceIds !== undefined) {
       state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(conversation.sourceIds || []);
     }
@@ -2852,7 +2903,7 @@
       state.sourceWorkspace.revision = String(conversation.sourceWorkspaceRevision || '');
     }
     renderSourceWorkspaceHeaderControl();
-    prepareQueueRuntimeForActiveSession();
+    if (!options.deferQueuePreparation) prepareQueueRuntimeForActiveSession();
   }
 
   function currentMnObjectRef() {
@@ -3242,38 +3293,52 @@
     var requestPayload = companionPayload(action, extra);
     if (options.onRequestPayload) options.onRequestPayload(requestPayload);
     var requestDocumentKey = String(requestPayload.contextDocumentKey || state.contextDocumentKey || '');
+    var requestSettled = false;
     var url = 'http://127.0.0.1:48761/marginnote/action';
     xhr.open('POST', url, true);
+    if (Number(options.timeoutMs || 0) > 0) xhr.timeout = Number(options.timeoutMs);
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
     authorizeCompanionRequest(xhr, url);
     setProgressStage(
       '正在等待 Companion 返回',
       '请求已发送到本地 Companion；如果走 Codex CLI 或 OpenAI，这一步会等待模型生成文字。'
     );
+    function routeStaleResponse(result) {
+      var staleDocument = !!(
+        requestDocumentKey &&
+        state.contextDocumentKey &&
+        requestDocumentKey !== state.contextDocumentKey
+      );
+      var staleBinding = options.requireActiveBinding === true &&
+        !window.SourceWorkspaceLifecycle.requestBindingMatchesActiveSession(requestPayload, state);
+      if (!staleDocument && !staleBinding) return false;
+      if (options.onStaleResponse) options.onStaleResponse(result || {}, requestPayload);
+      return true;
+    }
     xhr.onreadystatechange = function() {
-      if (xhr.readyState !== 4) return;
+      if (xhr.readyState !== 4 || requestSettled) return;
+      requestSettled = true;
       var parsedResult = parseCompanionResult(xhr);
-      if (requestDocumentKey && state.contextDocumentKey && requestDocumentKey !== state.contextDocumentKey) {
-        var staleDocumentResponse = {
-          ok: true,
-          staleDocumentResponse: true,
-          message: '当前文件已切换，上一文件的结果已保留在其历史对话中。'
-        };
-        setWebRunLock(false);
-        window.CodexPanel.setBusy({busy: false});
-        finishProgressStage('已切换文件', staleDocumentResponse.message);
-        if (options.onStaleResponse) options.onStaleResponse(parsedResult || {}, requestPayload);
-        return;
-      }
+      if (routeStaleResponse(parsedResult)) return;
       setProgressStage('已收到结果', 'Companion 已返回，正在解析结果并更新面板。');
       var result = displayCompanionResult(parsedResult, options.showReply !== false, action);
       if (done) done(result || {});
     };
     xhr.onerror = function() {
+      if (requestSettled) return;
+      requestSettled = true;
       var result = companionConnectionFailureResult();
+      if (routeStaleResponse(result)) return;
       setProgressStage('连接失败', result.message);
       finishProgressStage('连接失败', result.message);
       window.CodexPanel.setStatus({text: result.message});
+      if (done) done(result);
+    };
+    xhr.ontimeout = function() {
+      if (requestSettled) return;
+      requestSettled = true;
+      var result = {ok: false, httpStatus: 0, message: 'Companion 请求超时，请稍后重试。'};
+      if (routeStaleResponse(result)) return;
       if (done) done(result);
     };
     xhr.send(JSON.stringify(requestPayload));
@@ -7969,6 +8034,7 @@
       };
     }
     if (queueId && state.currentQueueId === queueId) state.currentQueueId = '';
+    if (detail.silent === true) return;
     setWebRunLock(false);
     window.CodexPanel.setBusy({busy: false});
     var inactiveWrite = reason === 'inactive_write';
@@ -7980,12 +8046,76 @@
     if (!inactiveWrite && detail.routing === 'active') addFailureMessage('队列任务执行失败', result);
   }
 
+  function restoreQueueRuntimeSessionForContext(done) {
+    var contextDocumentKey = String(state.contextDocumentKey || '');
+    if (!documentContextReadyForAutomaticSwitch(state.context || {}, contextDocumentKey)) {
+      if (done) done(false);
+      return;
+    }
+    if (
+      state.queueSessionRestoreComplete &&
+      state.queueSessionRestoredContextKey === contextDocumentKey
+    ) {
+      if (done) done(true);
+      return;
+    }
+    if (
+      state.queueSessionRestoreInFlight &&
+      state.queueSessionRestoreContextKey === contextDocumentKey
+    ) return;
+
+    state.queueRuntimeReady = false;
+    stopQueuePump();
+    if (state.queueSessionRestoreRetryTimer) window.clearTimeout(state.queueSessionRestoreRetryTimer);
+    state.queueSessionRestoreRetryTimer = null;
+    state.queueSessionRestoreToken += 1;
+    var restoreToken = state.queueSessionRestoreToken;
+    state.queueSessionRestoreInFlight = true;
+    state.queueSessionRestoreContextKey = contextDocumentKey;
+    postCompanion('conversation_active_restore', {
+      contextDocumentKey: contextDocumentKey,
+      mnObject: {},
+      mnObjectId: ''
+    }, function(result) {
+      if (
+        restoreToken !== state.queueSessionRestoreToken ||
+        contextDocumentKey !== String(state.contextDocumentKey || '')
+      ) return;
+      state.queueSessionRestoreInFlight = false;
+      state.queueSessionRestoreContextKey = '';
+      if (!result || !result.ok || result.restoreComplete !== true) {
+        state.queueSessionRestoreComplete = false;
+        state.queueSessionRestoredContextKey = '';
+        state.queueSessionRestoreRetryTimer = window.setTimeout(function() {
+          if (
+            restoreToken !== state.queueSessionRestoreToken ||
+            contextDocumentKey !== String(state.contextDocumentKey || '')
+          ) return;
+          state.queueSessionRestoreRetryTimer = null;
+          restoreQueueRuntimeSessionForContext();
+        }, 1000);
+        if (done) done(false);
+        return;
+      }
+      var conversation = result.active === true ? (result.conversation || {}) : {};
+      setCurrentConversation(conversation, {deferQueuePreparation: true});
+      renderHistoryItems(result.history || []);
+      if (result.active === true) {
+        if (result.workspace) state.sourceWorkspace = result.workspace;
+        refreshSourceWorkspace(false);
+      }
+      prepareQueueRuntimeForActiveSession();
+      if (done) done(true);
+    }, {showReply: false, timeoutMs: 8000});
+  }
+
   function queuedSessionIdentity() {
     return {
       conversationId: String(state.conversationId || ''),
       sessionId: String(state.sessionId || ''),
       sessionEpoch: String(state.sessionEpoch || ''),
-      contextDocumentKey: String(state.contextDocumentKey || '')
+      contextDocumentKey: String(state.contextDocumentKey || ''),
+      queueSessionRestoreComplete: state.queueSessionRestoreComplete === true
     };
   }
 
@@ -8054,6 +8184,16 @@
       if (done) done(false);
       return;
     }
+    if (!identityKey) {
+      state.pendingQueuedWriteConfirmation = null;
+      state.queueGuardRestoreInFlight = false;
+      state.queueGuardRestoreIdentityKey = '';
+      state.queueGuardRestoredIdentityKey = '';
+      state.queueRuntimeReady = true;
+      startQueuePump();
+      if (done) done(true);
+      return;
+    }
     restoreQueuedWriteConfirmationGuard(function(restored) {
       if (
         !restored ||
@@ -8069,21 +8209,18 @@
   }
 
   function persistQueuedWriteConfirmationState(identity, status, done) {
-    identity = identity || state.pendingQueuedWriteConfirmation || {};
+    identity = identity || {};
     var payload = {
       queueId: String(identity.queueId || ''),
       draftId: String(identity.draftId || identity.id || ''),
       transactionId: String(identity.transactionId || ''),
       status: String(status || identity.status || ''),
-      conversationId: String(identity.conversationId || state.conversationId || ''),
-      sessionId: String(identity.sessionId || state.sessionId || ''),
-      sessionEpoch: String(identity.sessionEpoch || state.sessionEpoch || ''),
-      contextDocumentKey: String(identity.contextDocumentKey || state.contextDocumentKey || '')
+      conversationId: String(identity.conversationId || ''),
+      sessionId: String(identity.sessionId || ''),
+      sessionEpoch: String(identity.sessionEpoch || ''),
+      contextDocumentKey: String(identity.contextDocumentKey || '')
     };
     postCompanion('queued_write_confirmation_update', payload, function(result) {
-      if (result && result.ok && result.confirmation && result.confirmation.status !== 'resolved') {
-        state.pendingQueuedWriteConfirmation = result.confirmation;
-      }
       if (done) done(result || {ok: false, message: '写入确认状态持久化失败。'});
     }, {showReply: false});
   }
@@ -8102,20 +8239,16 @@
 
   function applyQueuedResultPolicy(command, result, effects) {
     effects = effects || {};
-    return window.SourceWorkspaceLifecycle.handleQueuedResult({
-      command: command || {},
-      result: result || {},
-      activeConversation: {
-        conversationId: state.conversationId,
-        sessionId: state.sessionId,
-        sessionEpoch: state.sessionEpoch,
-        contextDocumentKey: state.contextDocumentKey
-      },
+      return window.SourceWorkspaceLifecycle.handleQueuedResult({
+        command: command || {},
+        result: result || {},
+        activeConversation: state,
       isWriteAction: isWriteAction,
       onActiveChat: effects.onActiveChat,
       onInactiveChat: effects.onInactiveChat,
       onActiveWrite: effects.onActiveWrite,
       onDeferred: function(detail) {
+        detail.silent = effects.silent === true;
         deferQueuedResult(command, detail.result || result, detail);
         if (effects.onDeferred) effects.onDeferred(detail);
       },
@@ -8128,7 +8261,8 @@
               reason: 'completion_persist_failed',
               retryable: true,
               routing: window.SourceWorkspaceLifecycle.queuedSessionRouting(command, state),
-              result: persisted || {}
+              result: persisted || {},
+              silent: effects.silent === true
             });
             return;
           }
@@ -8162,7 +8296,11 @@
       draft: result,
       queueId: command._queue_id || '',
       queueCommand: command,
-      writeTarget: result.writeTarget || (result.mindmap && result.mindmap.writeTarget) || (state.mindmapTarget && state.mindmapTarget.target) || {}
+      conversationId: String(command.conversationId || ''),
+      sessionId: String(command.sessionId || ''),
+      sessionEpoch: String(command.sessionEpoch || ''),
+      contextDocumentKey: String(command.contextDocumentKey || ''),
+      writeTarget: result.writeTarget || (result.mindmap && result.mindmap.writeTarget) || command.writeTarget || {}
     }, function(saved) {
       var routing = window.SourceWorkspaceLifecycle.queuedSessionRouting(command, {
         conversationId: state.conversationId,
@@ -8171,7 +8309,8 @@
       });
       if (
         routing !== 'active' ||
-        String(command.sessionEpoch || '') !== String(state.sessionEpoch || '')
+        String(command.sessionEpoch || '') !== String(state.sessionEpoch || '') ||
+        String(command.contextDocumentKey || '') !== String(state.contextDocumentKey || '')
       ) {
         done({ok: false, blocked: 'session_binding_mismatch', message: '对话已切换，写入草稿保持等待。'});
         return;
@@ -8200,8 +8339,35 @@
     });
   }
 
-  function runQueuedCommand(command, options) {
+  function freezeQueuedDispatchValue(value) {
+    if (!value || typeof value !== 'object' || !Object.freeze || Object.isFrozen(value)) return value;
+    for (var key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) freezeQueuedDispatchValue(value[key]);
+    }
+    return Object.freeze(value);
+  }
+
+  function captureQueuedCommandDispatch(command) {
     command = command || {};
+    var captured = {};
+    try {
+      captured = JSON.parse(JSON.stringify(command));
+    } catch (err) {
+      for (var key in command) {
+        if (Object.prototype.hasOwnProperty.call(command, key)) captured[key] = command[key];
+      }
+    }
+    captured._queue_id = String(command._queue_id || captured._queue_id || '');
+    captured.queueId = captured._queue_id;
+    captured.conversationId = String(command.conversationId || '');
+    captured.sessionId = String(command.sessionId || '');
+    captured.sessionEpoch = String(command.sessionEpoch || '');
+    captured.contextDocumentKey = String(command.contextDocumentKey || '');
+    return freezeQueuedDispatchValue(captured);
+  }
+
+  function runQueuedCommand(command, options) {
+    command = captureQueuedCommandDispatch(command || {});
     options = options || {};
     if (!command._queue_id && !command.rawAction && !command.action && !command.nativeAction) {
       ackAndSkipQueuedCommand(command, '队列缺少动作');
@@ -8287,14 +8453,14 @@
       return;
     }
     if (rawAction === 'goal_run') {
-      requestGoalAction(prompt, '[队列执行] 目标', queueId, extraPayload);
+      requestGoalAction(prompt, '[队列执行] 目标', queueId, extraPayload, command);
       return;
     }
     if (isWriteAction(rawAction)) {
-      requestDraftAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId, extraPayload);
+      requestDraftAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId, extraPayload, command);
       return;
     }
-    requestTextAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId, extraPayload);
+    requestTextAction(rawAction, prompt, '[队列执行] ' + actionLabel(rawAction), queueId, extraPayload, command);
   }
 
   function drainNextQueuedAction(options) {
@@ -8329,12 +8495,27 @@
       } catch (err) {
         return;
       }
-      var command = result.command || null;
-      if (!command && result.commands && result.commands.length) command = result.commands[0];
       if (result.blocked === 'web_busy') {
         window.setTimeout(drainNextQueuedAction, 700);
         return;
       }
+      var commands = result.commands && result.commands.length ? result.commands.slice() : [];
+      if (result.command) {
+        var primaryQueueId = String(result.command._queue_id || '');
+        var primaryIncluded = false;
+        for (var commandIndex = 0; commandIndex < commands.length; commandIndex++) {
+          if (String((commands[commandIndex] || {})._queue_id || '') === primaryQueueId) {
+            primaryIncluded = true;
+            break;
+          }
+        }
+        if (!primaryIncluded) commands.unshift(result.command);
+      }
+      var command = window.SourceWorkspaceLifecycle.firstRunnableQueuedCommand(
+        commands,
+        state,
+        Object.assign({}, options, {isWriteAction: isWriteAction})
+      );
       if (!command || result.blocked) return;
       var queueId = String(command._queue_id || '');
       var executionDisposition = window.SourceWorkspaceLifecycle.queuedExecutionDisposition(command, state);
@@ -8365,7 +8546,7 @@
     xhr.send();
   }
 
-  function requestTextAction(action, prompt, userText, queueId, extraPayload) {
+  function requestTextAction(action, prompt, userText, queueId, extraPayload, queuedDispatch) {
     state.currentQueueId = queueId || '';
     extraPayload = extraPayload || {};
     if (generationLifecycleUnavailableReason()) {
@@ -8379,10 +8560,10 @@
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在执行：' + actionLabel(action)});
     var requestId = newRequestId();
-    var queuedCommand = queueId ? Object.assign({}, extraPayload, {
+    var queuedCommand = queueId ? (queuedDispatch || captureQueuedCommandDispatch(Object.assign({}, extraPayload, {
       _queue_id: queueId,
       rawAction: action
-    }) : null;
+    }))) : null;
     startProgress(action, '正在询问 Codex', 'Web 面板正在直接调用本地 Companion，不再经过 MN4 原生请求层。', requestId);
     postCompanion(action, Object.assign({}, extraPayload, {prompt: prompt, _web_run_owner: true, _request_id: requestId}), function(result) {
       if (queueId) {
@@ -8425,13 +8606,11 @@
       ackQueueAndContinue(queueId);
     }, {
       showReply: !queueId,
+      requireActiveBinding: true,
       onStaleResponse: queueId ? function(staleResult) {
-        setWebRunLock(false);
         applyQueuedResultPolicy(queuedCommand, staleResult, {
-          onInactiveChat: function() {
-            finishProgressStage('后台完成', '结果已保存到绑定的历史对话。');
-            window.CodexPanel.setBusy({busy: false});
-          }
+          onInactiveChat: function() {},
+          silent: true
         });
       } : null
     });
@@ -10703,7 +10882,7 @@
     return {title: title.substring(0, 160), detail: detail.substring(0, 3000)};
   }
 
-  function requestGoalAction(goalText, userText, queueId, extraPayload) {
+  function requestGoalAction(goalText, userText, queueId, extraPayload, queuedDispatch) {
     state.currentQueueId = queueId || '';
     extraPayload = extraPayload || {};
     if (generationLifecycleUnavailableReason()) {
@@ -10711,10 +10890,10 @@
       else addMessage('assistant', generationLifecycleUnavailableReason());
       return;
     }
-    var queuedCommand = queueId ? Object.assign({}, extraPayload, {
+    var queuedCommand = queueId ? (queuedDispatch || captureQueuedCommandDispatch(Object.assign({}, extraPayload, {
       _queue_id: queueId,
       rawAction: 'goal_run'
-    }) : null;
+    }))) : null;
     var goal = goalTextToPayload(goalText);
     if (!goal.title && !goal.detail) {
       if (queueId) {
@@ -10791,19 +10970,17 @@
       ackQueueAndContinue(queueId);
     }, {
       showReply: !queueId,
+      requireActiveBinding: true,
       onStaleResponse: queueId ? function(staleResult) {
-        setWebRunLock(false);
         applyQueuedResultPolicy(queuedCommand, staleResult, {
-          onInactiveChat: function() {
-            finishProgressStage('后台完成', '目标结果已保存到绑定的历史对话。');
-            window.CodexPanel.setBusy({busy: false});
-          }
+          onInactiveChat: function() {},
+          silent: true
         });
       } : null
     });
   }
 
-  function requestDraftAction(action, prompt, userText, queueId, extraPayload) {
+  function requestDraftAction(action, prompt, userText, queueId, extraPayload, queuedDispatch) {
     state.currentQueueId = queueId || '';
     extraPayload = extraPayload || {};
     if (generationLifecycleUnavailableReason()) {
@@ -10813,10 +10990,10 @@
     }
     if (!ensureMindmapTargetReady(action)) {
       if (queueId) {
-        applyQueuedResultPolicy(Object.assign({}, extraPayload, {
+        applyQueuedResultPolicy(queuedDispatch || captureQueuedCommandDispatch(Object.assign({}, extraPayload, {
           _queue_id: queueId,
           rawAction: action
-        }), {
+        })), {
           ok: false,
           blocked: 'write_target_unavailable',
           message: '写入目标尚未就绪。'
@@ -10831,10 +11008,10 @@
     window.CodexPanel.setBusy({busy: true});
     window.CodexPanel.setStatus({text: '正在生成草稿：' + actionLabel(action)});
     var requestId = newRequestId();
-    var queuedCommand = queueId ? Object.assign({}, extraPayload, {
+    var queuedCommand = queueId ? (queuedDispatch || captureQueuedCommandDispatch(Object.assign({}, extraPayload, {
       _queue_id: queueId,
       rawAction: action
-    }) : null;
+    }))) : null;
     startProgress(action, '正在生成草稿', '正在把当前上下文发送给 Companion，并等待卡片/脑图草稿。', requestId);
     var requestPayload = Object.assign({}, extraPayload, {
       prompt: prompt,
@@ -10909,12 +11086,13 @@
       });
     }, {
       showReply: false,
+      requireActiveBinding: true,
       onStaleResponse: queueId ? function(staleResult) {
         applyQueuedResultPolicy(queuedCommand, Object.assign({}, staleResult, {
           ok: false,
           blocked: 'queued_document_mismatch',
-          message: '当前文件已切换，写入队列项保持等待。'
-        }));
+          message: '当前文件或对话已切换，写入队列项保持等待。'
+        }), {silent: true});
       } : null
     });
   }
@@ -11961,6 +12139,8 @@
       }
       resetQueueRuntimeForConversationSwitch();
       state.sessionEpoch = String(result.sessionEpoch || '');
+      state.queueSessionRestoreComplete = true;
+      state.queueSessionRestoredContextKey = String(state.contextDocumentKey || '');
       renderHistoryItems([]);
       prepareQueueRuntimeForActiveSession();
     });
@@ -11988,6 +12168,12 @@
       !pending.sessionEpoch || pending.sessionEpoch !== String(state.sessionEpoch || '') ||
       !pending.contextDocumentKey || pending.contextDocumentKey !== String(state.contextDocumentKey || '')
     ) return false;
+    if (
+      (identity.conversationId && String(identity.conversationId) !== String(pending.conversationId || '')) ||
+      (identity.sessionId && String(identity.sessionId) !== String(pending.sessionId || '')) ||
+      (identity.sessionEpoch && String(identity.sessionEpoch) !== String(pending.sessionEpoch || '')) ||
+      (identity.contextDocumentKey && String(identity.contextDocumentKey) !== String(pending.contextDocumentKey || ''))
+    ) return false;
     var queueId = String(identity.queueId || '');
     var draftId = String(identity.draftId || identity.id || '');
     var transactionId = String(identity.transactionId || '');
@@ -12011,17 +12197,103 @@
     return true;
   }
 
-  function writeAcceptedDraft(draftId, panel) {
-    if (!queuedDraftBindingMatchesActiveSession(state.draft)) return;
+  function captureQueuedDraftOperationBinding(draft, panel) {
+    draft = draft || {};
+    var draftId = String(draft.id || draft.draftId || '');
+    var pending = state.pendingQueuedWriteConfirmation || {};
+    var queueId = String(draft.queueId || '');
+    if (!queueId && draftId && String(pending.draftId || '') === draftId) {
+      queueId = String(pending.queueId || '');
+    }
+    var confirmation = draft.queueConfirmation || {};
+    if (
+      queueId &&
+      String(pending.queueId || '') === queueId &&
+      String(pending.draftId || '') === draftId
+    ) confirmation = pending;
+    var transactionId = currentAiEditTransactionId(panel);
+    var binding = {
+      queueId: queueId,
+      draftId: draftId,
+      transactionId: String(transactionId || confirmation.transactionId || ''),
+      conversationId: String(queueId ? confirmation.conversationId || '' : state.conversationId || ''),
+      sessionId: String(queueId ? confirmation.sessionId || '' : state.sessionId || ''),
+      sessionEpoch: String(queueId ? confirmation.sessionEpoch || '' : state.sessionEpoch || ''),
+      contextDocumentKey: String(queueId ? confirmation.contextDocumentKey || '' : state.contextDocumentKey || ''),
+      draft: Object.assign({}, draft, {
+        queueId: queueId,
+        queueConfirmation: Object.assign({}, confirmation)
+      })
+    };
+    return freezeQueuedDispatchValue(binding);
+  }
+
+  function queuedDraftOperationResultMatchesBinding(candidate, binding) {
+    candidate = candidate || {};
+    binding = binding || {};
+    var fields = [
+      'queueId',
+      'draftId',
+      'conversationId',
+      'sessionId',
+      'sessionEpoch',
+      'contextDocumentKey'
+    ];
+    for (var i = 0; i < fields.length; i++) {
+      var expected = String(binding[fields[i]] || '');
+      if (expected && expected !== String(candidate[fields[i]] || '')) return false;
+    }
+    return true;
+  }
+
+  function queuedDraftOperationBindingMatchesActiveSession(binding) {
+    binding = binding || {};
+    var draftId = String(binding.draftId || '');
+    if (!draftId) return false;
+    if (!String(binding.queueId || '')) {
+      return !!(
+        state.draft &&
+        String(state.draft.id || '') === draftId &&
+        String(binding.conversationId || '') === String(state.conversationId || '') &&
+        String(binding.sessionId || '') === String(state.sessionId || '') &&
+        String(binding.sessionEpoch || '') === String(state.sessionEpoch || '') &&
+        String(binding.contextDocumentKey || '') === String(state.contextDocumentKey || '')
+      );
+    }
+    if (!window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(binding, state)) return false;
     var pending = state.pendingQueuedWriteConfirmation;
-    var queueId = pending && String(pending.draftId || '') === String(draftId || '')
-      ? String(pending.queueId || '')
-      : String((state.draft || {}).queueId || '');
+    if (!pending) return false;
+    if (!queuedDraftOperationResultMatchesBinding(pending, binding)) return false;
+    if (
+      binding.transactionId && pending.transactionId &&
+      String(binding.transactionId) !== String(pending.transactionId)
+    ) return false;
+    return true;
+  }
+
+  function writeAcceptedDraft(operationBinding, panel) {
+    if (typeof operationBinding === 'string') {
+      if (!state.draft || String(state.draft.id || '') !== String(operationBinding || '')) return;
+      operationBinding = captureQueuedDraftOperationBinding(state.draft, panel);
+    }
+    operationBinding = operationBinding || {};
+    if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
+    var draftId = String(operationBinding.draftId || '');
+    var queueId = String(operationBinding.queueId || '');
     function sendWriteRequest() {
+      if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
       if (queueId) {
-        state.pendingAiEditDrafts[draftId] = Object.assign({}, state.draft || {}, {queueId: queueId});
+        state.pendingAiEditDrafts[draftId] = Object.assign({}, operationBinding.draft || {}, {queueId: queueId});
       }
-      bridge('write_draft', {id: draftId, queueId: queueId});
+      bridge('write_draft', {
+        id: draftId,
+        draftId: draftId,
+        queueId: queueId,
+        conversationId: String(operationBinding.conversationId || ''),
+        sessionId: String(operationBinding.sessionId || ''),
+        sessionEpoch: String(operationBinding.sessionEpoch || ''),
+        contextDocumentKey: String(operationBinding.contextDocumentKey || '')
+      });
       renderDraft(null);
       if (panel) {
         if (panel.className && panel.className.indexOf('mindmap-diff-operation') !== -1) {
@@ -12042,11 +12314,17 @@
       sendWriteRequest();
       return;
     }
-    persistQueuedWriteConfirmationState(pending, 'native_write', function(result) {
+    persistQueuedWriteConfirmationState(operationBinding, 'native_write', function(result) {
+      if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
       if (!result || !result.ok) {
         setAiEditOperationBusy(panel, false);
         setAiEditOperationStatus(panel, result && result.message ? result.message : '写入确认状态保存失败。', 'error');
         addFailureMessage('写入确认状态保存失败', result);
+        return;
+      }
+      if (!queuedDraftOperationResultMatchesBinding(result.confirmation || {}, operationBinding)) {
+        setAiEditOperationBusy(panel, false);
+        setAiEditOperationStatus(panel, '写入确认状态归属不匹配。', 'error');
         return;
       }
       state.pendingQueuedWriteConfirmation = result.confirmation;
@@ -12078,11 +12356,12 @@
   }
 
   function acceptDraft(panel) {
-    if (!queuedDraftBindingMatchesActiveSession(state.draft)) return;
     if (!state.draft || !state.draft.id) {
       addMessage('assistant', '没有待写入草稿。');
       return;
     }
+    var operationBinding = captureQueuedDraftOperationBinding(state.draft, panel);
+    if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
     if (state.draft.partial === true) {
       setAiEditOperationStatus(panel, '写入未完整完成，仅可拒绝并回滚。', 'partial_failed');
       return;
@@ -12091,42 +12370,77 @@
     if (transactionId) {
       setAiEditOperationBusy(panel, true);
       setAiEditOperationStatus(panel, '已接受，保留本次新增内容。', 'accepted');
-      bridge('accept_ai_edit_transaction', {transactionId: transactionId});
+      bridge('accept_ai_edit_transaction', {
+        transactionId: transactionId,
+        queueId: operationBinding.queueId,
+        draftId: operationBinding.draftId,
+        conversationId: operationBinding.conversationId,
+        sessionId: operationBinding.sessionId,
+        sessionEpoch: operationBinding.sessionEpoch,
+        contextDocumentKey: operationBinding.contextDocumentKey
+      });
       return;
     }
     var draftId = state.draft.id;
     var editor = byId('draftEditText');
     var editText = editor ? currentDraftEditText() : '';
     if (!editor || !String(editText || '').replace(/^\s+|\s+$/g, '')) {
-      writeAcceptedDraft(draftId, panel);
+      writeAcceptedDraft(operationBinding, panel);
       return;
     }
     setAiEditOperationBusy(panel, true);
     setAiEditOperationStatus(panel, '正在保存编辑...', 'saving');
-    postCompanion('draft_update', {id: draftId, editText: editText}, function(result) {
+    postCompanion('draft_update', {
+      id: draftId,
+      editText: editText,
+      queueId: operationBinding.queueId,
+      conversationId: operationBinding.conversationId,
+      sessionId: operationBinding.sessionId,
+      sessionEpoch: operationBinding.sessionEpoch,
+      contextDocumentKey: operationBinding.contextDocumentKey
+    }, function(result) {
+      if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
       if (!result || !result.ok) {
         setAiEditOperationBusy(panel, false);
         setAiEditOperationStatus(panel, result && result.message ? result.message : '草稿编辑保存失败。', 'error');
         addFailureMessage('草稿编辑保存失败', result);
         return;
       }
-      writeAcceptedDraft(draftId, panel);
+      writeAcceptedDraft(operationBinding, panel);
     });
   }
 
   function rejectDraft(panel) {
-    if (!queuedDraftBindingMatchesActiveSession(state.draft)) return;
+    if (!state.draft || !state.draft.id) return;
+    var operationBinding = captureQueuedDraftOperationBinding(state.draft, panel);
+    if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
     var transactionId = currentAiEditTransactionId(panel);
     if (transactionId) {
       setAiEditOperationBusy(panel, true);
       setAiEditOperationStatus(panel, '正在删除本次新增内容...', 'rejected');
-      bridge('reject_ai_edit_transaction', {transactionId: transactionId});
+      bridge('reject_ai_edit_transaction', {
+        transactionId: transactionId,
+        queueId: operationBinding.queueId,
+        draftId: operationBinding.draftId,
+        conversationId: operationBinding.conversationId,
+        sessionId: operationBinding.sessionId,
+        sessionEpoch: operationBinding.sessionEpoch,
+        contextDocumentKey: operationBinding.contextDocumentKey
+      });
       return;
     }
-    var draftId = state.draft && state.draft.id ? state.draft.id : '';
-    var queueId = String((state.draft || {}).queueId || '');
-    if (state.draft && state.draft.id) {
-      postCompanion('draft_delete', {id: state.draft.id}, function(result) {
+    var draftId = operationBinding.draftId;
+    var queueId = operationBinding.queueId;
+    if (draftId) {
+      postCompanion('draft_delete', {
+        id: draftId,
+        queueId: queueId,
+        conversationId: operationBinding.conversationId,
+        sessionId: operationBinding.sessionId,
+        sessionEpoch: operationBinding.sessionEpoch,
+        contextDocumentKey: operationBinding.contextDocumentKey
+      }, function(result) {
+        if (!queuedDraftOperationBindingMatchesActiveSession(operationBinding)) return;
         if (!result || !result.ok) {
           setAiEditOperationBusy(panel, false);
           setAiEditOperationStatus(panel, result && result.message ? result.message : '草稿删除失败。', 'error');
@@ -12140,7 +12454,7 @@
         } else {
           addMessage('assistant', '已丢弃草稿。');
         }
-        resolveQueuedWriteConfirmation({queueId: queueId, draftId: draftId});
+        resolveQueuedWriteConfirmation(operationBinding);
       });
       return;
     }
@@ -12285,6 +12599,7 @@
 
   function resetConversationForDocumentChange(ctx) {
     cancelSourceWorkspaceUpload('document-switch');
+    resetQueueRuntimeForConversationSwitch();
     invalidateSourceWorkspaceRequests();
     state.newConversationRequestToken += 1;
     state.sourceWorkspaceConversationCreateInFlight = false;
@@ -12345,16 +12660,24 @@
     if (state.documentSwitchDebounceTimer) window.clearTimeout(state.documentSwitchDebounceTimer);
     state.documentSwitchDebounceTimer = null;
     state.documentSwitchToken += 1;
+    resetQueueRuntimeForConversationSwitch();
     var canceled = sourceWorkspaceLifecycle.cancelMigration('context-returned');
     if (canceled && canceled.meta && canceled.meta.conversationResult) {
       cleanupStaleConversation(canceled.meta.conversationResult, canceled.meta.ownershipPayload || {}, canceled);
     }
+    var restoredOriginalState = false;
     if (canceled && canceled.meta && canceled.meta.originalState) {
       restoreAutomaticDocumentSwitchState(canceled.meta.originalState);
+      restoredOriginalState = true;
     }
     syncSourceWorkspaceLifecycleFlags();
     state.pendingDocumentSwitch = null;
     state.contextDocumentKey = state.stableContextDocumentKey || state.contextDocumentKey;
+    if (restoredOriginalState) {
+      state.queueSessionRestoreComplete = true;
+      state.queueSessionRestoredContextKey = String(state.contextDocumentKey || '');
+      prepareQueueRuntimeForActiveSession();
+    }
     updateActionAvailability();
   }
 
@@ -12373,6 +12696,7 @@
       var inheritedOriginalState = state.pendingDocumentSwitch && state.pendingDocumentSwitch.originalState
         ? state.pendingDocumentSwitch.originalState
         : captureAutomaticDocumentSwitchState();
+      resetQueueRuntimeForConversationSwitch();
       var lifecycleResult = sourceWorkspaceLifecycle.beginMigration({
         previousDocumentKey: state.stableContextDocumentKey || state.contextDocumentKey,
         contextDocumentKey: docKey,
@@ -12527,10 +12851,24 @@
     }
     var queueIdentityKey = queuedSessionIdentityKey();
     if (
-      queueIdentityKey &&
-      (!state.queueRuntimeReady || state.queueGuardRestoredIdentityKey !== queueIdentityKey) &&
+      !state.documentSwitchPending &&
+      !state.documentSwitchCommitting &&
+      (
+        !state.queueSessionRestoreComplete ||
+        state.queueSessionRestoredContextKey !== state.contextDocumentKey
+      )
+    ) {
+      restoreQueueRuntimeSessionForContext();
+    } else if (
+      state.queueSessionRestoreComplete &&
+      (
+        !state.queueRuntimeReady ||
+        (queueIdentityKey && state.queueGuardRestoredIdentityKey !== queueIdentityKey)
+      ) &&
       state.queueGuardRestoreIdentityKey !== queueIdentityKey
-    ) prepareQueueRuntimeForActiveSession();
+    ) {
+      prepareQueueRuntimeForActiveSession();
+    }
     renderContextSourceLine(state.context);
     var connected = state.context.topicid || state.context.notebookid || state.context.docmd5 || state.context.bookmd5;
     setText('contextLine', connected ? '已连接 MarginNote 上下文' : '等待 MarginNote 上下文');
@@ -12654,56 +12992,84 @@
         payload.ok = false;
         payload.status = 'partial_failed';
       }
-      var draftId = payload.draftId || payload.id || '';
-      var draft = draftId && state.pendingAiEditDrafts ? state.pendingAiEditDrafts[draftId] : null;
-      draft = draft || {};
-      for (var key in payload) {
-        if (Object.prototype.hasOwnProperty.call(payload, key)) draft[key] = payload[key];
-      }
-      if (!draft.id) draft.id = draftId;
-      var queueId = String(payload.queueId || draft.queueId || '');
-      if (!queueId && state.pendingQueuedWriteConfirmation && String(state.pendingQueuedWriteConfirmation.draftId || '') === String(draftId || '')) {
-        queueId = String(state.pendingQueuedWriteConfirmation.queueId || '');
-      }
+      var draftId = String(payload.draftId || payload.id || '');
+      var queueId = String(payload.queueId || '');
       if (queueId) {
-        var knownConfirmation = {};
-        if (
-          state.pendingQueuedWriteConfirmation &&
-          String(state.pendingQueuedWriteConfirmation.queueId || '') === queueId &&
-          String(state.pendingQueuedWriteConfirmation.draftId || '') === String(draftId || '')
-        ) knownConfirmation = state.pendingQueuedWriteConfirmation;
-        var confirmationBinding = Object.assign({}, draft.queueConfirmation || {}, knownConfirmation, {
+        var callbackBinding = {
           queueId: queueId,
-          draftId: String(draftId || ''),
+          draftId: draftId,
           transactionId: String(payload.transactionId || ''),
-          sessionId: String(payload.sessionId || knownConfirmation.sessionId || ''),
-          sessionEpoch: String(payload.sessionEpoch || knownConfirmation.sessionEpoch || ''),
-          contextDocumentKey: String(payload.contextDocumentKey || knownConfirmation.contextDocumentKey || ''),
+          conversationId: String(payload.conversationId || ''),
+          sessionId: String(payload.sessionId || ''),
+          sessionEpoch: String(payload.sessionEpoch || ''),
+          contextDocumentKey: String(payload.contextDocumentKey || ''),
           status: 'transaction_confirmation'
-        });
-        if (!window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(confirmationBinding, state)) {
-          if (draftId && state.pendingAiEditDrafts) delete state.pendingAiEditDrafts[draftId];
-          return;
+        };
+        if (!window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(callbackBinding, state)) return;
+        var knownConfirmation = state.pendingQueuedWriteConfirmation || {};
+        if (!queuedDraftOperationResultMatchesBinding(knownConfirmation, callbackBinding)) return;
+        callbackBinding.conversationId = String(knownConfirmation.conversationId || callbackBinding.conversationId || '');
+        var draft = draftId && state.pendingAiEditDrafts ? state.pendingAiEditDrafts[draftId] : null;
+        draft = draft || {};
+        for (var key in payload) {
+          if (Object.prototype.hasOwnProperty.call(payload, key)) draft[key] = payload[key];
         }
+        if (!draft.id) draft.id = draftId;
         draft.queueId = queueId;
+        var confirmationBinding = freezeQueuedDispatchValue(Object.assign({}, callbackBinding));
         state.pendingQueuedWriteConfirmation = confirmationBinding;
-        draft.queueConfirmation = Object.assign({}, state.pendingQueuedWriteConfirmation);
+        draft.queueConfirmation = Object.assign({}, confirmationBinding);
         persistQueuedWriteConfirmationState(
-          state.pendingQueuedWriteConfirmation,
+          confirmationBinding,
           'transaction_confirmation',
           function(result) {
-            if (result && result.ok && result.confirmation) {
+            if (
+              queuedDraftOperationBindingMatchesActiveSession(confirmationBinding) &&
+              result && result.ok && result.confirmation &&
+              queuedDraftOperationResultMatchesBinding(result.confirmation, confirmationBinding)
+            ) {
               state.pendingQueuedWriteConfirmation = result.confirmation;
             }
           }
         );
+        if (draftId && state.pendingAiEditDrafts) delete state.pendingAiEditDrafts[draftId];
+        renderAiEditOperation(draft);
+        return;
       }
-      if (draftId && state.pendingAiEditDrafts) delete state.pendingAiEditDrafts[draftId];
-      renderAiEditOperation(draft);
+      var directDraft = draftId && state.pendingAiEditDrafts ? state.pendingAiEditDrafts[draftId] : null;
+      if (!directDraft) return;
+      for (var directKey in payload) {
+        if (Object.prototype.hasOwnProperty.call(payload, directKey)) directDraft[directKey] = payload[directKey];
+      }
+      if (!directDraft.id) directDraft.id = draftId;
+      delete state.pendingAiEditDrafts[draftId];
+      renderAiEditOperation(directDraft);
     },
     setAiEditOperationResult: function(payload) {
       payload = payload || {};
-      var transactionId = payload.transactionId || '';
+      var transactionId = String(payload.transactionId || '');
+      var queueId = String(payload.queueId || '');
+      var resultBinding = null;
+      if (queueId) {
+        resultBinding = {
+          queueId: queueId,
+          draftId: String(payload.draftId || payload.id || ''),
+          transactionId: transactionId,
+          conversationId: String(payload.conversationId || ''),
+          sessionId: String(payload.sessionId || ''),
+          sessionEpoch: String(payload.sessionEpoch || ''),
+          contextDocumentKey: String(payload.contextDocumentKey || '')
+        };
+        if (!window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(resultBinding, state)) return;
+        var activeConfirmation = state.pendingQueuedWriteConfirmation || {};
+        if (!queuedDraftOperationResultMatchesBinding(activeConfirmation, resultBinding)) return;
+        if (
+          resultBinding.transactionId && activeConfirmation.transactionId &&
+          resultBinding.transactionId !== String(activeConfirmation.transactionId || '')
+        ) return;
+        resultBinding.conversationId = String(activeConfirmation.conversationId || resultBinding.conversationId || '');
+        resultBinding = freezeQueuedDispatchValue(resultBinding);
+      }
       var panels = document.querySelectorAll('.ai-edit-operation');
       for (var i = 0; i < panels.length; i++) {
         if (transactionId && panels[i].getAttribute('data-transaction-id') !== transactionId) continue;
@@ -12720,24 +13086,23 @@
         refreshAiEditVerification(transactionId, panels[i]);
       }
       if (payload.ok && (payload.action === 'accept' || payload.action === 'reject')) {
-        var resolvedIdentity = {
-          queueId: payload.queueId || '',
-          draftId: payload.draftId || payload.id || '',
+        var resolvedIdentity = resultBinding || {
+          queueId: '',
+          draftId: String(payload.draftId || payload.id || ''),
           transactionId: transactionId
         };
-        var pendingConfirmation = state.pendingQueuedWriteConfirmation;
-        if (
-          pendingConfirmation &&
-          window.SourceWorkspaceLifecycle.queuedConfirmationMatchesActiveSession(pendingConfirmation, state)
-        ) {
+        var pendingConfirmation = resultBinding ? state.pendingQueuedWriteConfirmation : null;
+        if (pendingConfirmation) {
           persistQueuedWriteConfirmationState(
-            Object.assign({}, pendingConfirmation, resolvedIdentity),
+            resolvedIdentity,
             'resolved',
             function(saved) {
+              if (!queuedDraftOperationBindingMatchesActiveSession(resolvedIdentity)) return;
               if (!saved || !saved.ok) {
                 window.CodexPanel.setStatus({text: saved && saved.message ? saved.message : '写入确认完成状态保存失败。'});
                 return;
               }
+              if (saved.confirmation && !queuedDraftOperationResultMatchesBinding(saved.confirmation, resolvedIdentity)) return;
               resolveQueuedWriteConfirmation(resolvedIdentity);
             }
           );

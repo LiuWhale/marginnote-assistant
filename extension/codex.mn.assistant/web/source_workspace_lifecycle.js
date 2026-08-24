@@ -43,14 +43,88 @@
     return 'execute';
   }
 
+  function queuedCommandOwnerKey(command) {
+    command = command || {};
+    var conversationId = String(command.conversationId || '');
+    var sessionId = String(command.sessionId || '');
+    var sessionEpoch = String(command.sessionEpoch || '');
+    var contextDocumentKey = String(command.contextDocumentKey || '');
+    if (conversationId || sessionId || sessionEpoch) {
+      return [conversationId, sessionId, sessionEpoch, contextDocumentKey].join('|');
+    }
+    return 'queue|' + String(command._queue_id || '');
+  }
+
+  function firstRunnableQueuedCommand(commands, runtime, options) {
+    commands = Array.isArray(commands) ? commands : [];
+    runtime = runtime || {};
+    options = options || {};
+    var blockedOwners = {};
+    for (var i = 0; i < commands.length; i++) {
+      var command = commands[i] || {};
+      var disposition = queuedExecutionDisposition(command, runtime);
+      if (disposition === 'ack_only') return command;
+      var ownerKey = queuedCommandOwnerKey(command);
+      if (blockedOwners[ownerKey]) continue;
+      if (disposition === 'confirmation_pending') {
+        blockedOwners[ownerKey] = true;
+        continue;
+      }
+      var action = String(command.rawAction || command.action || '');
+      var routing = queuedSessionRouting(command, runtime);
+      if (
+        options.isWriteAction &&
+        options.isWriteAction(action) &&
+        routing !== 'active'
+      ) {
+        blockedOwners[ownerKey] = true;
+        continue;
+      }
+      var queueId = String(command._queue_id || '');
+      var deferred = queueId && runtime.deferredQueueResults
+        ? runtime.deferredQueueResults[queueId]
+        : null;
+      if (deferred && !options.retryDeferred) {
+        var activeInactiveWrite = deferred.reason === 'inactive_write' &&
+          routing === 'active' &&
+          String(command.sessionEpoch || '') === String(runtime.sessionEpoch || '');
+        if (!activeInactiveWrite) {
+          blockedOwners[ownerKey] = true;
+          continue;
+        }
+      }
+      return command;
+    }
+    return null;
+  }
+
+  function requestBindingMatchesActiveSession(binding, activeConversation) {
+    binding = binding || {};
+    activeConversation = activeConversation || {};
+    var conversationId = String(binding.conversationId || '');
+    var sessionId = String(binding.sessionId || '');
+    var sessionEpoch = String(binding.sessionEpoch || '');
+    var hasIdentity = !!(conversationId || sessionId || sessionEpoch);
+    if (!hasIdentity) return true;
+    if (!conversationId || !sessionId || !sessionEpoch) return false;
+    if (
+      conversationId !== String(activeConversation.conversationId || '') ||
+      sessionId !== String(activeConversation.sessionId || '') ||
+      sessionEpoch !== String(activeConversation.sessionEpoch || '')
+    ) return false;
+    var contextDocumentKey = String(binding.contextDocumentKey || '');
+    return !contextDocumentKey || contextDocumentKey === String(activeConversation.contextDocumentKey || '');
+  }
+
   function queueRuntimeCanStart(runtime) {
     runtime = runtime || {};
-    return !!(
-      String(runtime.conversationId || '') &&
-      String(runtime.sessionId || '') &&
-      String(runtime.sessionEpoch || '') &&
-      String(runtime.contextDocumentKey || '')
-    );
+    if (!runtime.queueSessionRestoreComplete || !String(runtime.contextDocumentKey || '')) return false;
+    var conversationId = String(runtime.conversationId || '');
+    var sessionId = String(runtime.sessionId || '');
+    var sessionEpoch = String(runtime.sessionEpoch || '');
+    var hasAnySessionIdentity = !!(conversationId || sessionId || sessionEpoch);
+    if (!hasAnySessionIdentity) return true;
+    return !!(conversationId && sessionId && sessionEpoch);
   }
 
   function queuedWriteCommandMatchesConfirmation(command, confirmation) {
@@ -124,17 +198,30 @@
     var command = options.command || {};
     var result = options.result || {};
     var action = String(command.rawAction || command.action || options.action || '');
-    var routing = queuedSessionRouting(command, options.activeConversation || {});
-    var hasCompleteBinding = !!(
-      String(command.conversationId || '') &&
-      String(command.sessionId || '') &&
-      String(command.sessionEpoch || '')
-    );
-    if (!hasCompleteBinding) routing = 'invalid';
-    if (
-      routing === 'active' &&
-      String(command.sessionEpoch || '') !== String((options.activeConversation || {}).sessionEpoch || '')
-    ) routing = 'invalid';
+
+    function currentRouting() {
+      var activeConversation = options.activeConversation || {};
+      var nextRouting = queuedSessionRouting(command, activeConversation);
+      var hasCompleteBinding = !!(
+        String(command.conversationId || '') &&
+        String(command.sessionId || '') &&
+        String(command.sessionEpoch || '')
+      );
+      if (!hasCompleteBinding) return 'invalid';
+      if (
+        nextRouting === 'active' &&
+        String(command.sessionEpoch || '') !== String(activeConversation.sessionEpoch || '')
+      ) return 'invalid';
+      if (
+        nextRouting === 'active' &&
+        String(command.contextDocumentKey || '') &&
+        String(activeConversation.contextDocumentKey || '') &&
+        String(command.contextDocumentKey || '') !== String(activeConversation.contextDocumentKey || '')
+      ) return 'background';
+      return nextRouting;
+    }
+
+    var routing = currentRouting();
 
     function defer(reason, failedResult) {
       var detail = {
@@ -169,8 +256,13 @@
         options.onActiveWrite(result, function(writeResult) {
           if (settled) return;
           settled = true;
+          routing = currentRouting();
           if (!writeResult || writeResult.ok !== true) {
             defer(queuedResultFailureReason(command, writeResult || {}, routing) || 'result_failed', writeResult || {});
+            return;
+          }
+          if (routing !== 'active') {
+            defer(routing === 'invalid' ? 'session_binding_mismatch' : 'inactive_write', writeResult);
             return;
           }
           acknowledge();
@@ -330,7 +422,9 @@
     createController: createController,
     documentContextReadyForAutomaticSwitch: documentContextReadyForAutomaticSwitch,
     handleQueuedResult: handleQueuedResult,
+    firstRunnableQueuedCommand: firstRunnableQueuedCommand,
     queueRuntimeCanStart: queueRuntimeCanStart,
+    requestBindingMatchesActiveSession: requestBindingMatchesActiveSession,
     queuedDraftBindingMatchesActiveSession: queuedDraftBindingMatchesActiveSession,
     queuedExecutionDisposition: queuedExecutionDisposition,
     queuedConfirmationMatchesActiveSession: queuedConfirmationMatchesActiveSession,
