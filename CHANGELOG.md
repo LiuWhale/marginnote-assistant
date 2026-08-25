@@ -4,9 +4,7 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
-## 0.4.53 - 2026-08-23
-
-> Local release candidate only; not published as a GitHub Release.
+## 0.4.53 - 2026-08-25
 
 ### Added
 
@@ -27,6 +25,8 @@ All notable changes to Codex Companion are documented here.
 
 ### Fixed
 
+- WebView action-token loading now uses MarginNote-compatible `NSData.base64Encoding()` decoding and keeps the extension-local token usable when `NSHomeDirectory()` is unavailable, preventing false `invalid token` failures after installation.
+- Bulk source removal no longer depends on `window.confirm`, which legacy UIWebView could reject without displaying a dialog. The existing manage, select, and explicit remove action now completes the membership-only removal directly.
 - `conversation_new` now atomically persists its zero-message session before returning, so opening the source workspace after starting a new conversation no longer fails with `会话不存在`; a persistence failure leaves the current UI conversation unchanged.
 - Packaged WebView startup now treats `web/source_workspace_lifecycle.js` as load-bearing: both dist and mnaddon smoke checks require it because `index.html` imports it before `app.js`.
 - Session history and source metadata now share one atomic mutation lock and source-revision CAS, preventing concurrent generation/source saves from deleting messages or reverting source bindings.

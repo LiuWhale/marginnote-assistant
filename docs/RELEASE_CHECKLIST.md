@@ -3,10 +3,10 @@
 ## 版本信息
 
 - 插件名：Codex Companion
-- 当前发布候选：0.4.53
+- 正式发布版本：0.4.53，对应 Git Tag `v0.4.53`
 - MN4 插件 manifest 版本：0.4.53
 - Companion 版本：0.4.53
-- 0.4.53 尚未作为 GitHub Release 发布；本清单、生成的本地制品和本地 smoke/dry-run 都不是发布或公开可用性证明。
+- GitHub Release：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.53
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`

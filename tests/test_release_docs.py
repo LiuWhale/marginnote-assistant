@@ -287,8 +287,8 @@ class ReleaseDocsTests(unittest.TestCase):
             "对子集移除",
             ["移除后空集", "更新后必须验证新工作区", "更新或验证失败时必须恢复旧成员关系并验证恢复", "若回滚失败，界面必须显示明确警告", "不能报告操作成功"],
         )
-        self.assert_contract_unit(checklist, "当前发布候选", ["0.4.53"])
-        self.assert_contract_unit(checklist, "尚未作为 GitHub Release 发布", ["0.4.53", "不是发布或公开可用性证明"])
+        self.assert_contract_unit(checklist, "正式发布版本", ["0.4.53", "v0.4.53"])
+        self.assertIn("https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.53", checklist)
 
         changelog = self.read_doc("CHANGELOG.md").partition("## 0.4.53")[2].split("\n## ", 1)[0]
         self.assert_contract_unit(changelog, "active-conversation restoration", ["session epoch", "deletion `tombstone` boundary", "stale callbacks cannot recreate or mutate invalid sessions"])
@@ -296,7 +296,9 @@ class ReleaseDocsTests(unittest.TestCase):
         self.assert_contract_unit(changelog, "Token-aware Python clients", ["exact HTTP loopback Companion origins", "custom URLs never receive it"])
         self.assert_contract_unit(changelog, "Queued failures", ["remain retryable and unacknowledged", "persist a draft and require confirmation before native writes", "never write automatically in the background"])
         self.assert_contract_unit(changelog, "Source removal restores", ["after update or validation failure", "rollback failure is surfaced as an explicit warning instead of a successful result"])
-        self.assert_contract_unit(changelog, "Local release candidate only", ["not published as a GitHub Release"])
+        self.assertNotIn("Local release candidate only", changelog)
+        self.assert_contract_unit(changelog, "WebView action-token", ["MarginNote-compatible", "invalid token"])
+        self.assert_contract_unit(changelog, "Bulk source removal", ["UIWebView", "explicit remove action"])
 
     def test_release_status_matrix_tracks_knowledge_os_kernels_and_shell(self) -> None:
         text = self.read_doc("docs/RELEASE_STATUS_MATRIX.md")
