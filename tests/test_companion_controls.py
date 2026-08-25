@@ -160,7 +160,8 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(companion.CODEX_CLI_SERVICE_TIERS["codex_config"], "")
             self.assertEqual(companion.CODEX_CLI_SERVICE_TIERS["priority"], "priority")
             self.assertIn("xhigh", companion.REASONING_EFFORTS)
-            self.assertEqual(companion.CODEX_CLI_TIMEOUTS["codex_config"], 90)
+            self.assertIsNone(companion.CODEX_CLI_TIMEOUTS["codex_config"])
+            self.assertIsNone(companion.CODEX_CLI_LONG_TASK_TIMEOUT)
 
     def test_chat_prompt_does_not_inherit_saved_goal_or_defense_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5010,7 +5011,7 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertEqual(text, "priority xhigh cli output")
             self.assertEqual(backend, "codex-cli")
-            self.assertEqual(captured["timeout"], 600)
+            self.assertIsNone(captured["timeout"])
             self.assertEqual(captured["input"], "")
             self.assertIsNot(captured["stdout"], companion.subprocess.PIPE)
             self.assertIsNot(captured["stderr"], companion.subprocess.PIPE)
@@ -5034,7 +5035,7 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertIn("localhost", captured["env"]["NO_PROXY"])
             self.assertTrue((companion.CODEX_LITE_HOME / "auth.json").exists())
 
-    def test_codex_cli_uses_long_timeout_for_ultra_full_document_tasks(self) -> None:
+    def test_codex_cli_has_no_hard_timeout_for_ultra_full_document_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
             companion.save_runtime_settings(
@@ -5073,31 +5074,26 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertEqual(text, "mindmap output")
             self.assertEqual(backend, "codex-cli")
-            self.assertGreaterEqual(captured["timeout"], 600)
-            self.assertGreaterEqual(
-                companion.codex_cli_timeout_seconds("priority", "generate_full_reading"),
-                600,
-            )
+            self.assertIsNone(captured["timeout"])
+            self.assertIsNone(companion.codex_cli_timeout_seconds("priority", "generate_full_reading"))
 
-    def test_codex_cli_uses_long_timeout_for_full_document_chat_requests(self) -> None:
+    def test_codex_cli_has_no_hard_timeout_for_full_document_or_ordinary_chat(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
 
-            self.assertGreaterEqual(
+            self.assertIsNone(
                 companion.codex_cli_timeout_seconds(
                     "priority",
                     "chat",
                     {"prompt": "详细解释全文", "contextScope": "auto"},
-                ),
-                600,
+                )
             )
-            self.assertEqual(
+            self.assertIsNone(
                 companion.codex_cli_timeout_seconds(
                     "priority",
                     "chat",
                     {"prompt": "Figure 2 做什么", "contextScope": "auto"},
-                ),
-                90,
+                )
             )
 
     def test_model_presets_are_read_from_codex_cli_catalog(self) -> None:
@@ -5241,7 +5237,7 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertEqual(text, "config cli output")
             self.assertEqual(backend, "codex-cli")
-            self.assertEqual(captured["timeout"], 90)
+            self.assertIsNone(captured["timeout"])
             self.assertNotIn("service_tier=priority", captured["args"])
             self.assertNotIn("model_reasoning_effort=medium", captured["args"])
             self.assertNotIn("model_reasoning_effort=high", captured["args"])
@@ -8010,6 +8006,7 @@ class CompanionControlsTests(unittest.TestCase):
                     )
 
                 def communicate(self, input: str = "", timeout: float | None = None) -> tuple[str, str]:
+                    calls[-1]["timeout"] = timeout
                     return "", ""
 
                 def poll(self) -> int:
@@ -8023,6 +8020,7 @@ class CompanionControlsTests(unittest.TestCase):
             codex_calls = [item for item in calls if item["command"][:2] == ["/tmp/codex", "exec"]]
             self.assertEqual(len(codex_calls), 1)
             self.assertEqual(Path(str(codex_calls[0]["cwd"])), Path(workspace["workspacePath"]))
+            self.assertIsNone(codex_calls[0]["timeout"])
 
             missing = companion.with_generation_source_usage(
                 payload,

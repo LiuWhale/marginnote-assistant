@@ -13,7 +13,7 @@ It is not limited to academic papers. Papers, book chapters, course material, pr
 
 The public 0.4.x line is still a preview and should not be mistaken for the end-state product. This line now opens in a clean Chat mode by default, matching the built-in MarginNote AI interaction first; the optional Tools mode starts as a simple task center with status, next-step guidance, and four large actions. The old advanced surfaces for mind-map Diff, card review, workflows, evidence, verification, rollback, and diagnostics are still available, but they are hidden behind Expert Mode. The long-term target is still **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, skills, external automation requests, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
 
-The current source candidate remains **0.4.53**. It has not been published as a GitHub Release; the release links above describe the normal delivery path and must not be read as publication evidence for this candidate.
+The current public release is **0.4.54**: https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.54. It removes the fixed Codex CLI generation timeout while keeping user-triggered Stop cancellation.
 
 The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS, where a full Notebook Workspace can become the main surface instead of a plain chat box. Current 0.4.x deliberately does not force the experimental workspace into the first screen: Chat is the default entry, Tools is the simple task center, and the full object, operation, knowledge, and workflow surfaces are optional Expert Mode. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. The seven non-negotiable kernels are Live MN Object Kernel, Source Registry, Operation Compiler, Transactional Native Editor, Workflow Runtime, Skill Runtime, and Verification Agent. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
 
@@ -61,8 +61,8 @@ If the main experience is still "ask, read an answer, click card or mind-map but
 - Use the first Mindmap Studio panel in Advanced mode. It is not a renamed answer button: it exposes the operation sequence `读取现有脑图`, `预览 Diff`, `应用所选`, `验证事务`, and `回滚事务`.
 - Turn the latest answer into a mind-map tree; accept keeps it, reject attempts to remove the nodes and cards created by that edit.
 - Select the target mind map at the top of the chat before writing, reducing the risk of creating nodes in the wrong notebook or page.
-- Queue actions while another generation is running; pending tasks continue automatically.
-- Stop the current generation; stopped tasks do not continue writing cards or mind maps.
+- Queue actions while another generation is running; pending tasks continue automatically. Codex CLI has no fixed generation timeout, so ordinary chat and multi-file work can run until Codex returns.
+- Stop the current generation explicitly; Stop terminates the registered Codex CLI process group, and stopped tasks do not continue writing cards or mind maps.
 - Show a persistent current-document cache light: yellow while caching, green when ready, red on failure.
 - Provide chat history, new conversations, settings, file path management, structured logs, and diagnostics; history and action logs carry the current `MNObject` so operations can be traced by selection, note, document, or mind-map object.
 - Show a Knowledge Console risk panel in the object workspace. `agent_plan` now returns `codex.mn.riskRegister.v1`, listing permission, context scope, target mind map, dry-run, and confirmation risk items before the user chooses an action.
@@ -183,7 +183,7 @@ One send uses **一次 Codex CLI 调用** from a conversation-managed workspace.
 
 Multi-file workspace mode requires Codex CLI. `auto` may use Codex CLI, but it does not fall back to the OpenAI API for this request; an OpenAI API-only configuration is blocked before generation because that backend cannot read local workspace links. The response reports which source IDs were read. Read sources remain independent of the MarginNote write target: cards and mind maps still require one explicit current notebook and one validated target, and selecting several files never authorizes writes to several notebooks.
 
-The 0.4.53 local HTTP action endpoint requires the install-scoped token stored at `~/.codex/marginnote-assistant/control/web-action-token`, an exact `127.0.0.1:48761` Host, and the installed file-origin CORS policy. The Web panel always uses `http://127.0.0.1:48761`. Token-aware Python clients attach the implicit token only to the exact HTTP loopback Companion origins `http://127.0.0.1:48761`, `http://localhost:48761`, and `http://[::1]:48761`; custom URLs never receive it. The token is never copied into action JSON, conversation history, or diagnostic logs. Request-provided document paths do not authorize workspace sources: candidates come only from Companion-owned PDF cache/index records, managed uploads, or server-owned MarginNote path resolution.
+Since 0.4.53, the local HTTP action endpoint requires the install-scoped token stored at `~/.codex/marginnote-assistant/control/web-action-token`, an exact `127.0.0.1:48761` Host, and the installed file-origin CORS policy. The Web panel always uses `http://127.0.0.1:48761`. Token-aware Python clients attach the implicit token only to the exact HTTP loopback Companion origins `http://127.0.0.1:48761`, `http://localhost:48761`, and `http://[::1]:48761`; custom URLs never receive it. The token is never copied into action JSON, conversation history, or diagnostic logs. Request-provided document paths do not authorize workspace sources: candidates come only from Companion-owned PDF cache/index records, managed uploads, or server-owned MarginNote path resolution.
 
 A readable original PDF remains selectable when text extraction fails. Its manifest entry reports `textReadable=false` with the extraction diagnostic, so Codex can inspect the original and must not claim extracted text exists. Truncated extracted text is marked explicitly. Periodic cleanup removes ownership-proven orphan workspaces and unreferenced managed text artifacts after 7 days, and stale staging/backup workspaces after 24 hours; active, linked, or ambiguously owned paths are left untouched.
 
@@ -351,20 +351,20 @@ The browser action gate records `buttonActionDeltas`, so repeated-action control
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.53
+python3 package_release.py 0.4.54
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.54-latest-dist.zip --mnaddon release/CodexCompanion-0.4.54-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.54-latest-dist.zip --mnaddon release/CodexCompanion-0.4.54-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.53-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.54-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

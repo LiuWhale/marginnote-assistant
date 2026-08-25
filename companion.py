@@ -142,7 +142,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.53"
+CURRENT_PLUGIN_VERSION = "0.4.54"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -15083,15 +15083,9 @@ def codex_cli_timeout_seconds(
     speed: str,
     task: str,
     payload: dict[str, Any] | None = None,
-) -> int:
-    if task in {"generate_mindmap", "generate_full_reading"}:
-        return CODEX_CLI_LONG_TASK_TIMEOUT
-    if payload and (
-        normalize_context_scope(payload) == "document"
-        or prompt_requests_document_scope(payload, task)
-    ):
-        return CODEX_CLI_LONG_TASK_TIMEOUT
-    return CODEX_CLI_TIMEOUTS[speed]
+) -> None:
+    # Codex CLI tasks remain cancellable through stop_current; do not kill valid long generations on a wall-clock limit.
+    return None
 
 
 def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]:
@@ -15177,8 +15171,8 @@ def call_codex_cli(payload: dict[str, Any], task: str) -> tuple[str | None, str]
                 except FileNotFoundError:
                     pass
             if workspace.get("active"):
-                return f"Codex CLI 调用超时（{timeout}s）。多文件资料不会回退到 OpenAI API，请检查 CLI 登录状态后重试。", "codex-cli-error"
-            return f"Codex CLI 调用超时（{timeout}s）。自动模式会回退到其他后端；强制 CLI 时请检查 CLI 登录状态。", "codex-cli-error"
+                return "Codex CLI 调用被外部超时机制中止。插件本身未设置固定生成时限；多文件资料不会回退到 OpenAI API，请重试或检查 CLI 登录状态。", "codex-cli-error"
+            return "Codex CLI 调用被外部超时机制中止。插件本身未设置固定生成时限；自动模式会回退到其他后端。", "codex-cli-error"
         except Exception as exc:
             for temp_log in (output_path, stdout_path, stderr_path):
                 try:

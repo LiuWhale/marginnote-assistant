@@ -4,6 +4,16 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.54 - 2026-08-25
+
+### Changed
+
+- Codex CLI now has no fixed wall-clock generation timeout. Ordinary chat, full-document reading, mind-map generation, and explicit multi-file workspaces all call the CLI with `timeout=None`; long work continues until Codex returns or the user clicks `Stop`, which terminates the registered process group.
+
+### Fixed
+
+- Removed the incorrect 90-second failure path that stopped valid multi-file explanations and group-meeting-style paper reports even while Codex CLI was still working.
+
 ## 0.4.53 - 2026-08-25
 
 ### Added

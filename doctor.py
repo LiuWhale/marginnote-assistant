@@ -26,7 +26,7 @@ DB_PATH = HOME / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Priva
 ONEDRIVE_DIR = HOME / "Library/CloudStorage/OneDrive-个人/Codex Companion"
 MN4_APP = Path("/Applications/MarginNote 4.app")
 EVENTS_PATH = ROOT / "events.jsonl"
-CURRENT_PLUGIN_VERSION = "0.4.53"
+CURRENT_PLUGIN_VERSION = "0.4.54"
 REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-highlight-arm-next-selection-default",
     "native-highlight-prefer-next-selection-v1",
@@ -48,7 +48,7 @@ REQUIRED_NATIVE_HANDLER_FEATURES = [
     "native-mindmap-delete-suggestion-confirm-v1",
     "mindmap-visible-surface-guard-v1",
 ]
-CURRENT_RC_VERSION = "0.4.53"
+CURRENT_RC_VERSION = "0.4.54"
 PREFERRED_LAUNCH_LABEL = "com.codex.paper-companion"
 LEGACY_LAUNCH_LABEL = "com.liuwhale.codex-marginnote-assistant"
 LATEST_PACKAGE = ROOT / f"release/CodexCompanion-{CURRENT_RC_VERSION}-latest-dist.zip"

@@ -13,7 +13,7 @@ Codex Companion 是一个运行在 MarginNote 4 里的本地优先 AI 助手插�
 
 当前公开的 0.4.x 仍是预览版，不能被误认为终局。这个版本默认打开干净的 `对话` 模式，优先对标 MarginNote 自带 AI 的问答体验；`工具` 模式只显示当前状态、下一步建议和四个大任务按钮，专家级脑图 Diff、制卡检查、workflow、证据、验证和排错面板默认收在 `专家模式` 里。长期目标仍是 **MarginNote Knowledge Agent OS**：一个 Notebook Knowledge IDE，主语不是 prompt 或回答，而是真实 MarginNote note、脑图节点、摘录、卡片、文档、复习任务、workflow、技能、外部自动化请求和操作证据。终局必须支持 `zero-message workflow`：用户不输入任何 prompt，只打开 notebook，就能看到对象状态、材料覆盖、脑图缺口、卡片缺口、最近失败事务、可执行 workflow 和待确认写入。
 
-当前源码候选版本仍是 **0.4.53**。它尚未作为 GitHub Release 发布；上方的 release 链接只说明常规交付路径，不能作为该候选版本已经发布的证据。
+当前公开版本是 **0.4.54**：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.54。该版本取消 Codex CLI 的固定生成超时，同时保留用户主动点击“停止”终止任务的能力。
 
 路线图必须分成四层。`v0.4.x` 是 Chat Companion；`v1.x` 应该成为稳定 Study Copilot，体验对标 MarginNote 自带 AI；`v2.x` 必须成为 Native Knowledge Editor，能读取和编辑现有 `noteId` 对象，并通过 Diff、验证和回滚闭环；`v3.x` 才是 Notebook Knowledge OS，届时可以打开完整 `Notebook Workspace`，而不是只停留在问答框。当前 0.4.x 不把实验性工作台强行塞到首屏：`对话` 是默认入口，`工具` 是简化任务中心，完整对象、操作、知识和 workflow 区只在专家模式展开。每次 AI 写入都应进入带验证和回滚证据的 Operation Ledger；跨 notebook 知识层、工作流运行时、外部 URL/API 自动化和可分享技能包都应成为一等产品界面。终局的七个不可替代内核是 Live MN Object Kernel、Source Registry、Operation Compiler、Transactional Native Editor、Workflow Runtime、Skill Runtime 和 Verification Agent。换句话说，如果一个所谓终局仍然只是“发送、生成脑图、生成卡片、设置和日志更好用”，它仍然不是 v3。
 
@@ -61,8 +61,8 @@ v3 目标不是“当前插件加更多按钮”。只有下面这些产品合�
 - `高级` 工作台里提供第一阶段 `Mindmap Studio`，它不是回答下方按钮的别名，而是脑图对象操作台：`读取现有脑图`、`预览 Diff`、`应用所选`、`验证事务`、`回滚事务` 都在同一个面板里完成。
 - 把最新回答一键转成脑图树；接受则保留，拒绝会尝试删除本次新增脑图结构和卡片。
 - 在主界面顶部选择脑图写入目标，避免新脑图写到错误的 notebook 或旧页面。
-- 支持任务排队：运行中继续发送或点击按钮会进入 pending，下一个任务自动接着跑。
-- 支持停止当前生成；停止后不继续写入卡片或脑图。
+- 支持任务排队：运行中继续发送或点击按钮会进入 pending，下一个任务自动接着跑。Codex CLI 没有固定生成超时，普通问答和多文件任务都可以持续到 Codex 返回结果。
+- 支持主动停止当前生成；“停止”会终止已注册的 Codex CLI 进程组，停止后不继续写入卡片或脑图。
 - 支持当前文档缓存状态灯：缓存中为黄灯，成功为绿灯，失败为红灯。
 - 支持历史对话、新对话、设置页、文件路径管理、结构化日志和诊断；历史和日志会携带当前 `MNObject`，便于按选区、卡片、文档或脑图对象追踪操作。
 - 对象区提供 Knowledge Console 风险面板；`agent_plan` 会返回 `codex.mn.riskRegister.v1`，把权限、上下文范围、目标脑图、dry-run 和确认点列成可见风险项。
@@ -183,7 +183,7 @@ Uninstall Codex Companion.command
 
 多文件资料工作区必须使用 Codex CLI。`auto` 可以选择 Codex CLI，但这类请求不会回退到 OpenAI API；只配置 OpenAI API 时会在生成前阻止，因为 API 后端不能读取本地软链接。回答会报告成功读取的 source ID。读取资料与 MarginNote 写入目标彼此独立：卡片或脑图仍只能写入一个明确的当前 notebook 和已验证目标，选择多个资料不代表允许写入多个 notebook。
 
-0.4.53 的本地 HTTP 动作接口要求安装时生成的 token、精确的 `127.0.0.1:48761` Host 和受限文件来源 CORS。Web 面板始终使用 `http://127.0.0.1:48761`；支持 token 的 Python 客户端只会向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 这三个精确 HTTP loopback 来源附加隐式 token，自定义 URL 绝不会收到它。token 不会写入动作 JSON、对话历史或诊断日志。请求里的 `pdfPath`、`documentPath` 或 `availableDocuments` 路径不能授权资料；候选只来自 Companion 自有 PDF 缓存/索引、托管上传记录或服务端解析的 MarginNote 路径。
+从 0.4.53 起，本地 HTTP 动作接口要求安装时生成的 token、精确的 `127.0.0.1:48761` Host 和受限文件来源 CORS。Web 面板始终使用 `http://127.0.0.1:48761`；支持 token 的 Python 客户端只会向 `http://127.0.0.1:48761`、`http://localhost:48761` 和 `http://[::1]:48761` 这三个精确 HTTP loopback 来源附加隐式 token，自定义 URL 绝不会收到它。token 不会写入动作 JSON、对话历史或诊断日志。请求里的 `pdfPath`、`documentPath` 或 `availableDocuments` 路径不能授权资料；候选只来自 Companion 自有 PDF 缓存/索引、托管上传记录或服务端解析的 MarginNote 路径。
 
 PDF 原文件可读但文本提取失败时仍可继续使用，manifest 会显示 `textReadable=false` 和提取诊断，让 Codex 改为检查原 PDF，不能假装已有提取文本；发生截断时也会明确标记。周期清理只删除所有权可证明且超过 7 天的孤立工作区和未引用文本产物，以及超过 24 小时的 staging/backup；活跃目录、链接目录和所有权不明确的目录都保留。
 
@@ -351,20 +351,20 @@ python3 ui_functional_acceptance.py --document-title "任意文档 UI 验收.pdf
 构建 release zip：
 
 ```bash
-python3 package_release.py 0.4.53
+python3 package_release.py 0.4.54
 ```
 
 Smoke test：
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.53-latest-dist.zip --mnaddon release/CodexCompanion-0.4.53-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.54-latest-dist.zip --mnaddon release/CodexCompanion-0.4.54-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.54-latest-dist.zip --mnaddon release/CodexCompanion-0.4.54-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance：
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.53-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.54-latest-dist.zip --json
 ```
 
 Release acceptance 可能因为机器相关证据不足而阻塞，例如原生高亮证据、签名/公证证据、跨机器安装证据。这些是发布证据检查，不代表源码打包失败。
