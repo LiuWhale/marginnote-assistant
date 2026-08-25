@@ -2275,13 +2275,14 @@ class WebControlsStaticTests(unittest.TestCase):
         for marker in [
             "source_workspace_update",
             "source_workspace_validate",
-            "原始文件和上传记录会保留",
+            "原始文件和上传记录已保留",
             "sourceWorkspaceRemovalSelection",
             "sourceWorkspaceResultRevision",
             "回滚",
         ]:
             self.assertIn(marker, removal_body)
         self.assertIn("source_workspace_clear", removal_body)
+        self.assertNotIn("window.confirm", removal_body)
         for forbidden in ["delete_file", "upload_delete", "removeUpload"]:
             self.assertNotIn(forbidden, removal_body)
 

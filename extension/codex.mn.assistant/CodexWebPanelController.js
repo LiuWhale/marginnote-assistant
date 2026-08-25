@@ -11,13 +11,43 @@ function codexSafeString(value) {
   return String(value);
 }
 
+function codexDecodeBase64Ascii(value) {
+  var text = codexSafeString(value).replace(/\s+/g, '');
+  var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  if (!text || text.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(text)) return '';
+  var out = '';
+  for (var i = 0; i < text.length; i += 4) {
+    var a = alphabet.indexOf(text.charAt(i));
+    var b = alphabet.indexOf(text.charAt(i + 1));
+    var c = text.charAt(i + 2) === '=' ? 64 : alphabet.indexOf(text.charAt(i + 2));
+    var d = text.charAt(i + 3) === '=' ? 64 : alphabet.indexOf(text.charAt(i + 3));
+    if (a < 0 || b < 0 || c < 0 || d < 0) return '';
+    out += String.fromCharCode((a << 2) | (b >> 4));
+    if (c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+    if (d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
+  }
+  return out;
+}
+
+function codexReadAsciiFile(path) {
+  try {
+    var data = NSData.dataWithContentsOfFile(path);
+    if (!data) return '';
+    return codexDecodeBase64Ascii(data.base64Encoding());
+  } catch (err) {
+    return '';
+  }
+}
+
 function codexCompanionActionToken(mainPath) {
   try {
-    var home = codexSafeString(NSHomeDirectory());
     var candidates = [codexSafeString(mainPath) + '/web-action-token'];
-    if (home) candidates.push(home + '/.codex/marginnote-assistant/control/web-action-token');
+    try {
+      var home = codexSafeString(NSHomeDirectory());
+      if (home) candidates.push(home + '/.codex/marginnote-assistant/control/web-action-token');
+    } catch (homeErr) {}
     for (var i = 0; i < candidates.length; i++) {
-      var value = NSString.stringWithContentsOfFileEncodingError(candidates[i], 4, null);
+      var value = codexReadAsciiFile(candidates[i]);
       var token = codexSafeString(value).replace(/^\s+|\s+$/g, '');
       if (/^[A-Fa-f0-9]{64}$/.test(token)) return token;
     }
@@ -566,8 +596,55 @@ CodexWebPanelController.prototype.sendContextToWeb = function() {
   }
   context.panel = 'webview';
   context.companionUrl = 'http://127.0.0.1:48761';
-  this.callPanel('setActionToken', {token: codexCompanionActionToken(this.mainPath)});
+  var actionToken = codexCompanionActionToken(this.mainPath);
+  this.callPanel('setActionToken', {token: actionToken});
   this.callPanel('setContext', context);
+  if (this.addon && this.addon.postEvent) {
+    var mainPathValue = codexSafeString(this.mainPath);
+    var localTokenPath = mainPathValue + '/web-action-token';
+    var localTokenData = null;
+    var localTokenFileExists = false;
+    var localTokenDataLength = 0;
+    var localTokenBase64Length = 0;
+    var localTokenDecodedLength = 0;
+    var localTokenDecodedValid = false;
+    try {
+      localTokenFileExists = !!NSFileManager.defaultManager().fileExistsAtPath(localTokenPath);
+      localTokenData = NSData.dataWithContentsOfFile(localTokenPath);
+      if (localTokenData) {
+        localTokenDataLength = typeof localTokenData.length === 'function'
+          ? Number(localTokenData.length())
+          : Number(localTokenData.length || 0);
+        localTokenBase64Length = codexSafeString(localTokenData.base64Encoding()).length;
+        var localTokenDecoded = codexReadAsciiFile(localTokenPath).replace(/^\s+|\s+$/g, '');
+        localTokenDecodedLength = localTokenDecoded.length;
+        localTokenDecodedValid = /^[A-Fa-f0-9]{64}$/.test(localTokenDecoded);
+      }
+    } catch (err) {}
+    var tokenDiagnosticSignature = [
+      actionToken ? actionToken.length : 0,
+      mainPathValue,
+      localTokenFileExists ? 1 : 0,
+      localTokenDataLength,
+      localTokenBase64Length,
+      localTokenDecodedLength,
+      localTokenDecodedValid ? 1 : 0
+    ].join('|');
+    if (this.lastTokenDiagnosticSignature !== tokenDiagnosticSignature) {
+      this.lastTokenDiagnosticSignature = tokenDiagnosticSignature;
+      this.addon.postEvent('webPanelContextInjected', {
+        tokenAvailable: !!actionToken,
+        tokenLength: actionToken ? actionToken.length : 0,
+        mainPathAvailable: !!this.mainPath,
+        mainPathValue: mainPathValue,
+        localTokenFileExists: localTokenFileExists,
+        localTokenDataLength: localTokenDataLength,
+        localTokenBase64Length: localTokenBase64Length,
+        localTokenDecodedLength: localTokenDecodedLength,
+        localTokenDecodedValid: localTokenDecodedValid
+      });
+    }
+  }
 };
 
 CodexWebPanelController.prototype.promptText = function() {

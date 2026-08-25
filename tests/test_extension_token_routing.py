@@ -60,6 +60,71 @@ if (webActionToken !== 'a'.repeat(64)) throw new Error('invalid token replaced t
         result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_native_token_readers_use_the_existing_margin_note_base64_api(self) -> None:
+        self.assertIn("function codexDecodeBase64Ascii", self.panel_controller)
+        self.assertIn("function codexReadAsciiFile", self.panel_controller)
+        self.assertIn("NSData.dataWithContentsOfFile(path)", self.panel_controller)
+        self.assertIn("data.base64Encoding()", self.panel_controller)
+        self.assertIn("/web-action-token", self.panel_controller)
+        self.assertIn("codexReadAsciiFile(candidates[i])", self.panel_controller)
+        self.assertIn("/web-action-token", self.main)
+        self.assertIn("codexReadAsciiFile(candidates[i])", self.main)
+
+        decoder = function_body(self.panel_controller, "codexDecodeBase64Ascii", "codexReadAsciiFile")
+        node = shutil.which("node")
+        if node is None:
+            self.fail("node is required to execute the native token decoder test")
+        script = f"""
+function codexSafeString(value) {{ return value === null || value === undefined ? '' : String(value); }}
+{decoder}
+const token = '0123456789abcdef'.repeat(4) + '\\n';
+const encoded = Buffer.from(token, 'ascii').toString('base64');
+if (codexDecodeBase64Ascii(encoded) !== token) throw new Error('ASCII token decode failed');
+if (codexDecodeBase64Ascii('not base64!') !== '') throw new Error('invalid base64 was accepted');
+"""
+        result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_local_extension_token_survives_home_directory_lookup_failure(self) -> None:
+        token_reader = function_body(
+            self.panel_controller,
+            "codexCompanionActionToken",
+            "codexUrlString",
+        )
+        node = shutil.which("node")
+        if node is None:
+            self.fail("node is required to execute the native token lookup fallback test")
+        script = f"""
+function codexSafeString(value) {{ return value === null || value === undefined ? '' : String(value); }}
+function codexReadAsciiFile(path) {{ return path.endsWith('/web-action-token') ? 'a'.repeat(64) : ''; }}
+function NSHomeDirectory() {{ throw new Error('unsupported bridge global'); }}
+{token_reader}
+if (codexCompanionActionToken('/extension') !== 'a'.repeat(64)) {{
+  throw new Error('local extension token was lost when home lookup failed');
+}}
+"""
+        result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_web_panel_reports_token_injection_without_exposing_the_token(self) -> None:
+        send_context = self.panel_controller.split(
+            "CodexWebPanelController.prototype.sendContextToWeb", 1
+        )[1].split("\nCodexWebPanelController.prototype.promptText", 1)[0]
+
+        self.assertIn("webPanelContextInjected", send_context)
+        self.assertIn("tokenAvailable", send_context)
+        self.assertIn("tokenLength", send_context)
+        self.assertIn("mainPathAvailable", send_context)
+        self.assertIn("mainPathValue", send_context)
+        self.assertIn("localTokenFileExists", send_context)
+        self.assertIn("localTokenDataLength", send_context)
+        self.assertIn("localTokenBase64Length", send_context)
+        self.assertIn("localTokenDecodedLength", send_context)
+        self.assertIn("localTokenDecodedValid", send_context)
+        self.assertIn("lastTokenDiagnosticSignature", send_context)
+        diagnostic = send_context.split("webPanelContextInjected", 1)[1]
+        self.assertNotIn("token: actionToken", diagnostic)
+
     def test_native_main_keeps_generic_event_and_ack_routes_tokenless(self) -> None:
         generic_headers = function_body(self.main, "companionRequestHeaders", "companionActionRequestHeaders")
         post_json = function_body(self.main, "postJSON", "createPanelController")

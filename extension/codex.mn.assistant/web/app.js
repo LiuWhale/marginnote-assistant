@@ -2711,10 +2711,6 @@
       setSourceWorkspaceStatus('warning', '请先选择要从本次对话移除的资料。');
       return;
     }
-    if (window.confirm && !window.confirm(
-      '将从本次对话移除 ' + removalIds.length + ' 个资料。原始文件和上传记录会保留。'
-    )) return;
-
     state.sourceWorkspaceBulkInFlight = true;
     state.sourceWorkspaceInFlight = true;
     state.sourceWorkspaceSelection = sourceWorkspaceSelectionMap(reducedSourceIds);

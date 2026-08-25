@@ -43,11 +43,13 @@ JSB.newAddon = function(mainPath) {
 
   function companionActionToken() {
     try {
-      var home = safeString(NSHomeDirectory());
       var candidates = [safeString(mainPath) + '/web-action-token'];
-      if (home) candidates.push(home + '/.codex/marginnote-assistant/control/web-action-token');
+      try {
+        var home = safeString(NSHomeDirectory());
+        if (home) candidates.push(home + '/.codex/marginnote-assistant/control/web-action-token');
+      } catch (homeErr) {}
       for (var i = 0; i < candidates.length; i++) {
-        var value = NSString.stringWithContentsOfFileEncodingError(candidates[i], 4, null);
+        var value = codexReadAsciiFile(candidates[i]);
         var token = safeString(value).replace(/^\s+|\s+$/g, '');
         if (/^[A-Fa-f0-9]{64}$/.test(token)) return token;
       }
