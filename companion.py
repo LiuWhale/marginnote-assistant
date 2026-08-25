@@ -142,7 +142,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.54"
+CURRENT_PLUGIN_VERSION = "0.4.55"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -5541,7 +5541,10 @@ def read_latest_mindmap_tree(topic_id: str, book_md5: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def reply_mindmap_cache_status(cache: dict[str, Any]) -> tuple[bool, str]:
+def reply_mindmap_cache_status(
+    cache: dict[str, Any],
+    payload: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
     if not cache:
         return False, "missing"
     if "mindmapVisible" not in cache:
@@ -5551,10 +5554,27 @@ def reply_mindmap_cache_status(cache: dict[str, Any]) -> tuple[bool, str]:
     tree = cache.get("currentMindmap") if isinstance(cache.get("currentMindmap"), dict) else {}
     if not tree:
         return False, "missing"
-    if str(cache.get("scope") or "") != "whole_notebook":
+    scope = str(cache.get("scope") or "")
+    if scope == "whole_notebook":
+        if str(cache.get("snapshotCapability") or "") != WHOLE_NOTEBOOK_SNAPSHOT_FEATURE:
+            return False, "untrusted-snapshot"
+    elif scope == "current_document":
+        request_payload = payload if isinstance(payload, dict) else {}
+        expected_topic_id = str(request_payload.get("topicid") or request_payload.get("notebookid") or "").strip()
+        expected_book_md5 = str(request_payload.get("bookmd5") or request_payload.get("docmd5") or "").strip()
+        cache_topic_id = str(cache.get("topicid") or "")
+        cache_book_md5 = str(cache.get("bookmd5") or "")
+        tree_document_id = str(tree.get("documentId") or "")
+        if not expected_topic_id or not expected_book_md5:
+            return False, "partial-scope"
+        if (
+            cache_topic_id != expected_topic_id
+            or cache_book_md5 != expected_book_md5
+            or tree_document_id != expected_book_md5
+        ):
+            return False, "document-scope-mismatch"
+    else:
         return False, "partial-scope"
-    if str(cache.get("snapshotCapability") or "") != WHOLE_NOTEBOOK_SNAPSHOT_FEATURE:
-        return False, "untrusted-snapshot"
     try:
         truncated_count = int(cache.get("truncatedCount") or 0)
     except (TypeError, ValueError):
@@ -5604,7 +5624,7 @@ def wait_for_reply_mindmap_refresh(
         if refresh_epoch > 0 and cache_epoch < refresh_epoch:
             last_reason = "waiting-for-fresh-snapshot"
             continue
-        ready, last_reason = reply_mindmap_cache_status(cache)
+        ready, last_reason = reply_mindmap_cache_status(cache, payload)
         if ready:
             return cache, "ready"
         if last_reason == "mindmap-not-open":
@@ -16115,7 +16135,7 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
             normalize_topic_id(payload),
             normalize_book_md5(payload),
         )
-        cache_ready, cache_reason = reply_mindmap_cache_status(tree_cache)
+        cache_ready, cache_reason = reply_mindmap_cache_status(tree_cache, payload)
         if cache_ready:
             current_mindmap = _payload_mindmap(tree_cache.get("currentMindmap"))
         else:

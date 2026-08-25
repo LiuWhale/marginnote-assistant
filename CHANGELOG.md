@@ -4,6 +4,13 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.55 - 2026-08-25
+
+### Fixed
+
+- Reply-derived mind maps now accept a same-document `current_document` snapshot only when the request topic, cache `bookmd5`, and root `documentId` all match. Cross-document work still requires the trusted whole-notebook snapshot capability.
+- Fixed the first-click brain-map race where MarginNote completed the native read callback immediately, but Companion rejected the valid document-scoped snapshot and stopped before model generation. Generation now continues automatically after the matching callback.
+
 ## 0.4.54 - 2026-08-25
 
 ### Changed

@@ -3842,6 +3842,36 @@ class CompanionControlsTests(unittest.TestCase):
 
             self.assertEqual(companion.reply_mindmap_cache_status({}), (False, "missing"))
 
+    def test_current_document_mindmap_cache_requires_matching_document_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            cache = {
+                "schema": "codex.mn.mindmapTreeCache.v1",
+                "topicid": "T1",
+                "bookmd5": "B1",
+                "scope": "current_document",
+                "snapshotCapability": "",
+                "mindmapVisible": True,
+                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "truncatedCount": 0,
+                "currentMindmap": {
+                    "noteId": "notebook-root",
+                    "title": "Paper.pdf",
+                    "documentId": "B1",
+                    "children": [],
+                },
+            }
+
+            self.assertEqual(
+                companion.reply_mindmap_cache_status(cache, {"topicid": "T1", "bookmd5": "B1"}),
+                (True, "ready"),
+            )
+            self.assertEqual(
+                companion.reply_mindmap_cache_status(cache, {"topicid": "T1", "bookmd5": "OTHER"}),
+                (False, "document-scope-mismatch"),
+            )
+            self.assertEqual(companion.reply_mindmap_cache_status(cache), (False, "partial-scope"))
+
     def test_mindmap_refresh_waits_for_snapshot_newer_than_the_read_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))
@@ -4154,14 +4184,15 @@ class CompanionControlsTests(unittest.TestCase):
                     "schema": "codex.mn.mindmapTreeCache.v1",
                     "topicid": topic_id,
                     "bookmd5": book_md5,
-                    "scope": "whole_notebook",
-                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "scope": "current_document",
+                    "snapshotCapability": "",
                     "mindmapVisible": True,
                     "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                     "truncatedCount": 0,
                     "currentMindmap": {
                         "noteId": "notebook-root",
                         "title": "I-JEPA",
+                        "documentId": book_md5,
                         "body": "",
                         "children": [],
                     },
