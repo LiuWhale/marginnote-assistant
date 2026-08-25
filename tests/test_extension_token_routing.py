@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1] / "extension/codex.mn.assistant"
 MAIN_PATH = ROOT / "main.js"
 APP_PATH = ROOT / "web/app.js"
+PANEL_CONTROLLER_PATH = ROOT / "CodexWebPanelController.js"
 LOOPBACK_ORIGIN = "http://127.0.0.1:48761"
 
 
@@ -28,6 +29,36 @@ class ExtensionTokenRoutingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.main = MAIN_PATH.read_text(encoding="utf-8")
         self.app = APP_PATH.read_text(encoding="utf-8")
+        self.panel_controller = PANEL_CONTROLLER_PATH.read_text(encoding="utf-8")
+
+    def test_web_panel_injects_action_token_before_document_context(self) -> None:
+        send_context = self.panel_controller.split(
+            "CodexWebPanelController.prototype.sendContextToWeb", 1
+        )[1].split("\nCodexWebPanelController.prototype.promptText", 1)[0]
+
+        self.assertIn("this.callPanel('setActionToken'", send_context)
+        self.assertIn("this.callPanel('setContext'", send_context)
+        self.assertLess(
+            send_context.index("this.callPanel('setActionToken'"),
+            send_context.index("this.callPanel('setContext'"),
+        )
+
+        self.assertIn("function setWebActionToken", self.app)
+        self.assertIn("setActionToken: function(payload)", self.app)
+        token_helper = function_body(self.app, "setWebActionToken", "renderContext")
+        node = shutil.which("node")
+        if node is None:
+            self.fail("node is required to execute the Web token injection test")
+        script = f"""
+var webActionToken = '';
+{token_helper}
+setWebActionToken('a'.repeat(64));
+if (webActionToken !== 'a'.repeat(64)) throw new Error('valid token was not installed');
+setWebActionToken('invalid');
+if (webActionToken !== 'a'.repeat(64)) throw new Error('invalid token replaced the valid token');
+"""
+        result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_native_main_keeps_generic_event_and_ack_routes_tokenless(self) -> None:
         generic_headers = function_body(self.main, "companionRequestHeaders", "companionActionRequestHeaders")

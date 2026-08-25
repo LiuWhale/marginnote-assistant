@@ -566,7 +566,7 @@ CodexWebPanelController.prototype.sendContextToWeb = function() {
   }
   context.panel = 'webview';
   context.companionUrl = 'http://127.0.0.1:48761';
-  context.webActionToken = codexCompanionActionToken(this.mainPath);
+  this.callPanel('setActionToken', {token: codexCompanionActionToken(this.mainPath)});
   this.callPanel('setContext', context);
 };
 

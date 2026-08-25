@@ -13118,10 +13118,14 @@
     });
   }
 
+  function setWebActionToken(value) {
+    var incomingToken = String(value || '').trim();
+    if (/^[A-Fa-f0-9]{64}$/.test(incomingToken)) webActionToken = incomingToken;
+  }
+
   function renderContext(ctx) {
     ctx = ctx || {};
-    var incomingToken = String(ctx.webActionToken || '').trim();
-    if (/^[A-Fa-f0-9]{64}$/.test(incomingToken)) webActionToken = incomingToken;
+    setWebActionToken(ctx.webActionToken);
     var safeContext = {};
     for (var contextKey in ctx) {
       if (Object.prototype.hasOwnProperty.call(ctx, contextKey) && contextKey !== 'webActionToken') {
@@ -13230,6 +13234,9 @@
   }
 
   window.CodexPanel = {
+    setActionToken: function(payload) {
+      setWebActionToken(payload && payload.token);
+    },
     setContext: function(ctx) {
       renderContext(ctx || {});
     },
