@@ -2015,6 +2015,18 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(loaded["mindmap"]["title"], "Root")
             self.assertEqual(loaded["operationManifest"]["operationCount"], 3)
 
+            native_loaded = companion.handle_action(
+                {
+                    "action": "draft_get",
+                    "draftId": saved["draft"]["id"],
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                }
+            )
+            self.assertTrue(native_loaded["ok"])
+            self.assertEqual(native_loaded["cards"][0]["title"], "T")
+            self.assertEqual(native_loaded["mindmap"]["title"], "Root")
+
             preview = companion.handle_action(
                 {
                     "action": "operation_plan_preview",

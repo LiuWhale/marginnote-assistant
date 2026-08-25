@@ -1745,14 +1745,15 @@ class WebControlsStaticTests(unittest.TestCase):
         self.assertIn('button[data-busy="queue-available"][data-action-state="ready"]:not(#sendButton)::after', self.css)
         self.assertNotIn('button[data-busy="queue-available"][data-action-state="ready"]::after {\n  content: "可排队";', self.css)
 
-    def test_send_action_always_uses_chat(self) -> None:
+    def test_send_action_defaults_to_chat_but_honors_explicit_staged_tool_action(self) -> None:
         send_body = self.js.split("function sendAction", 1)[1].split("\n  function normalizePdfCacheState", 1)[0]
-        self.assertIn("executeAction('chat'", send_body)
+        self.assertIn("var requestedAction = state.stagedAction || 'chat'", send_body)
+        self.assertIn("executeAction(requestedAction", send_body)
         self.assertIn("currentContextScope() !== 'document'", send_body)
         self.assertNotIn("routeNaturalLanguageAction", send_body)
-        self.assertNotIn("generate_card", send_body)
-        self.assertNotIn("generate_mindmap", send_body)
-        self.assertNotIn("request_native_highlight_selection", send_body)
+        self.assertNotIn("executeAction('generate_card'", send_body)
+        self.assertNotIn("executeAction('generate_mindmap'", send_body)
+        self.assertNotIn("executeAction('request_native_highlight_selection'", send_body)
 
     def test_enter_sends_and_shift_enter_keeps_newline(self) -> None:
         keydown_body = self.js.split("byId('promptInput').addEventListener('keydown'", 1)[1].split(

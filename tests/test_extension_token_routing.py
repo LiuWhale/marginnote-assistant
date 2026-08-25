@@ -67,6 +67,10 @@ if (webActionToken !== 'a'.repeat(64)) throw new Error('invalid token replaced t
         self.assertIn("data.base64Encoding()", self.panel_controller)
         self.assertIn("/web-action-token", self.panel_controller)
         self.assertIn("codexReadAsciiFile(candidates[i])", self.panel_controller)
+        self.assertIn("function codexDecodeBase64Ascii", self.main)
+        self.assertIn("function codexReadAsciiFile", self.main)
+        self.assertIn("NSData.dataWithContentsOfFile(path)", self.main)
+        self.assertIn("data.base64Encoding()", self.main)
         self.assertIn("/web-action-token", self.main)
         self.assertIn("codexReadAsciiFile(candidates[i])", self.main)
 
@@ -158,6 +162,46 @@ if (codexCompanionActionToken('/extension') !== 'a'.repeat(64)) {{
         self.assertIn("companionActionRequestHeaders(CompanionURL)", call_action)
         self.assertIn("postJSON(CompanionURL, ctx, 30,", upload_action)
         self.assertIn(", true);", upload_action)
+
+    def test_native_draft_read_uses_authenticated_action_post_instead_of_plain_nsdata_url(self) -> None:
+        action_headers = function_body(self.main, "companionActionRequestHeaders", "isExplicitTrue")
+        write_draft = self.main.split(
+            "CodexAssistantAddon.prototype.writeDraft", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1)[0]
+
+        self.assertIn("url === CompanionURL", action_headers)
+        self.assertIn("action: 'draft_get'", write_draft)
+        self.assertIn("draftId: draftId", write_draft)
+        self.assertIn("postJSON(CompanionURL", write_draft)
+        self.assertIn(", true);", write_draft)
+        self.assertNotIn(
+            "NSData.dataWithContentsOfURL(NSURL.URLWithString(url))",
+            write_draft,
+        )
+
+    def test_native_draft_read_diagnostics_report_metadata_without_token_value(self) -> None:
+        write_draft = self.main.split(
+            "CodexAssistantAddon.prototype.writeDraft", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1)[0]
+
+        self.assertIn("nativeDraftReadRequestPrepared", write_draft)
+        self.assertIn("nativeDraftReadRequestFinished", write_draft)
+        for marker in ["tokenAvailable", "tokenLength", "statusCode", "dataLength", "error"]:
+            self.assertIn(marker, write_draft)
+        self.assertNotIn("token: draftReadToken", write_draft)
+
+    def test_native_json_parsing_uses_nsdata_length_instead_of_js_truthiness(self) -> None:
+        parse_json = function_body(self.main, "parseJSONData", "rawStringFromData")
+        raw_string = function_body(self.main, "rawStringFromData", "previewData")
+        write_draft = self.main.split(
+            "CodexAssistantAddon.prototype.writeDraftResponse", 1
+        )[1].split("\n  CodexAssistantAddon.prototype.handleCompanionResponse", 1)[0]
+
+        self.assertIn("if (isNil(data)) return null", parse_json)
+        self.assertIn("if (isNil(data)) return ''", raw_string)
+        self.assertIn("!isNil(error)", write_draft)
+        self.assertIn("byteLengthOfData(data) <= 0", write_draft)
+        self.assertNotIn("error || !data", write_draft)
 
     def test_web_token_authorizer_is_gated_by_literal_loopback_origin(self) -> None:
         self.assertIn("function isLiteralLoopbackCompanionUrl", self.app)

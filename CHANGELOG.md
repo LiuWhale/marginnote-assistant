@@ -4,6 +4,15 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.56 - 2026-08-25
+
+### Fixed
+
+- Fixed native draft writes failing after successful mind-map generation because the MarginNote addon called an undefined token-file reader and therefore sent no Companion action token. Native draft retrieval now uses the authenticated `draft_get` action path with its own MarginNote-compatible token decoder.
+- Fixed Tools mode staging `generate_mindmap` or `generate_card` but the shared Send button always dispatching `chat`. Plain input still defaults to chat; an explicit staged tool action now keeps its real action type.
+- Fixed an older raw generation item at the head of a queue preventing later native commands such as draft write, PDF cache, or capability refresh from executing. Native polling now defers raw work to the WebView while continuing through the same mixed batch.
+- Includes the first-click snapshot fix: a matching `current_document` cache requires the same `bookmd5` and root `documentId`, while cross-document work still requires a trusted whole-notebook snapshot; after the native read callback, generation continues automatically.
+
 ## 0.4.55 - 2026-08-25
 
 ### Fixed

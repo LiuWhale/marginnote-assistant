@@ -11484,8 +11484,10 @@
     var prompt = repairPdfExtractedMathText(promptValue());
     var useSelectionFallback = currentContextScope() !== 'document';
     var naturalText = prompt || (useSelectionFallback ? state.lastPromptFromSelection : '') || '';
-    var chatPrompt = prompt || (useSelectionFallback ? state.lastPromptFromSelection : '') || '';
-    if (executeAction('chat', chatPrompt, naturalText || '问 AI') !== false) {
+    var requestedAction = state.stagedAction || 'chat';
+    var actionPrompt = prompt || (useSelectionFallback ? state.lastPromptFromSelection : '') || '';
+    var fallbackLabel = requestedAction === 'chat' ? '问 AI' : (state.stagedLabel || actionLabel(requestedAction));
+    if (executeAction(requestedAction, actionPrompt, naturalText || fallbackLabel) !== false) {
       clearPromptInputAfterSend();
       clearStagedPrompt();
     }

@@ -3,8 +3,7 @@ JSB.newAddon = function(mainPath) {
   JSB.require('CodexWebPanelController');
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
-  var DraftURL = 'http://127.0.0.1:48761/marginnote/draft?id=';
-  var PluginVersion = '0.4.55';
+  var PluginVersion = '0.4.56';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [
@@ -39,6 +38,34 @@ JSB.newAddon = function(mainPath) {
   function safeString(value) {
     if (isNil(value)) return '';
     return String(value);
+  }
+
+  function codexDecodeBase64Ascii(value) {
+    var text = safeString(value).replace(/\s+/g, '');
+    var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    if (!text || text.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(text)) return '';
+    var out = '';
+    for (var i = 0; i < text.length; i += 4) {
+      var a = alphabet.indexOf(text.charAt(i));
+      var b = alphabet.indexOf(text.charAt(i + 1));
+      var c = text.charAt(i + 2) === '=' ? 64 : alphabet.indexOf(text.charAt(i + 2));
+      var d = text.charAt(i + 3) === '=' ? 64 : alphabet.indexOf(text.charAt(i + 3));
+      if (a < 0 || b < 0 || c < 0 || d < 0) return '';
+      out += String.fromCharCode((a << 2) | (b >> 4));
+      if (c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+      if (d !== 64) out += String.fromCharCode(((c & 3) << 6) | d);
+    }
+    return out;
+  }
+
+  function codexReadAsciiFile(path) {
+    try {
+      var data = NSData.dataWithContentsOfFile(path);
+      if (!data) return '';
+      return codexDecodeBase64Ascii(data.base64Encoding());
+    } catch (err) {
+      return '';
+    }
   }
 
   function companionActionToken() {
@@ -1055,7 +1082,7 @@ JSB.newAddon = function(mainPath) {
   }
 
   function parseJSONData(data) {
-    if (!data) return null;
+    if (isNil(data)) return null;
     try {
       return NSJSONSerialization.JSONObjectWithDataOptions(data, 1);
     } catch (err) {}
@@ -1067,7 +1094,7 @@ JSB.newAddon = function(mainPath) {
   }
 
   function rawStringFromData(data) {
-    if (!data) return '';
+    if (isNil(data)) return '';
     try {
       if (typeof data.base64Encoding === 'function') {
         var decoded = decodeBase64Utf8(String(data.base64Encoding()));
@@ -2967,34 +2994,17 @@ JSB.newAddon = function(mainPath) {
         return;
       }
       var singleCommand = valueOf(json, 'command');
-      if (singleCommand) {
-        var queueIdSingle = valueOf(singleCommand, '_queue_id');
-        var rawActionSingle = valueOf(singleCommand, 'rawAction');
-        if (rawActionSingle) {
-          addon.postEvent('rawQueueDeferredToWebView', {
-            action: safeString(rawActionSingle),
-            mode: 'single',
-            queueId: queueIdSingle ? String(queueIdSingle) : ''
-          });
-          return;
-        }
-        if (addon.handleNativeQueueCommand(singleCommand)) {
-          if (queueIdSingle) addon.ackCommands([String(queueIdSingle)]);
-          return;
-        }
-        addon.postEvent('commandsReceived', {count: 1, mode: 'single-sync'});
-        var handledSingle = addon.handleCompanionResponse(singleCommand, 'queued');
-        if (queueIdSingle && handledSingle !== false) addon.ackCommands([String(queueIdSingle)]);
-        return;
-      }
       var commandList = valueOf(json, 'commands');
       var pendingValue = valueOf(json, 'pending');
-      if (!commandList) {
+      var commands = commandList ? toArray(commandList) : (singleCommand ? [singleCommand] : []);
+      if (!commands.length) {
         if (pendingValue && Number(pendingValue) > 0) addon.postEvent('pollMissingCommands', {pending: Number(pendingValue)});
         return;
       }
-      var commands = toArray(commandList);
-      if (commands.length) addon.postEvent('commandsReceived', {count: commands.length, mode: 'array-sync'});
+      addon.postEvent('commandsReceived', {
+        count: commands.length,
+        mode: commandList ? 'array-sync' : 'single-sync'
+      });
       var ackIds = [];
       for (var i = 0; i < commands.length; i++) {
         var queueId = valueOf(commands[i], '_queue_id');
@@ -3002,10 +3012,10 @@ JSB.newAddon = function(mainPath) {
         if (rawAction) {
           addon.postEvent('rawQueueDeferredToWebView', {
             action: safeString(rawAction),
-            mode: 'array',
+            mode: commandList ? 'array' : 'single',
             queueId: queueId ? String(queueId) : ''
           });
-          break;
+          continue;
         }
         if (addon.handleNativeQueueCommand(commands[i])) {
           if (queueId) ackIds.push(String(queueId));
@@ -4201,9 +4211,48 @@ JSB.newAddon = function(mainPath) {
       this.postEvent('draftWriteFailed', {reason: 'missing-id'});
       return;
     }
+    var addon = this;
+    var draftReadToken = companionActionToken();
+    this.postEvent('nativeDraftReadRequestPrepared', {
+      id: draftId,
+      tokenAvailable: !!draftReadToken,
+      tokenLength: draftReadToken ? draftReadToken.length : 0
+    });
+    postJSON(CompanionURL, {
+      action: 'draft_get',
+      draftId: draftId,
+      source: 'marginnote4-plugin',
+      pluginVersion: PluginVersion
+    }, 15, function(response, data, error) {
+      addon.postEvent('nativeDraftReadRequestFinished', {
+        id: draftId,
+        tokenAvailable: !!draftReadToken,
+        tokenLength: draftReadToken ? draftReadToken.length : 0,
+        statusCode: intValue(valueOf(response, 'statusCode')),
+        dataLength: byteLengthOfData(data),
+        error: companionErrorDescription(error)
+      });
+      addon.writeDraftResponse(draftId, options, response, data, error);
+    }, true);
+  };
+
+  CodexAssistantAddon.prototype.writeDraftResponse = function(draftId, options, response, data, error) {
+    options = options || {};
+    draftId = safeString(draftId);
+    var controller = this.getStudyController();
+    var view = controller ? controller.view : this.window;
     try {
-      var url = DraftURL + encodeURIComponent(draftId);
-      var data = NSData.dataWithContentsOfURL(NSURL.URLWithString(url));
+      if (!isNil(error) || byteLengthOfData(data) <= 0) {
+        var requestError = companionErrorDescription(error) || '草稿读取失败。';
+        if (this.panel) this.panel.setStatus(requestError);
+        Application.sharedInstance().showHUD(requestError, view, 3);
+        this.postEvent('draftWriteFailed', {
+          id: draftId,
+          reason: 'draft-load-request-failed',
+          message: requestError
+        });
+        return;
+      }
       var json = parseJSONData(data);
       if (!json || !isExplicitTrue(valueOf(json, 'ok'))) {
         var message = json ? safeString(valueOf(json, 'message')) : '草稿读取失败。';

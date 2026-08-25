@@ -86,7 +86,7 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("codexpaper://write_draft", self.controller)
         self.assertIn("writeDraft", self.controller)
         self.assertIn("writeDraft", self.main)
-        self.assertIn("/marginnote/draft?id=", self.main)
+        self.assertIn("action: 'draft_get'", self.main)
         self.assertIn("draftWriteFailed", self.main)
         self.assertIn("draftWritten", self.main)
         write_body = self.main.split("CodexAssistantAddon.prototype.writeDraft", 1)[1].split(
@@ -431,7 +431,8 @@ class ResizablePanelContractTest(unittest.TestCase):
 
         send_body = self.app.split("function sendAction", 1)[1].split("\n  function renderControls", 1)[0]
         self.assertNotIn("routeNaturalLanguageAction", send_body)
-        self.assertIn("executeAction('chat'", send_body)
+        self.assertIn("var requestedAction = state.stagedAction || 'chat'", send_body)
+        self.assertIn("executeAction(requestedAction", send_body)
 
     def test_merge_mindmap_appends_children_to_selected_node_without_wrapper(self) -> None:
         self.assertIn("mergeIntoSelected", self.main)
@@ -527,14 +528,21 @@ class ResizablePanelContractTest(unittest.TestCase):
     def test_native_poll_defers_raw_queue_commands_to_webview(self) -> None:
         self.assertIn("callCompanion = function(action, prompt, ackIds)", self.main)
         self.assertIn("if (ackIds && ackIds.length) addon.ackCommands(ackIds);", self.main)
-        single_branch = self.main.split("if (rawActionSingle) {", 1)[1].split("return;", 1)[0]
-        self.assertIn("rawQueueDeferredToWebView", single_branch)
-        self.assertNotIn("addon.callCompanion", single_branch)
-        self.assertNotIn("ackCommands([String(queueIdSingle)])", single_branch)
-        array_branch = self.main.split("if (rawAction) {", 1)[1].split("break;", 1)[0]
-        self.assertIn("rawQueueDeferredToWebView", array_branch)
-        self.assertNotIn("addon.callCompanion", array_branch)
-        self.assertNotIn("ackIds.push(String(queueId))", array_branch)
+        poll_body = self.main.split("CodexAssistantAddon.prototype.pollCommands", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.serializeMindmapNode", 1
+        )[0]
+        self.assertIn(
+            "var commands = commandList ? toArray(commandList) : (singleCommand ? [singleCommand] : [])",
+            poll_body,
+        )
+        raw_branch = poll_body.split("if (rawAction) {", 1)[1].split("continue;", 1)[0]
+        self.assertIn("rawQueueDeferredToWebView", raw_branch)
+        self.assertNotIn("addon.callCompanion", raw_branch)
+        self.assertNotIn("ackIds.push", raw_branch)
+        self.assertLess(
+            poll_body.index("if (rawAction)"),
+            poll_body.index("addon.handleNativeQueueCommand(commands[i])"),
+        )
 
     def test_runtime_probes_native_highlight_and_export_api_candidates(self) -> None:
         self.assertIn("probeNativeApiCapabilities", self.main)
@@ -1125,12 +1133,12 @@ class ResizablePanelContractTest(unittest.TestCase):
         self.assertIn("pdfPathCandidates", self.main)
         self.assertIn("pdfCacheUploadCandidateFailed", self.main)
 
-        single_branch = self.main.split("if (singleCommand) {", 1)[1].split(
-            "addon.postEvent('commandsReceived'", 1
+        poll_body = self.main.split("CodexAssistantAddon.prototype.pollCommands", 1)[1].split(
+            "\n  CodexAssistantAddon.prototype.serializeMindmapNode", 1
         )[0]
-        self.assertIn("addon.handleNativeQueueCommand(singleCommand)", single_branch)
-        self.assertIn("addon.ackCommands([String(queueIdSingle)])", single_branch)
-        self.assertNotIn("addon.handleCompanionResponse(singleCommand", single_branch)
+        self.assertIn("addon.handleNativeQueueCommand(commands[i])", poll_body)
+        self.assertIn("if (queueId) ackIds.push(String(queueId))", poll_body)
+        self.assertIn("if (ackIds.length) addon.ackCommands(ackIds)", poll_body)
 
         native_body = self.main.split("CodexAssistantAddon.prototype.handleNativeQueueCommand", 1)[1].split(
             "\n  CodexAssistantAddon.prototype.ackCommands", 1
