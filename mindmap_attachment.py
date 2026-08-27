@@ -9,6 +9,7 @@ from typing import Any
 ROUTING_SCHEMA = "codex.mn.replyMindmapAttachment.v1"
 DEFAULT_CONFIDENCE_THRESHOLD = 0.34
 SELECTED_COMPATIBILITY_THRESHOLD = 0.20
+DEFAULT_AMBIGUITY_MARGIN = 0.08
 _GENERIC_TERMS = {
     "codex",
     "mindmap",
@@ -128,7 +129,19 @@ def flatten_current_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
             walk(child, depth + 1, f"{path}.{index}" if path else str(index), document_id)
 
     walk(tree, 0, "1", str(tree.get("documentId") or ""))
-    return nodes
+    deduplicated: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        note_id = str(node.get("noteId") or "")
+        existing = deduplicated.get(note_id)
+        if existing is None:
+            deduplicated[note_id] = node
+            continue
+        if int(node.get("depth") or 0) < int(existing.get("depth") or 0):
+            deduplicated[note_id] = node
+            existing = node
+        if len(str(node.get("body") or "")) > len(str(existing.get("body") or "")):
+            existing["body"] = str(node.get("body") or "")
+    return list(deduplicated.values())
 
 
 def _coverage(query_terms: set[str], candidate_terms: set[str]) -> float:
@@ -258,6 +271,74 @@ def _verified_parent_target(candidate: dict[str, Any], reason: str) -> dict[str,
     }
 
 
+def _meaningful_parent_title(value: Any) -> str:
+    title = _title_key(value)
+    title = re.sub(r"(?:[·|\-]\s*)?Codex\s*脑图$", "", title, flags=re.I).strip()
+    if title.endswith("脑图") and len(title) > 2:
+        title = title[:-2].strip()
+    normalized = _normalized_text(title)
+    if not title or normalized in {
+        "回答",
+        "回答脑图",
+        "本次回答",
+        "模型输出",
+        "codex",
+        "codex 脑图",
+        "脑图",
+        "脑图分支",
+    }:
+        return ""
+    if re.fullmatch(r"[a-f0-9]{24,}", normalized):
+        return ""
+    return title[:48].strip()
+
+
+def semantic_parent_title(
+    proposed_tree: dict[str, Any],
+    document_root_target: dict[str, Any],
+) -> str:
+    explicit = _meaningful_parent_title(proposed_tree.get("suggestedParentTitle"))
+    if explicit:
+        return explicit
+    raw_root_title = _title_key(proposed_tree.get("title"))
+    raw_target_title = _title_key(document_root_target.get("rootTitle"))
+    root_title = _meaningful_parent_title(raw_root_title)
+    if root_title and raw_root_title != raw_target_title:
+        return root_title
+    children = proposed_tree.get("children") if isinstance(proposed_tree.get("children"), list) else []
+    child_titles = [
+        _meaningful_parent_title(item.get("title"))
+        for item in children
+        if isinstance(item, dict)
+    ]
+    child_titles = [title for title in child_titles if title]
+    if len(child_titles) == 1:
+        return child_titles[0]
+    if child_titles:
+        suffix = "等主题"
+        return (child_titles[0][: max(1, 48 - len(suffix))] + suffix).strip()
+    target_title = _meaningful_parent_title(document_root_target.get("rootTitle"))
+    return target_title or "本次回答主题"
+
+
+def wrap_with_semantic_parent(
+    proposed_tree: dict[str, Any],
+    parent_title: str,
+) -> dict[str, Any]:
+    tree = copy.deepcopy(proposed_tree) if isinstance(proposed_tree, dict) else {}
+    children = tree.get("children") if isinstance(tree.get("children"), list) else []
+    if len(children) == 1 and _title_key(children[0].get("title")) == _title_key(parent_title):
+        return tree
+    tree["children"] = [
+        {
+            "title": parent_title,
+            "body": str(tree.get("body") or "").strip(),
+            "children": children,
+        }
+    ]
+    return tree
+
+
 def plan_reply_attachment(
     proposed_tree: dict[str, Any],
     current_tree: dict[str, Any],
@@ -265,6 +346,7 @@ def plan_reply_attachment(
     document_root_target: dict[str, Any],
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     expected_document_id: str = "",
+    ambiguity_margin: float = DEFAULT_AMBIGUITY_MARGIN,
 ) -> dict[str, Any]:
     candidates = flatten_current_nodes(current_tree)
     expected_document_id = str(expected_document_id or "").strip()
@@ -278,34 +360,68 @@ def plan_reply_attachment(
     query_terms = _terms(query_text)
     query_signals = _semantic_signals(query_text)
     ranked = rank_candidates(candidates, query_terms, query_signals, selected_note_id)
+    proposed_tree, duplicates = prune_duplicate_proposed_nodes(proposed_tree, candidates)
     selected = next(
         (item for item in ranked if item.get("selectedCompatible")),
         None,
     )
     best = selected or (ranked[0] if ranked else None)
+    eligible = [
+        item
+        for item in ranked
+        if float(item.get("score") or 0.0) >= confidence_threshold
+    ]
+    runner_up = next(
+        (
+            item
+            for item in eligible
+            if not best or str(item.get("noteId") or "") != str(best.get("noteId") or "")
+        ),
+        None,
+    )
+    ambiguous = bool(
+        not selected
+        and best
+        and runner_up
+        and float(best.get("score") or 0.0) - float(runner_up.get("score") or 0.0) < ambiguity_margin
+    )
     fallback = not best or float(best.get("score") or 0.0) < confidence_threshold
-    if fallback:
+    decision = "existing_parent"
+    requires_parent_confirmation = False
+    new_parent_title = ""
+    if ambiguous:
+        decision = "ambiguous"
+        requires_parent_confirmation = True
+        reason = "ambiguous-existing-parent"
+        write_target = copy.deepcopy(document_root_target)
+        write_target["confidence"] = round(float(best.get("score") or 0.0), 4)
+        write_target["reason"] = reason
+    elif fallback:
         shallowest_depth = min((int(item.get("depth") or 0) for item in candidates), default=-1)
         document_roots = [
             item for item in candidates if int(item.get("depth") or 0) == shallowest_depth
         ]
         if expected_document_id and len(document_roots) == 1:
-            reason = "unique-current-document-root"
             write_target = _verified_parent_target(
                 {**document_roots[0], "score": 1.0},
-                reason,
+                "new-semantic-parent-root",
             )
-            fallback = False
         else:
             write_target = copy.deepcopy(document_root_target)
-            write_target["confidence"] = round(float(best.get("score") or 0.0) if best else 0.0, 4)
-            write_target["reason"] = "low-confidence-document-root-fallback"
-            reason = "low-confidence-document-root-fallback"
+        decision = "new_parent"
+        new_parent_title = semantic_parent_title(proposed_tree, document_root_target)
+        proposed_tree = wrap_with_semantic_parent(proposed_tree, new_parent_title)
+        write_target["confidence"] = round(float(best.get("score") or 0.0) if best else 0.0, 4)
+        write_target["reason"] = "new-semantic-parent"
+        reason = "new-semantic-parent"
     else:
         reason = "compatible-selected-node" if best.get("selectedCompatible") else "best-semantic-match"
         write_target = _verified_parent_target(best, reason)
 
-    pruned_tree, duplicates = prune_duplicate_proposed_nodes(proposed_tree, candidates)
+    pruned_tree = proposed_tree
+    if decision == "new_parent":
+        pruned_tree, wrapper_duplicates = prune_duplicate_proposed_nodes(proposed_tree, candidates)
+        duplicates.extend(wrapper_duplicates)
     confidence = float(write_target.get("confidence") or 0.0)
     return {
         "schema": ROUTING_SCHEMA,
@@ -315,12 +431,23 @@ def plan_reply_attachment(
         "duplicates": duplicates,
         "routing": {
             "schema": ROUTING_SCHEMA,
+            "decision": decision,
             "reason": reason,
             "fallback": fallback,
             "confidence": round(confidence, 4),
+            "requiresParentConfirmation": requires_parent_confirmation,
+            "newParentTitle": new_parent_title,
             "parentNoteId": str(write_target.get("parentNoteId") or ""),
             "parentNoteTitle": str(write_target.get("parentNoteTitle") or write_target.get("rootTitle") or ""),
             "candidateCount": len(ranked),
+            "parentCandidates": [
+                {
+                    "noteId": str(item.get("noteId") or ""),
+                    "title": str(item.get("title") or ""),
+                    "score": float(item.get("score") or 0.0),
+                }
+                for item in eligible[:3]
+            ],
             "topCandidates": [
                 {
                     "noteId": str(item.get("noteId") or ""),

@@ -4,6 +4,16 @@ All notable changes to Codex Companion are documented here.
 
 ## Unreleased
 
+## 0.4.57 - 2026-08-27
+
+### Changed
+
+- Reply-derived mind maps now evaluate every unique existing `noteId` in the current document. A compatible selected node wins; otherwise an existing parent is used only when it clears the semantic threshold and leads the runner-up by the ambiguity margin.
+- When no existing node is suitable, Companion creates a short semantic parent under the current document root and places the generated branch beneath it instead of scattering new top-level nodes.
+- When multiple existing parents are too close, Companion stops before draft creation, lists the candidate nodes and asks the user to select the intended MarginNote node before retrying.
+- Repeated appearances of the same native `noteId` in MarginNote's serialized tree are deduplicated before ranking, preventing duplicate candidates and artificial depth boosts.
+- Retains the first-click snapshot boundary: a matching `current_document` cache still requires the same `bookmd5` and root `documentId`; cross-document work requires a trusted whole-notebook snapshot, and generation continues automatically after the native read callback.
+
 ## 0.4.56 - 2026-08-25
 
 ### Fixed

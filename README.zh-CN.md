@@ -13,7 +13,7 @@ Codex Companion 是一个运行在 MarginNote 4 里的本地优先 AI 助手插�
 
 当前公开的 0.4.x 仍是预览版，不能被误认为终局。这个版本默认打开干净的 `对话` 模式，优先对标 MarginNote 自带 AI 的问答体验；`工具` 模式只显示当前状态、下一步建议和四个大任务按钮，专家级脑图 Diff、制卡检查、workflow、证据、验证和排错面板默认收在 `专家模式` 里。长期目标仍是 **MarginNote Knowledge Agent OS**：一个 Notebook Knowledge IDE，主语不是 prompt 或回答，而是真实 MarginNote note、脑图节点、摘录、卡片、文档、复习任务、workflow、技能、外部自动化请求和操作证据。终局必须支持 `zero-message workflow`：用户不输入任何 prompt，只打开 notebook，就能看到对象状态、材料覆盖、脑图缺口、卡片缺口、最近失败事务、可执行 workflow 和待确认写入。
 
-当前公开版本是 **0.4.56**：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.56。该版本保留 Codex CLI 无固定超时行为，修复工具中心脑图动作被误发为普通聊天的问题，并恢复带 token 的原生草稿写入，使生成结果真正进入 MarginNote 的接受/拒绝事务。
+当前公开版本是 **0.4.57**：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.57。回答生成的脑图会接入明确匹配的已有节点；没有合适节点时新建语义父节点；多个父节点难以区分时停止写入并要求用户先选择。原生草稿写入继续使用带 token 的事务链路。
 
 路线图必须分成四层。`v0.4.x` 是 Chat Companion；`v1.x` 应该成为稳定 Study Copilot，体验对标 MarginNote 自带 AI；`v2.x` 必须成为 Native Knowledge Editor，能读取和编辑现有 `noteId` 对象，并通过 Diff、验证和回滚闭环；`v3.x` 才是 Notebook Knowledge OS，届时可以打开完整 `Notebook Workspace`，而不是只停留在问答框。当前 0.4.x 不把实验性工作台强行塞到首屏：`对话` 是默认入口，`工具` 是简化任务中心，完整对象、操作、知识和 workflow 区只在专家模式展开。每次 AI 写入都应进入带验证和回滚证据的 Operation Ledger；跨 notebook 知识层、工作流运行时、外部 URL/API 自动化和可分享技能包都应成为一等产品界面。终局的七个不可替代内核是 Live MN Object Kernel、Source Registry、Operation Compiler、Transactional Native Editor、Workflow Runtime、Skill Runtime 和 Verification Agent。换句话说，如果一个所谓终局仍然只是“发送、生成脑图、生成卡片、设置和日志更好用”，它仍然不是 v3。
 
@@ -351,20 +351,20 @@ python3 ui_functional_acceptance.py --document-title "任意文档 UI 验收.pdf
 构建 release zip：
 
 ```bash
-python3 package_release.py 0.4.56
+python3 package_release.py 0.4.57
 ```
 
 Smoke test：
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.56-latest-dist.zip --mnaddon release/CodexCompanion-0.4.56-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.56-latest-dist.zip --mnaddon release/CodexCompanion-0.4.56-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.57-latest-dist.zip --mnaddon release/CodexCompanion-0.4.57-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.57-latest-dist.zip --mnaddon release/CodexCompanion-0.4.57-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance：
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.56-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.57-latest-dist.zip --json
 ```
 
 Release acceptance 可能因为机器相关证据不足而阻塞，例如原生高亮证据、签名/公证证据、跨机器安装证据。这些是发布证据检查，不代表源码打包失败。

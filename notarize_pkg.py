@@ -18,7 +18,7 @@ def current_plugin_version() -> str:
     try:
         return str(json.loads(EXTENSION_MANIFEST.read_text(encoding="utf-8"))["version"])
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return "0.4.56"
+        return "0.4.57"
 
 
 CURRENT_PLUGIN_VERSION = current_plugin_version()

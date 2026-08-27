@@ -4093,6 +4093,76 @@ class CompanionControlsTests(unittest.TestCase):
             self.assertEqual(result["mindmapAttachment"]["reason"], "compatible-selected-node")
             self.assertFalse(result["mindmapAttachment"]["fallback"])
 
+    def test_reply_derived_mindmap_blocks_write_when_existing_parent_candidates_are_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            companion = load_companion(Path(tmp))
+            companion.generate_reply = lambda payload, task: (
+                "## SimbaV2 超球归一化\n特征范数、参数范数与梯度稳定性。\n"
+                "### 高 UTD 扩展\n强化学习模型扩展与有效学习率。",
+                "codex-cli",
+            )
+            companion.write_json_file(
+                companion.mindmap_tree_cache_path("T1", "B1"),
+                {
+                    "schema": "codex.mn.mindmapTreeCache.v1",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "scope": "whole_notebook",
+                    "snapshotCapability": "mindmap-whole-notebook-snapshot-v2",
+                    "mindmapVisible": True,
+                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "truncatedCount": 0,
+                    "currentMindmap": {
+                        "noteId": "notebook-root",
+                        "title": "Scale RL",
+                        "children": [
+                            {
+                                "noteId": "N-root",
+                                "title": "Scale RL · Codex 脑图",
+                                "documentId": "B1",
+                                "children": [
+                                    {
+                                        "noteId": "candidate-a",
+                                        "title": "SimbaV2 超球归一化",
+                                        "body": "强化学习特征范数、参数范数、梯度稳定性与高 UTD 扩展。",
+                                        "documentId": "B1",
+                                        "children": [],
+                                    },
+                                    {
+                                        "noteId": "candidate-b",
+                                        "title": "SimbaV2 超球归一化",
+                                        "body": "强化学习特征范数、参数范数、梯度稳定性与高 UTD 扩展。",
+                                        "documentId": "B1",
+                                        "children": [],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                },
+            )
+
+            result = companion.generate_mindmap(
+                {
+                    "prompt": "[create_card_tree] 根据回答创建脑图",
+                    "replyDerivedMindmap": True,
+                    "sourceAnswerMarkdown": "解释 SimbaV2 超球归一化与高 UTD 扩展。",
+                    "topicid": "T1",
+                    "bookmd5": "B1",
+                    "documentTitle": "Scale RL",
+                }
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["blocked"], "ambiguous_mindmap_parent")
+            self.assertTrue(result["parentSelectionRequired"])
+            self.assertNotIn("mindmap", result)
+            self.assertEqual(
+                {item["noteId"] for item in result["parentCandidates"]},
+                {"candidate-a", "candidate-b"},
+            )
+            self.assertIn("先在 MarginNote 脑图中选中", result["reply"])
+
     def test_reply_derived_mindmap_diff_is_create_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             companion = load_companion(Path(tmp))

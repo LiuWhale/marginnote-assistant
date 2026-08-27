@@ -13,7 +13,7 @@ It is not limited to academic papers. Papers, book chapters, course material, pr
 
 The public 0.4.x line is still a preview and should not be mistaken for the end-state product. This line now opens in a clean Chat mode by default, matching the built-in MarginNote AI interaction first; the optional Tools mode starts as a simple task center with status, next-step guidance, and four large actions. The old advanced surfaces for mind-map Diff, card review, workflows, evidence, verification, rollback, and diagnostics are still available, but they are hidden behind Expert Mode. The long-term target is still **MarginNote Knowledge Agent OS**: a Notebook Knowledge IDE where the primary objects are real MarginNote notes, mind-map nodes, excerpts, cards, documents, review tasks, workflows, skills, external automation requests, and operation evidence. The end state must support `zero-message workflows`: when a user opens a notebook without typing a prompt, the workspace should already show object state, source coverage, mind-map gaps, card gaps, recent failed operations, executable workflows, and pending write confirmations.
 
-The current public release is **0.4.56**: https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.56. It keeps the no-timeout Codex CLI behavior, preserves staged Tools actions, and restores authenticated native draft writes so a generated mind map actually reaches MarginNote and enters the accept/reject transaction.
+The current public release is **0.4.57**: https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.57. Reply-derived mind maps now attach to a clearly matching existing node, create a semantic parent when no node fits, and stop for user selection when multiple parents are ambiguous. Native draft writes remain authenticated and transactional.
 
 The product roadmap deliberately separates four stages. `v0.4.x` is a Chat Companion. `v1.x` should become a reliable Study Copilot comparable to MarginNote's built-in AI. `v2.x` must become a Native Knowledge Editor that reads and edits existing `noteId` objects through Diff, verification, and rollback. `v3.x` is the Notebook Knowledge OS, where a full Notebook Workspace can become the main surface instead of a plain chat box. Current 0.4.x deliberately does not force the experimental workspace into the first screen: Chat is the default entry, Tools is the simple task center, and the full object, operation, knowledge, and workflow surfaces are optional Expert Mode. Every AI write should enter an Operation Ledger with verification and rollback evidence; cross-notebook knowledge, workflow runtime, external URL/API automation, and shareable skill packages should become first-class product surfaces. The seven non-negotiable kernels are Live MN Object Kernel, Source Registry, Operation Compiler, Transactional Native Editor, Workflow Runtime, Skill Runtime, and Verification Agent. In other words, if the "ultimate" version still feels like better send/card/mind-map/settings/log buttons, it is not v3.
 
@@ -351,20 +351,20 @@ The browser action gate records `buttonActionDeltas`, so repeated-action control
 Build the release zip:
 
 ```bash
-python3 package_release.py 0.4.56
+python3 package_release.py 0.4.57
 ```
 
 Smoke test:
 
 ```bash
-python3 release_smoke_test.py release/CodexCompanion-0.4.56-latest-dist.zip --mnaddon release/CodexCompanion-0.4.56-latest.mnaddon
-python3 release_smoke_test.py release/CodexCompanion-0.4.56-latest-dist.zip --mnaddon release/CodexCompanion-0.4.56-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py release/CodexCompanion-0.4.57-latest-dist.zip --mnaddon release/CodexCompanion-0.4.57-latest.mnaddon
+python3 release_smoke_test.py release/CodexCompanion-0.4.57-latest-dist.zip --mnaddon release/CodexCompanion-0.4.57-latest.mnaddon --install-dry-run
 ```
 
 Release acceptance:
 
 ```bash
-python3 release_acceptance.py release/CodexCompanion-0.4.56-latest-dist.zip --json
+python3 release_acceptance.py release/CodexCompanion-0.4.57-latest-dist.zip --json
 ```
 
 Release acceptance may remain blocked by machine-specific evidence such as native visible highlight proof, signed/notarized package proof, or cross-machine install proof. These are release evidence gates, not source packaging failures.

@@ -57,9 +57,9 @@ class ReleaseDocsTests(unittest.TestCase):
 
     def test_release_docs_cover_final_workspace_security_and_fallback_contracts(self) -> None:
         expectations = {
-            "README.md": ["0.4.56", "token", "one file", "textReadable=false", "7 days", "no fixed generation timeout"],
-            "README.zh-CN.md": ["0.4.56", "token", "一个文件", "textReadable=false", "7 天", "没有固定生成超时"],
-            "docs/USER_MANUAL.md": ["0.4.56", "token", "一个文件", "textReadable=false", "7 天", "没有固定生成超时"],
+            "README.md": ["0.4.57", "token", "one file", "textReadable=false", "7 days", "no fixed generation timeout"],
+            "README.zh-CN.md": ["0.4.57", "token", "一个文件", "textReadable=false", "7 天", "没有固定生成超时"],
+            "docs/USER_MANUAL.md": ["0.4.57", "token", "一个文件", "textReadable=false", "7 天", "没有固定生成超时"],
         }
         for name, markers in expectations.items():
             with self.subTest(name=name):
@@ -196,7 +196,7 @@ class ReleaseDocsTests(unittest.TestCase):
                 "If rollback fails, the panel shows an explicit warning and does not report the removal as complete",
             ],
         )
-        self.assert_contract_unit(readme, "current public release", ["0.4.56", "releases/tag/v0.4.56"])
+        self.assert_contract_unit(readme, "current public release", ["0.4.57", "releases/tag/v0.4.57"])
 
         readme_zh = self.read_doc("README.zh-CN.md")
         self.assert_contract_unit(
@@ -229,7 +229,7 @@ class ReleaseDocsTests(unittest.TestCase):
                 "若回滚失败，面板会给出明确警告，不能把本次移除显示为完成",
             ],
         )
-        self.assert_contract_unit(readme_zh, "当前公开版本", ["0.4.56", "releases/tag/v0.4.56"])
+        self.assert_contract_unit(readme_zh, "当前公开版本", ["0.4.57", "releases/tag/v0.4.57"])
 
         manual = self.read_doc("docs/USER_MANUAL.md")
         self.assert_contract_unit(
@@ -260,7 +260,7 @@ class ReleaseDocsTests(unittest.TestCase):
             "跟随当前文件` 开启时",
             ["当前跟随文件受保护", "关闭后才允许选择它", "恢复旧成员关系并验证恢复结果", "若回滚失败，会显示明确警告", "不得把这次操作视为成功"],
         )
-        self.assert_contract_unit(manual, "当前公开版本", ["0.4.56", "releases/tag/v0.4.56"])
+        self.assert_contract_unit(manual, "当前公开版本", ["0.4.57", "releases/tag/v0.4.57"])
 
         checklist = self.read_doc("docs/RELEASE_CHECKLIST.md")
         self.assert_contract_unit(
@@ -287,10 +287,10 @@ class ReleaseDocsTests(unittest.TestCase):
             "对子集移除",
             ["移除后空集", "更新后必须验证新工作区", "更新或验证失败时必须恢复旧成员关系并验证恢复", "若回滚失败，界面必须显示明确警告", "不能报告操作成功"],
         )
-        self.assert_contract_unit(checklist, "正式发布版本", ["0.4.56", "v0.4.56"])
-        self.assertIn("https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.56", checklist)
+        self.assert_contract_unit(checklist, "正式发布版本", ["0.4.57", "v0.4.57"])
+        self.assertIn("https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.57", checklist)
 
-        changelog = self.read_doc("CHANGELOG.md").partition("## 0.4.56")[2].split("\n## ", 1)[0]
+        changelog = self.read_doc("CHANGELOG.md").partition("## 0.4.57")[2].split("\n## ", 1)[0]
         self.assert_contract_unit(changelog, "current_document", ["bookmd5", "documentId", "whole-notebook"])
         self.assert_contract_unit(changelog, "first-click", ["native read callback", "continues automatically"])
 

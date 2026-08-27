@@ -3,7 +3,7 @@ JSB.newAddon = function(mainPath) {
   JSB.require('CodexWebPanelController');
 
   var CompanionURL = 'http://127.0.0.1:48761/marginnote/action';
-  var PluginVersion = '0.4.56';
+  var PluginVersion = '0.4.57';
   var CompanionActionTimeout = 900;
   var CodexMarkerPrefix = '<!--codex-paper-companion:';
   var NativeHandlerFeatures = [

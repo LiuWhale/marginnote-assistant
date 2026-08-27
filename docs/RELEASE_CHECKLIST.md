@@ -3,10 +3,10 @@
 ## 版本信息
 
 - 插件名：Codex Companion
-- 正式发布版本：0.4.56，对应 Git Tag `v0.4.56`
-- MN4 插件 manifest 版本：0.4.56
-- Companion 版本：0.4.56
-- GitHub Release：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.56
+- 正式发布版本：0.4.57，对应 Git Tag `v0.4.57`
+- MN4 插件 manifest 版本：0.4.57
+- Companion 版本：0.4.57
+- GitHub Release：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.57
 - MN4 扩展目录：`~/Library/Containers/QReader.MarginStudy.easy/Data/Library/MarginNote Extensions/codex.mn.assistant`
 - Companion 目录：`~/.codex/marginnote-assistant`
 - LaunchAgent：`~/Library/LaunchAgents/com.codex.paper-companion.plist`
@@ -16,11 +16,11 @@
 0. 发布包一键安装入口
 
 ```bash
-unzip CodexCompanion-0.4.56-latest-dist.zip
-cd CodexCompanion-0.4.56
+unzip CodexCompanion-0.4.57-latest-dist.zip
+cd CodexCompanion-0.4.57
 python3 release_smoke_test.py
-python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.56-latest.mnaddon
-python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.56-latest.mnaddon --install-dry-run
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.57-latest.mnaddon
+python3 release_smoke_test.py --mnaddon ../CodexCompanion-0.4.57-latest.mnaddon --install-dry-run
 python3 build_pkg.py --dry-run
 ./install.sh
 ```
@@ -57,7 +57,7 @@ python3 build_pkg.py --sign-identity "Developer ID Installer: <Team Name> (<Team
 签名 pkg 还不是最终可分发包。公发前必须 notarize 并 staple：
 
 ```bash
-python3 notarize_pkg.py ./release/CodexCompanion-0.4.56-latest.pkg --keychain-profile "CodexNotary"
+python3 notarize_pkg.py ./release/CodexCompanion-0.4.57-latest.pkg --keychain-profile "CodexNotary"
 ```
 
 发布维护者也可以双击 `Notarize Package.command`。该入口需要 `NOTARYTOOL_KEYCHAIN_PROFILE`，或 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_SPECIFIC_PASSWORD`。`doctor.py` 会用 `xcrun stapler validate` 和 `spctl -a -vv -t install` 把 notarization 作为独立证据；`release_acceptance.py` 会把 `signed_pkg` 和 `notarized_pkg` 分开阻断。
@@ -114,7 +114,7 @@ tail -n 30 "$HOME/.codex/marginnote-assistant/events.jsonl"
 
 应看到：
 
-- `pluginVersion` 为 `0.4.56`
+- `pluginVersion` 为 `0.4.57`
 - `webPanelLoaded`
 - `panelShownState`
 - `panelKind=webview`

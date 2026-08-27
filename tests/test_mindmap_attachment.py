@@ -47,6 +47,37 @@ def document_root_target() -> dict:
 
 
 class MindmapAttachmentTests(unittest.TestCase):
+    def test_current_candidates_are_deduplicated_by_note_id_across_repeated_views(self) -> None:
+        current = {
+            "noteId": "notebook-root",
+            "children": [
+                {
+                    "noteId": "branch-a",
+                    "children": [
+                        {
+                            "noteId": "shared-note",
+                            "title": "共享节点",
+                            "body": "同一个原生节点。",
+                            "children": [],
+                        }
+                    ],
+                },
+                {
+                    "noteId": "shared-note",
+                    "title": "共享节点",
+                    "body": "同一个原生节点。",
+                    "children": [],
+                },
+            ],
+        }
+
+        candidates = mindmap_attachment.flatten_current_nodes(current)
+
+        self.assertEqual(
+            [item["noteId"] for item in candidates].count("shared-note"),
+            1,
+        )
+
     def test_one_short_chinese_phrase_cannot_count_as_three_independent_signals(self) -> None:
         proposed = {
             "title": "回答脑图",
@@ -143,7 +174,118 @@ class MindmapAttachmentTests(unittest.TestCase):
 
         self.assertEqual(result["writeTarget"]["parentNoteId"], "attention-node")
         self.assertEqual(result["routing"]["reason"], "best-semantic-match")
+        self.assertEqual(result["routing"]["decision"], "existing_parent")
+        self.assertFalse(result["routing"]["requiresParentConfirmation"])
         self.assertGreaterEqual(result["routing"]["confidence"], 0.34)
+
+    def test_close_existing_parent_candidates_require_confirmation_instead_of_auto_routing(self) -> None:
+        proposed = {
+            "title": "SimbaV2 缩放稳定性",
+            "body": "超球归一化控制特征范数、参数范数和梯度稳定性。",
+            "children": [
+                {
+                    "title": "高 UTD 稳定训练",
+                    "body": "强化学习模型扩展与有效学习率。",
+                    "children": [],
+                }
+            ],
+        }
+        current = {
+            "noteId": "notebook-root",
+            "children": [
+                {
+                    "noteId": "doc-root",
+                    "title": "Scale RL · Codex 脑图",
+                    "documentId": "B1",
+                    "children": [
+                        {
+                            "noteId": "candidate-a",
+                            "title": "SimbaV2 超球归一化",
+                            "body": "强化学习特征范数、参数范数、梯度稳定性与高 UTD 扩展。",
+                            "documentId": "B1",
+                            "children": [],
+                        },
+                        {
+                            "noteId": "candidate-b",
+                            "title": "SimbaV2 超球归一化",
+                            "body": "强化学习特征范数、参数范数、梯度稳定性与高 UTD 扩展。",
+                            "documentId": "B1",
+                            "children": [],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        result = mindmap_attachment.plan_reply_attachment(
+            proposed,
+            current,
+            "",
+            document_root_target(),
+            expected_document_id="B1",
+        )
+
+        self.assertEqual(result["routing"]["decision"], "ambiguous")
+        self.assertEqual(result["routing"]["reason"], "ambiguous-existing-parent")
+        self.assertTrue(result["routing"]["requiresParentConfirmation"])
+        self.assertEqual(
+            {item["noteId"] for item in result["routing"]["parentCandidates"]},
+            {"candidate-a", "candidate-b"},
+        )
+
+    def test_low_confidence_creates_semantic_parent_under_document_root(self) -> None:
+        proposed = {
+            "title": "训练时间调度",
+            "body": "本节讨论训练调度。",
+            "children": [
+                {
+                    "title": "学习率 Warmup",
+                    "body": "逐步提高学习率。",
+                    "children": [],
+                }
+            ],
+        }
+
+        result = mindmap_attachment.plan_reply_attachment(
+            proposed,
+            current_mindmap(),
+            "",
+            document_root_target(),
+        )
+
+        self.assertEqual(result["writeTarget"]["mode"], "document_root")
+        self.assertEqual(result["routing"]["decision"], "new_parent")
+        self.assertEqual(result["routing"]["reason"], "new-semantic-parent")
+        self.assertEqual(result["routing"]["newParentTitle"], "训练时间调度")
+        self.assertEqual(result["tree"]["children"][0]["title"], "训练时间调度")
+        self.assertEqual(
+            result["tree"]["children"][0]["children"][0]["title"],
+            "学习率 Warmup",
+        )
+
+    def test_document_root_container_title_is_not_reused_as_semantic_parent(self) -> None:
+        proposed = {
+            "title": "Paper · Codex 脑图",
+            "body": "本次回答解释 SimbaV2。",
+            "children": [
+                {
+                    "title": "SimbaV2 超球归一化",
+                    "body": "控制特征和参数范数。",
+                    "children": [],
+                }
+            ],
+        }
+
+        result = mindmap_attachment.plan_reply_attachment(
+            proposed,
+            current_mindmap(),
+            "",
+            document_root_target(),
+        )
+
+        self.assertEqual(result["routing"]["decision"], "new_parent")
+        self.assertEqual(result["routing"]["newParentTitle"], "SimbaV2 超球归一化")
+        self.assertNotEqual(result["routing"]["newParentTitle"], "Paper")
 
     def test_low_confidence_falls_back_to_document_root(self) -> None:
         proposed = {
@@ -161,7 +303,9 @@ class MindmapAttachmentTests(unittest.TestCase):
 
         self.assertEqual(result["writeTarget"]["mode"], "document_root")
         self.assertEqual(result["writeTarget"]["codexId"], "mindmap-target:paper")
-        self.assertEqual(result["routing"]["reason"], "low-confidence-document-root-fallback")
+        self.assertEqual(result["routing"]["decision"], "new_parent")
+        self.assertEqual(result["routing"]["reason"], "new-semantic-parent")
+        self.assertEqual(result["routing"]["newParentTitle"], "训练时间调度")
         self.assertTrue(result["routing"]["fallback"])
 
     def test_low_confidence_uses_unique_current_document_root_in_open_mindmap(self) -> None:
@@ -204,8 +348,10 @@ class MindmapAttachmentTests(unittest.TestCase):
         self.assertEqual(result["writeTarget"]["mode"], "verified_parent_node")
         self.assertEqual(result["writeTarget"]["parentNoteId"], "ijepa-root")
         self.assertEqual(result["writeTarget"]["parentNoteTitle"], "I-JEPA")
-        self.assertEqual(result["routing"]["reason"], "unique-current-document-root")
-        self.assertFalse(result["routing"]["fallback"])
+        self.assertEqual(result["routing"]["decision"], "new_parent")
+        self.assertEqual(result["routing"]["reason"], "new-semantic-parent")
+        self.assertEqual(result["routing"]["newParentTitle"], "新主题")
+        self.assertTrue(result["routing"]["fallback"])
 
     def test_existing_and_repeated_titles_are_removed_from_proposed_tree(self) -> None:
         proposed = {
@@ -337,8 +483,9 @@ class MindmapAttachmentTests(unittest.TestCase):
         )
 
         self.assertEqual(result["duplicateCount"], 0)
+        self.assertEqual(result["tree"]["children"][0]["title"], "C++等主题")
         self.assertEqual(
-            [child["title"] for child in result["tree"]["children"]],
+            [child["title"] for child in result["tree"]["children"][0]["children"]],
             ["C++", "A/B", "AB"],
         )
 

@@ -142,7 +142,7 @@ CODEX_LITE_HOME = CONTROL_DIR / "codex-home"
 DRAFTS_DIR = ROOT / "drafts"
 WORKFLOW_RUNS_DIR = ROOT / "workflow-runs"
 EXTERNAL_GATEWAY_DIR = ROOT / "external-gateway"
-CURRENT_PLUGIN_VERSION = "0.4.56"
+CURRENT_PLUGIN_VERSION = "0.4.57"
 ACCESS_LOG_ENABLED = os.environ.get("CODEX_MN_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes", "on"}
 TEXT_TAIL_MAX_BYTES = 512 * 1024
 EVENT_TAIL_MAX_BYTES = 1024 * 1024
@@ -16209,6 +16209,34 @@ def generate_mindmap(payload: dict[str, Any]) -> dict[str, Any]:
             document_root_mindmap_target(generation_payload),
             expected_document_id=normalize_book_md5(generation_payload),
         )
+        routing = planned.get("routing") if isinstance(planned.get("routing"), dict) else {}
+        if routing.get("requiresParentConfirmation") is True:
+            parent_candidates = (
+                routing.get("parentCandidates")
+                if isinstance(routing.get("parentCandidates"), list)
+                else []
+            )
+            candidate_lines = [
+                f"- {str(item.get('title') or '未命名节点')}（匹配分 {float(item.get('score') or 0.0):.3f}）"
+                for item in parent_candidates
+                if isinstance(item, dict)
+            ]
+            message = "脑图父节点存在歧义，已停止自动写入。"
+            reply_text = (
+                f"{message}\n\n候选父节点：\n"
+                + ("\n".join(candidate_lines) if candidate_lines else "- 未取得可确认候选")
+                + "\n\n请先在 MarginNote 脑图中选中目标节点，再次点击“生成脑图树”。"
+            )
+            append_history(payload, text, message, assistant_kind="error")
+            return {
+                "ok": False,
+                "blocked": "ambiguous_mindmap_parent",
+                "message": message,
+                "reply": reply_text,
+                "parentSelectionRequired": True,
+                "parentCandidates": parent_candidates,
+                "mindmapAttachment": routing,
+            }
         tree = planned["tree"]
         write_target = planned["writeTarget"]
         write_target["expectedDocumentId"] = normalize_book_md5(payload)

@@ -1,11 +1,11 @@
 # Codex Companion 产品手册
 
-适用版本：`0.4.56`
-更新时间：2026-08-25
+适用版本：`0.4.57`
+更新时间：2026-08-27
 
 Codex Companion 是一个运行在 MarginNote 4 里的通用 Codex 面板。它不是只服务论文的插件：论文精读、课程资料、书籍章节、项目文档、会议材料都可以作为使用对象。它的目标是在不离开 MarginNote 4 的情况下完成对话、解释、制卡、脑图、目标任务、原文定位、可见高亮和导出带标注 PDF 副本。
 
-当前公开版本是 **0.4.56**：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.56。它不是最终 v1.0；基础问答、草稿制卡、草稿脑图、目标任务、队列、文件上传、PDF 缓存、标注 PDF 副本导出、运行态诊断和双语 README 已经具备，可靠的 MarginNote 原生可见高亮、签名安装包、公证安装包和跨机器验收仍在补证据。
+当前公开版本是 **0.4.57**：https://github.com/LiuWhale/marginnote-assistant/releases/tag/v0.4.57。它不是最终 v1.0；基础问答、草稿制卡、草稿脑图、目标任务、队列、文件上传、PDF 缓存、标注 PDF 副本导出、运行态诊断和双语 README 已经具备，可靠的 MarginNote 原生可见高亮、签名安装包、公证安装包和跨机器验收仍在补证据。
 
 更远的终极目标不是“聊天框加几个按钮”，而是 **MarginNote Knowledge Agent OS**。当前 0.4.x 的聊天页、回答按钮、设置、日志和第一阶段工具/专家工作台都只是过渡壳层；v1.x 才是对标 MarginNote 自带 AI 的 Study Copilot，v2.x 是能原地编辑真实 `noteId` 的 Native Knowledge Editor，v3.x 才是 Notebook Knowledge OS。当前版本默认打开干净的对话页；`工具` 只在需要精读资料、生成脑图、制卡或检查写入时打开；对象、workflow、证据、验证和回滚细节默认收进专家模式。终局需要 Live MN Object Kernel、Source Registry、Operation Compiler、Transactional Native Editor、Workflow Runtime、Skill Runtime 和 Verification Agent 七个系统内核，而不只是更多按钮。
 
@@ -610,7 +610,7 @@ OpenAI Key 写在：
 
 ## 21. 当前预览版限制
 
-截至 2026-08-25，`v0.4.56` 是当前公开预览版。该版本保留完整多文件资料工作区和 Codex CLI 无固定超时行为，并修复工具中心动作误发、原生草稿读取缺少 token、混合队列阻塞原生命令以及同文档脑图快照被误判的问题；MN4 运行态仍需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
+截至 2026-08-27，`v0.4.57` 是当前公开预览版。该版本在 0.4.56 原生写入修复之上增加多节点父级路由：明确匹配时接入已有节点，没有合适节点时创建语义父节点，候选接近时停止写入并要求用户选择；MN4 运行态仍需要重新打开面板或重启 MN4 后才会上报新版 WebView/native 能力事件。当前仍有这些发布阻塞：
 
 - MarginNote 原生可见高亮仍缺活跃 PDF 选区下的完整证据。
 - `release_sha256_manifest` 已覆盖 zip、`.mnaddon` 和 `.pkg` 并通过；当前阻塞不再来自 artifact hash manifest。
@@ -618,7 +618,7 @@ OpenAI Key 写在：
 - 还缺第二用户或第二机器的结构化安装验收。
 - 还缺同一文档完整按钮/工作流验收 PASS evidence。
 
-这些限制不影响使用 `v0.4.56` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
+这些限制不影响使用 `v0.4.57` zip 或 `.mnaddon` 作为公开预览版继续试用，但影响“发给别人当最终正式产品”的判断。
 
 ## 22. 给用户的最短使用路径
 
